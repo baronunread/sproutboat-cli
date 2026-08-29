@@ -56,6 +56,11 @@ you can hold logins for several instances at once.
 | `rollback <id>` | Activate a previous version |
 | `delete --yes` | Delete the project |
 
+[`SURFACE.md`](SURFACE.md) is the machine-generated inventory — every command,
+every env var, and the pinned toolchain. `src/surface.test.ts` regenerates it
+(`bun run surface`) and fails CI if it drifts from the code, so it stays honest;
+it's also what the docs site consumes for the CLI reference.
+
 ## Status
 
 **Migrated.** This is the canonical source. See [MIGRATION.md](MIGRATION.md) for

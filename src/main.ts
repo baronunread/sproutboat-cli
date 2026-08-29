@@ -7,6 +7,7 @@ import { buildArtifact } from "./build";
 import { validateManifest, type ArtifactManifest } from "./manifest";
 import { printDeployReport } from "./report";
 import { activeApiUrl, savedToken, saveToken } from "./credentials";
+import { usageLine } from "./surface";
 
 const defaultApiUrl = "https://dashboard.sproutboat.com";
 
@@ -302,7 +303,7 @@ async function deleteProject(args: string[]) {
 }
 
 function usage(): never {
-  console.error("usage: sproutboat <init [name]|check|build|login [--api-url <url>] [--token <token>]|deploy [--dry-run|--artifact <path>]|tail|versions list|rollback <version-id>|delete --yes>");
+  console.error(usageLine());
   process.exit(1);
 }
 
