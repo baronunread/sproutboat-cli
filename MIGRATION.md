@@ -15,7 +15,6 @@ pieces are published as `@sproutboat/*` packages.
 | `src/source.ts` | `packages/config/src/source.ts` |
 | `src/manifest.ts` | `packages/artifact/src/manifest.ts` |
 | `src/native-fetch-prelude.js` | `tools/native-fetch-prelude.js` (verbatim) |
-| `patches/porffor-render.patch` | `patches/porffor-render.patch` (verbatim) |
 
 The only change on import is rewriting the monorepo's relative
 `../../../packages/...` paths to local `./` imports.
@@ -31,7 +30,7 @@ does **not** — it runs Porffor directly and cross-compiles with Zig:
 | `src/build.ts` | monorepo `packages/artifact/src/build.ts` (no `docker`, no `buildImage()` / GHCR) |
 | `src/compile.ts` | monorepo `tools/compile.ts` (`wrapNativeFetchHandler` verbatim; adds `--musl`) |
 | `src/toolchain.ts` | monorepo `tools/porffor.ts` + `build-image/` — pins Zig, downloads it, stamps provenance |
-| `src/patch-porffor.ts` | monorepo `tools/patch-porffor.ts` (finds `node_modules/porffor` by walking up) |
+| `src/patch-porffor.ts` | monorepo `tools/patch-porffor.ts` + `patches/porffor-render.patch` — now a 2-line in-JS edit of `render.js` (adds the `$PORT` runtime read), applied from the build path. Not a `postinstall` hook: package managers block dependency lifecycle scripts by default, so a published one would silently not run. No `patch` binary needed. See `patches/UPSTREAM.md`. |
 
 Consequences:
 

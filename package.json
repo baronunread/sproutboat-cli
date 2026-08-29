@@ -8,11 +8,9 @@
     "sproutboat": "src/main.ts"
   },
   "files": [
-    "src",
-    "patches"
+    "src"
   ],
   "scripts": {
-    "postinstall": "bun run src/patch-porffor.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

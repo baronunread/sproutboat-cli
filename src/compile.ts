@@ -10,6 +10,7 @@
  */
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { ensurePorfforPatched } from "./patch-porffor";
 import { porfforRoot } from "./toolchain";
 
 const preludePath = new URL("./native-fetch-prelude.js", import.meta.url);
@@ -41,6 +42,7 @@ export type CompileInput = {
 
 /** Compile `sourcePath` to a native binary at `outPath` (mode 0555). */
 export async function compileWorker(input: CompileInput): Promise<void> {
+  await ensurePorfforPatched();
   const outDir = dirname(input.outPath);
   await mkdir(outDir, { recursive: true });
   const generatedPath = resolve(outDir, "worker.generated.js");
