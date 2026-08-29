@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { parseConfig, type SproutboatConfig } from "./config";

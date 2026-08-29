@@ -4,15 +4,38 @@
   "description": "Wrangler-shaped CLI for Sproutboat — works against any control plane (self-hosted or cloud) via --api-url / SPROUTBOAT_API_URL.",
   "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/baronunread/sproutboat-cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baronunread/sproutboat-cli.git"
+  },
+  "bugs": "https://github.com/baronunread/sproutboat-cli/issues",
+  "keywords": [
+    "sproutboat",
+    "cli",
+    "deploy",
+    "porffor",
+    "serverless",
+    "edge",
+    "wrangler"
+  ],
   "bin": {
     "sproutboat": "src/main.ts"
   },
   "files": [
-    "src"
+    "src",
+    "!src/*.test.ts"
   ],
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "bun run typecheck && bun test"
   },
   "dependencies": {
     "esbuild": "^0.28.2",
