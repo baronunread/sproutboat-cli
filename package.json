@@ -1,0 +1,21 @@
+{
+  "name": "@sproutboat/cli",
+  "version": "0.1.0",
+  "description": "Wrangler-shaped CLI for Sproutboat — works against any control plane (self-hosted or cloud) via --api-url / SPROUTBOAT_API_URL.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "sproutboat": "src/main.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "typescript": "5.9.2"
+  }
+}
