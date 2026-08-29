@@ -3,10 +3,13 @@
 The Wrangler-shaped CLI for [Sproutboat](https://github.com/baronunread/sproutboat).
 **MIT licensed** (the platform itself is not).
 
-It speaks only the documented `/api` HTTP contract, so the same binary targets a
-**self-hosted** instance or the **cloud** — you point it at a control-plane URL.
+It speaks only the documented `/api` HTTP contract, so the same binary targets
+any control plane — you point it at a URL with `--api-url`.
 
 > Runs on **Bun** (uses `Bun.spawn`/`Bun.file`). Use `bunx`, not `npx`.
+>
+> Today it targets a **self-hosted** instance. **Managed cloud hosting is
+> coming soon** — when it opens, `login --api-url <cloud>` is all that changes.
 
 ```sh
 bunx @sproutboat/cli login --api-url https://control.example.com --token <token>
