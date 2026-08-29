@@ -140,7 +140,7 @@ async function check(directory?: string) {
 
 async function build(directory?: string) {
   const project = await readProject(directory);
-  console.log("Compiling the native-fetch server with Porffor in the pinned build image...");
+  console.log("Compiling the native-fetch server with Porffor + Zig (linux-x86_64, static)...");
   const artifact = await buildArtifact({ projectDir: project.directory, config: project.config, sourcePath: project.sourcePath });
   console.log(`Built ${project.config.name}`);
   console.log(artifact.artifactDir);
@@ -150,6 +150,7 @@ async function build(directory?: string) {
 async function deploy(args: string[]) {
   const artifactIndex = args.indexOf("--artifact");
   const dryRun = args.includes("--dry-run");
+  const directory = args.find((arg, index) => !arg.startsWith("--") && index !== artifactIndex + 1);
   let projectName: string;
   let artifactDir: string;
   let config: SproutboatConfig | undefined;
@@ -157,7 +158,7 @@ async function deploy(args: string[]) {
     artifactDir = args[artifactIndex + 1] ? resolve(args[artifactIndex + 1]) : fail("--artifact requires a directory");
     projectName = "";
   } else {
-    const built = await build(args[0]);
+    const built = await build(directory);
     projectName = built.project.config.name;
     artifactDir = built.artifact.artifactDir;
     config = built.project.config;

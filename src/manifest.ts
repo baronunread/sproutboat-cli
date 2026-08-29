@@ -10,6 +10,7 @@ export type ArtifactManifest = {
   capabilityProfile: "http-sync-v0";
   porfforVersion: string;
   esbuildVersion: string;
+  /** Build provenance, e.g. `zig-musl/0.16.0+porffor/a415d19+uws/360c276d`. */
   buildImage: string;
   sourceHash: `sha256:${string}`;
   binaryHash: `sha256:${string}`;

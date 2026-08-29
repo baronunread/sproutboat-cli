@@ -8,11 +8,17 @@
     "sproutboat": "src/main.ts"
   },
   "files": [
-    "src"
+    "src",
+    "patches"
   ],
   "scripts": {
+    "postinstall": "bun run src/patch-porffor.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "porffor": "github:CanadaHonk/porffor#alpha-4"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

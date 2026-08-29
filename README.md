@@ -26,13 +26,16 @@ you can hold logins for several instances at once.
 ## Requirements
 
 - [Bun](https://bun.sh) 1.4+
-- Docker — `sproutboat build`/`deploy` cross-compile the handler inside a pinned
-  Porffor toolchain image, published to GHCR by CI
-  (`ghcr.io/baronunread/sproutboat/build:latest`). It is pulled once on first
-  build. Overrides:
-  - `SPROUTBOAT_BUILD_IMAGE_REF` — use a different image ref
-  - `SPROUTBOAT_BUILD_IMAGE` — pin an immutable `...@sha256:` digest
-  - `SB_GHCR_TOKEN` — token for `docker login ghcr.io` if the package is private
+- `git` and `make` on `PATH` — used **once** the first time you build, to fetch
+  and compile uWebSockets into `~/.cache/porffor/deps/`. Later builds reuse it.
+- No Docker. `sproutboat build`/`deploy` cross-compile the handler to a static
+  `linux-x86_64` binary with Porffor + [Zig](https://ziglang.org) (`zig cc
+  -target x86_64-linux-musl`). Zig is fetched once to
+  `~/.cache/sproutboat/zig-<version>/`.
+  - `SPROUTBOAT_ZIG=/path/to/zig` — use an existing Zig instead of downloading
+  - `SPROUTBOAT_COMPILE_TIMEOUT_MS` — compile timeout (default 600000)
+
+  Windows is not supported directly — build from WSL.
 
 ## Commands
 
