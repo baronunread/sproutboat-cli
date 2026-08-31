@@ -35,6 +35,7 @@
     "test": "bun test",
     "example:kitchen-sink": "bun examples/kitchen-sink/harness.ts",
     "surface": "UPDATE_SURFACE=1 bun test src/surface.test.ts",
+    "version": "bun run surface && git add SURFACE.md",
     "prepublishOnly": "bun run typecheck && bun test",
     "style": "bunx style-doctor@latest --quiet"
   },
