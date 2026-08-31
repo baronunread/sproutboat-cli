@@ -62,3 +62,14 @@ test("wrap: Durable Object classes are neutralised and registered", () => {
   expect(out).toContain(`\nclass Counter { fetch()`);
   expect(out).toContain(`__sbRegisterDO({ Counter: Counter });`);
 });
+
+test("prelude: crypto is CSPRNG-backed, no Math.random downgrade", async () => {
+  const prelude = await Bun.file(new URL("./native-fetch-prelude.js", import.meta.url)).text();
+  // the OS entropy path is wired end to end
+  expect(prelude).toContain("static int sb_os_random(");
+  expect(prelude).toContain('open("/dev/urandom"');
+  expect(prelude).toContain("function __sbRandomBytes(");
+  expect(prelude).toContain("__sbRandomBytes(String(n))");
+  // and the insecure fallback is gone (issue #54)
+  expect(prelude).not.toContain("Math.random");
+});

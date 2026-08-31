@@ -134,8 +134,11 @@ export async function compileWorker(input: CompileInput): Promise<void> {
   const binDir = resolve(porffor, "../.bin");
   const path = `${dirname(input.zigBin)}:${binDir}:${process.env.PATH ?? ""}`;
 
+  // `-s`: strip at link. The unstripped static-musl binary is ~90% DWARF that
+  // nothing needs at runtime (12 MB -> ~1.3 MB for the kitchen-sink). Porffor
+  // forwards `-s` straight to the `zig cc` link step.
   const child = Bun.spawn(
-    [process.execPath, launcher, "native", generatedPath, "-o", input.outPath, "--musl"],
+    [process.execPath, launcher, "native", generatedPath, "-o", input.outPath, "--musl", "-s"],
     { cwd: outDir, stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: path } },
   );
   let timedOut = false;
