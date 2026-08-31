@@ -1,6 +1,6 @@
 {
   "name": "sproutboat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Wrangler-shaped CLI for Sproutboat. Deploys workers to any control plane via --api-url / SPROUTBOAT_API_URL.",
   "license": "MIT",
   "type": "module",
