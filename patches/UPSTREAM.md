@@ -18,7 +18,7 @@ binary and drop both the source dep and the patch step.
 
 Porffor's `AI_POLICY`: disclose AI use, and don't paste LLM prose — rewrite the
 draft below in your own words before filing. File as an **issue**, not a PR
-(the maintainer may want a general env binding rather than a `PORT` special case).
+(the maintainer may want a general env binding instead of a `PORT` special case).
 
 ---
 
@@ -34,7 +34,7 @@ The port a native-fetch server listens on is fixed at compile time. The `port:`
 field on the handler object is read by `runtime/native-fetch.js` while bundling
 and rendered into the C as a constant; `porf_native_fetch_get_port()` returns
 that constant unconditionally. The compiled binary parses no argv and reads no
-environment, so there is no way to tell it which port to use when it starts.
+environment, so nothing can tell it which port to use when it starts.
 
 This blocks running more than one compiled handler on a host. A supervisor that
 spawns many handlers assigns each a distinct port at spawn time — it can't, so

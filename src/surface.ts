@@ -29,6 +29,9 @@ export const ENV_VARS: readonly EnvVar[] = [
   { name: "SPROUTBOAT_CONFIG_DIR", purpose: "Directory for credentials.json (default ~/.config/sproutboat)." },
   { name: "XDG_CONFIG_HOME", purpose: "Base for the default credentials dir when SPROUTBOAT_CONFIG_DIR is unset." },
   { name: "PORFFOR_VERSION", purpose: "Override the Porffor identity string recorded in the manifest." },
+  { name: "SB_BROKER_PORT", purpose: "Loopback port of the binding broker, read by the compiled worker at runtime (set by the control plane, or by `src/broker.ts` for local runs)." },
+  { name: "SB_BROKER_TOKEN", purpose: "Per-deployment auth token the worker sends on every broker frame, and the broker sends back on scheduled/queue triggers (paired with SB_BROKER_PORT)." },
+  { name: "SB_WORKER_URL", purpose: "http://127.0.0.1:<PORT> of the worker; when set, `src/broker.ts` runs the cron scheduler and queue consumer and delivers triggers to it." },
 ];
 
 /** One-line usage string, e.g. for `usage()` and `--help`. */

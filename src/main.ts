@@ -118,7 +118,7 @@ async function readProject(directory = process.cwd()) {
   } catch {
     fail(`entry point not found: ${parsed.value.main}`);
   }
-  const supported = validateHttpSyncSource(source);
+  const supported = validateHttpSyncSource(source, (parsed.value.outbound ?? []).length > 0);
   if (!supported.ok) fail(supported.errors.join("\n"));
   return { directory: projectDirectory, config: parsed.value, sourcePath, source };
 }

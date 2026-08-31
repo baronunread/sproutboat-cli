@@ -20,23 +20,79 @@ const DEFAULT_PORT = 8080;
 const COMPILE_TIMEOUT_MS = Number(process.env.SPROUTBOAT_COMPILE_TIMEOUT_MS || 600_000);
 
 /**
- * Prepend the prelude (URLSearchParams / Response.json / crypto shims) and the
- * `env` binding (non-secret `vars` from sproutboat.jsonc, baked in), then the
- * handler body verbatim — no source rewriting. `env` is module-scoped, not a
- * `fetch` parameter: Porffor's native-fetch runtime calls `fetch(request)` with
- * one argument.
+ * Binding names a project declares. `do` maps a binding name to a Durable Object
+ * class name; `crons` are schedule expressions with no name.
  */
-export function wrapNativeFetchHandler(source: string, prelude: string, vars: Record<string, string> = {}): string {
-  const match = /^\s*export\s+default\s*\{\s*(async\s+)?fetch\s*\(([^)]*)\)\s*\{([\s\S]*)\}\s*\}\s*;?\s*$/.exec(source);
-  if (!match) throw new Error("handler must default-export an object with a fetch(request) method");
-  const env = `const env = ${JSON.stringify(vars)};\n`;
-  return `${prelude}\n${env}export default {\n  port: ${DEFAULT_PORT},\n  ${match[1] || ""}fetch(${match[2] || "request"}) {${match[3]}}\n};\n`;
+export type Bindings = {
+  kv: string[];
+  secrets: string[];
+  outbound: string[];
+  d1: string[];
+  r2: string[];
+  queues: string[];
+  analytics: string[];
+  do: Array<{ binding: string; className: string }>;
+  crons: string[];
+  /** Static-asset binding name for `env.<NAME>.fetch(request)`; `""` when assets are edge-only. */
+  assets: string;
+};
+
+const EMPTY_BINDINGS: Bindings = { kv: [], secrets: [], outbound: [], d1: [], r2: [], queues: [], analytics: [], do: [], crons: [], assets: "" };
+
+function hasBindings(b: Bindings): boolean {
+  return (
+    b.kv.length > 0 || b.secrets.length > 0 || b.outbound.length > 0 || b.d1.length > 0 || b.r2.length > 0 ||
+    b.queues.length > 0 || b.analytics.length > 0 || b.do.length > 0 || b.assets !== ""
+  );
+}
+
+/**
+ * Build the final native-fetch module: the prelude (Web API shims + the broker
+ * binding shim + the trigger dispatcher), then `const env = {…}` with the baked
+ * `vars`, then — if any binding is declared — one `__sbInstallBindings(env, …)`
+ * line, then the user's source with its `export` keywords neutralised (so its
+ * `export default {…}` becomes a plain object we can hand to the dispatcher),
+ * then our single `export default { fetch }` that routes every request through
+ * `__sbEntry` (HTTP → `handlers.fetch`; `x-sb-trigger` → scheduled / queue / DO).
+ *
+ * With no bindings and no `scheduled`/`queue`/DO the output behaves exactly like
+ * a plain `export default { fetch }` worker.
+ */
+export function wrapNativeFetchHandler(
+  source: string,
+  prelude: string,
+  vars: Record<string, string> = {},
+  bindings: Bindings = EMPTY_BINDINGS,
+): string {
+  if (!/\bexport\s+default\s*\{/.test(source) || !/\bfetch\s*\(/.test(source)) {
+    throw new Error("handler must default-export an object with a fetch(request) method");
+  }
+  // Neutralise the module's exports: its default object becomes `__sbHandlers`,
+  // and any `export class`/`function`/`const` (Durable Object classes, helpers)
+  // becomes a plain top-level declaration. Imports are already rejected upstream.
+  const neutralised = source
+    .replace(/^(\s*)export\s+default\s*/m, "$1const __sbHandlers = ")
+    .replace(/^export\s+(async\s+function|function|class|const|let|var)\b/gm, "$1");
+
+  const env = `const env = ${JSON.stringify(vars)};\nglobalThis.env = env;\n`;
+  const wire = hasBindings(bindings) ? `__sbInstallBindings(env, ${JSON.stringify(bindings)});\n` : "";
+  const registerDO = bindings.do.length
+    ? `__sbRegisterDO({ ${bindings.do.map((d) => `${d.className}: ${d.className}`).join(", ")} });\n`
+    : "";
+
+  return (
+    `${prelude}\n${env}${wire}` +
+    `${neutralised}\n` +
+    `${registerDO}` +
+    `export default {\n  port: ${DEFAULT_PORT},\n  fetch(request) { return __sbEntry(__sbHandlers, request); }\n};\n`
+  );
 }
 
 export type CompileInput = {
   sourcePath: string;
   outPath: string;
   vars: Record<string, string>;
+  bindings?: Bindings;
   zigBin: string;
 };
 
@@ -47,7 +103,7 @@ export async function compileWorker(input: CompileInput): Promise<void> {
   await mkdir(outDir, { recursive: true });
   const generatedPath = resolve(outDir, "worker.generated.js");
   const [source, prelude] = await Promise.all([readFile(input.sourcePath, "utf8"), readFile(preludePath, "utf8")]);
-  await writeFile(generatedPath, wrapNativeFetchHandler(source, prelude, input.vars));
+  await writeFile(generatedPath, wrapNativeFetchHandler(source, prelude, input.vars, input.bindings ?? EMPTY_BINDINGS));
 
   const porffor = porfforRoot();
   const launcher = resolve(porffor, "runtime/index.js");

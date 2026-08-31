@@ -1,7 +1,7 @@
 {
-  "name": "@sproutboat/cli",
+  "name": "sproutboat",
   "version": "0.1.0",
-  "description": "Wrangler-shaped CLI for Sproutboat — works against any control plane (self-hosted or cloud) via --api-url / SPROUTBOAT_API_URL.",
+  "description": "Wrangler-shaped CLI for Sproutboat. Deploys workers to any control plane via --api-url / SPROUTBOAT_API_URL.",
   "license": "MIT",
   "type": "module",
   "homepage": "https://github.com/baronunread/sproutboat-cli",
@@ -20,6 +20,7 @@
     "wrangler"
   ],
   "bin": {
+    "sprout": "src/main.ts",
     "sproutboat": "src/main.ts"
   },
   "files": [
@@ -30,14 +31,13 @@
   "engines": {
     "bun": ">=1.4.0"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "example:kitchen-sink": "bun examples/kitchen-sink/harness.ts",
     "surface": "UPDATE_SURFACE=1 bun test src/surface.test.ts",
-    "prepublishOnly": "bun run typecheck && bun test"
+    "prepublishOnly": "bun run typecheck && bun test",
+    "style": "bunx style-doctor@latest --quiet"
   },
   "dependencies": {
     "esbuild": "^0.28.2",
