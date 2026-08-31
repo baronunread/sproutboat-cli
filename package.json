@@ -20,7 +20,6 @@
     "wrangler"
   ],
   "bin": {
-    "sprout": "src/main.ts",
     "sproutboat": "src/main.ts"
   },
   "files": [

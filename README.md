@@ -11,11 +11,13 @@ cd hello
 bunx sproutboat deploy
 ```
 
-Install it for the short command:
+Or install it once and drop the `bunx`:
 
 ```sh
-bun add -g sproutboat     # then: sprout deploy, sprout tail, ...
+bun add -g sproutboat     # then: sproutboat deploy, sproutboat tail, ...
 ```
+
+Want it shorter? Alias it yourself: `alias sprout='sproutboat'`.
 
 For CI, skip `login` and set `SPROUTBOAT_API_URL` + `SPROUTBOAT_TOKEN`.
 
