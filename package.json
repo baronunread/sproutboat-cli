@@ -25,6 +25,7 @@
   "files": [
     "src",
     "!src/*.test.ts",
+    "vendor",
     "SURFACE.md"
   ],
   "engines": {

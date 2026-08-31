@@ -31,7 +31,7 @@ does **not** — it runs Porffor directly and cross-compiles with Zig:
 | --- | --- |
 | `src/build.ts` | monorepo `packages/artifact/src/build.ts` (no `docker`, no `buildImage()` / GHCR) |
 | `src/compile.ts` | monorepo `tools/compile.ts` (`wrapNativeFetchHandler` verbatim; adds `--musl`) |
-| `src/toolchain.ts` | monorepo `tools/porffor.ts` + `build-image/`: pins Zig, downloads it, stamps provenance |
+| `src/toolchain.ts` | monorepo `tools/porffor.ts` + `build-image/`: pins + downloads Zig, extracts the vendored prebuilt uWebSockets (`ensureUWebSockets`, `vendor/*.tar.xz`), stamps provenance |
 | `src/patch-porffor.ts` | monorepo `tools/patch-porffor.ts` + `patches/porffor-render.patch`: now a 2-line in-JS edit of `render.js` (adds the `$PORT` runtime read), applied from the build path. Not a `postinstall` hook: package managers block dependency lifecycle scripts by default, so a published one would silently not run. No `patch` binary needed. See `patches/UPSTREAM.md`. |
 
 Consequences:
@@ -98,8 +98,11 @@ Consequences:
 
 ## Pinned versions (bump together)
 
-- `src/toolchain.ts`: `ZIG_VERSION` + its `ZIG_SHA256` table, and
-  `PORFFOR_CHANNEL` / `PORFFOR_COMMIT` (must match `porffor` in `package.json`).
+- `src/toolchain.ts`: `ZIG_VERSION` + its `ZIG_SHA256` table,
+  `PORFFOR_CHANNEL` / `PORFFOR_COMMIT` (must match `porffor` in `package.json`),
+  and `UWS_COMMIT_FULL` + `UWS_TARBALL_SHA256` (rebuild via
+  `bun tools/prebuild-uws.ts` / the `uws-prebuild` workflow when the porffor pin
+  moves).
 - `package.json`: `porffor` (`github:CanadaHonk/porffor#alpha-4`), `esbuild`.
 
 ## Keeping in sync

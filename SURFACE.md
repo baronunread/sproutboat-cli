@@ -30,6 +30,7 @@ usage: sproutboat <init [name] | check [project-dir] | build [project-dir] | dep
 | `SPROUTBOAT_API_URL` | Control-plane URL. Overrides the saved active endpoint. |
 | `SPROUTBOAT_TOKEN` | API token. Overrides the saved credential for the endpoint. |
 | `SPROUTBOAT_ZIG` | Path to a Zig binary to use instead of downloading the pinned one. |
+| `SPROUTBOAT_UWS_TARBALL` | Path to a prebuilt uWebSockets (x86_64-linux-musl) tarball to seed the Porffor cache with, instead of downloading it (removes the first-build git + make need). |
 | `SPROUTBOAT_COMPILE_TIMEOUT_MS` | Porffor compile timeout in ms (default 600000). |
 | `SPROUTBOAT_CONFIG_DIR` | Directory for credentials.json (default ~/.config/sproutboat). |
 | `XDG_CONFIG_HOME` | Base for the default credentials dir when SPROUTBOAT_CONFIG_DIR is unset. |

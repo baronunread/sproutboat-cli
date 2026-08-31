@@ -4,14 +4,15 @@
  * `zig cc -target x86_64-linux-musl` and statically links, so the same command
  * works from macOS, Linux, or WSL with no Docker.
  *
- * One-time per machine: Porffor git-clones uWebSockets and builds `uSockets.a`
- * into ~/.cache/porffor/deps/ (needs `git` and `make` on PATH). Later builds
- * reuse it and take a few seconds.
+ * One-time per machine: the uWebSockets tree Porffor links is unpacked into
+ * ~/.cache/porffor/deps/. `ensureUWebSockets()` extracts the prebuilt archive
+ * shipped in `vendor/` so this needs no `git` or `make`; if that archive is
+ * unusable it falls back to Porffor's own git + make path (needs both on PATH).
  */
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
-import { porfforRoot } from "./toolchain";
+import { ensureUWebSockets, porfforRoot, UwsUnavailableError } from "./toolchain";
 
 const preludePath = new URL("./native-fetch-prelude.js", import.meta.url);
 // The server honours $PORT at runtime (patches/porffor-render.patch); this baked
@@ -99,6 +100,28 @@ export type CompileInput = {
 /** Compile `sourcePath` to a native binary at `outPath` (mode 0555). */
 export async function compileWorker(input: CompileInput): Promise<void> {
   await ensurePorfforPatched();
+
+  // Seed the Porffor uWebSockets cache from the prebuilt archive in `vendor/` so
+  // the first build needs no `git` / `make`. Fall back to Porffor's own git+make
+  // path if the archive is missing or fails its checksum.
+  try {
+    await ensureUWebSockets();
+  } catch (error) {
+    if (!(error instanceof UwsUnavailableError)) throw error;
+    const haveGit = Bun.which("git");
+    const haveMake = Bun.which("make");
+    if (haveGit && haveMake) {
+      console.warn(`prebuilt uWebSockets unusable (${error.message.split("\n")[0]}); falling back to git + make (slower, one-time)`);
+    } else {
+      const missing = [!haveGit && "git", !haveMake && "make"].filter(Boolean).join(" and ");
+      throw new Error(
+        `${error.message}\n\nThe prebuilt uWebSockets is unusable, and ${missing} ` +
+        `${missing.includes("and") ? "are" : "is"} not on PATH for the fallback build. ` +
+        `Install ${missing}, or set SPROUTBOAT_UWS_TARBALL to a valid archive.`,
+      );
+    }
+  }
+
   const outDir = dirname(input.outPath);
   await mkdir(outDir, { recursive: true });
   const generatedPath = resolve(outDir, "worker.generated.js");

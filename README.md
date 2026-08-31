@@ -70,9 +70,16 @@ binding, with an Astro UI and a runnable end-to-end harness.
 ## Requirements
 
 - [Bun](https://bun.sh) 1.4+
-- `git` and `make` on `PATH` (first build only — compiles uWebSockets once)
-- No Docker. Builds cross-compile to a static `linux-x86_64` binary with Porffor
-  and Zig. Windows: build from WSL.
+
+`build` / `deploy` cross-compile the handler to a static `linux-x86_64` binary
+with Porffor and Zig (Zig is fetched automatically on first use). The package
+ships a prebuilt uWebSockets, so nothing else is compiled from source. No Docker,
+no root. On Windows, build from WSL.
+
+If that prebuilt is unusable (a `porffor` pin bump before the archive is
+refreshed), the first build falls back to compiling uWebSockets locally, which
+needs `git` and `make` on `PATH`. `SPROUTBOAT_UWS_TARBALL=<archive>` overrides
+the shipped one.
 
 ## Limits (v1)
 

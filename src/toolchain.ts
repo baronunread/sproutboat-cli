@@ -30,6 +30,14 @@ const PORFFOR_COMMIT = "a415d19";
 // uWebSockets commit Porffor alpha-4 fetches for the native-fetch server. Read
 // from node_modules/porffor at build time; this is the fallback for the stamp.
 const UWS_COMMIT = "360c276d";
+const UWS_COMMIT_FULL = "360c276d609d59af56ae6932adb95154ace9f15f";
+
+// `vendor/uwebsockets-<UWS_COMMIT>-musl.tar.xz` ships in the package: the
+// checked-out, patched, `zig cc -target x86_64-linux-musl`-built uWebSockets
+// tree (headers + `uSockets/uSockets.a`). Regenerate + re-pin the sha whenever
+// the `porffor` pin (and thus UWS_COMMIT_FULL) changes — `bun tools/prebuild-uws.ts`
+// or the `uws-prebuild` workflow.
+const UWS_TARBALL_SHA256 = "e83736f3f8cf9d56a1ebe6ea61625a7af12386763374d47c14cff472ada7484a";
 
 function platformKey(): string {
   const arch = process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : null;
@@ -80,6 +88,66 @@ export async function ensureZig(): Promise<string> {
   if (!existsSync(bin)) throw new Error("Zig archive did not contain a `zig` binary");
   await chmod(bin, 0o755);
   return bin;
+}
+
+function uwsCommitFull(): string {
+  try {
+    const src = readFileSync(resolve(porfforRoot(), "compiler/uwebsockets.js"), "utf8");
+    return /UWS_COMMIT\s*=\s*['"]([0-9a-f]{40})/.exec(src)?.[1] ?? UWS_COMMIT_FULL;
+  } catch {
+    return UWS_COMMIT_FULL;
+  }
+}
+
+/** Thrown when the prebuilt uWebSockets archive is missing or fails its checksum. */
+export class UwsUnavailableError extends Error {}
+
+/** Path to the vendored prebuilt archive for the given short commit. */
+export function uwsVendorArchive(short: string): string {
+  return resolve(import.meta.dir, "..", "vendor", `uwebsockets-${short}-musl.tar.xz`);
+}
+
+/**
+ * Seed `~/.cache/porffor/deps/uWebSockets-<commit>-musl/` with the checked-out,
+ * patched, `x86_64-linux-musl`-built uWebSockets tree so Porffor's own
+ * `ensureUWebSockets` / `ensureUSocketsBuilt` short-circuit — the first build
+ * then needs no `git` and no `make`, only Zig.
+ *
+ * The archive ships in the package (`vendor/`). No-ops if the cache is already
+ * populated. Throws `UwsUnavailableError` if the archive is missing or fails its
+ * checksum; the caller decides whether to fall back to Porffor's git + make path.
+ *
+ * `SPROUTBOAT_UWS_TARBALL=/path/to/archive.tar.xz` overrides the vendored one.
+ */
+export async function ensureUWebSockets(): Promise<void> {
+  const commit = uwsCommitFull();
+  const short = commit.slice(0, 8);
+  const depsRoot = resolve(homedir(), ".cache/porffor/deps");
+  const dir = resolve(depsRoot, `uWebSockets-${commit}-musl`);
+  if (existsSync(resolve(dir, "src/App.h")) && existsSync(resolve(dir, "uSockets/uSockets.a"))) return;
+
+  const archive = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(short);
+  if (!existsSync(archive)) {
+    throw new UwsUnavailableError(
+      process.env.SPROUTBOAT_UWS_TARBALL
+        ? `SPROUTBOAT_UWS_TARBALL=${archive} does not exist`
+        : `no vendored uWebSockets archive at ${archive} (porffor pin moved? run \`bun tools/prebuild-uws.ts\`)`,
+    );
+  }
+  if (!process.env.SPROUTBOAT_UWS_TARBALL) {
+    const actual = await sha256File(archive);
+    if (actual !== UWS_TARBALL_SHA256) {
+      throw new UwsUnavailableError(`vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`);
+    }
+  }
+
+  await mkdir(dir, { recursive: true });
+  const untar = Bun.spawn(["tar", "-xJf", archive, "-C", dir, "--strip-components=1"], { stdout: "pipe", stderr: "pipe" });
+  const [code, err] = await Promise.all([untar.exited, new Response(untar.stderr).text()]);
+  if (code !== 0) {
+    await rm(dir, { recursive: true, force: true });
+    throw new UwsUnavailableError(`could not extract vendored uWebSockets: ${err.trim()}`);
+  }
 }
 
 /** Directory holding node_modules/porffor (walks up from this file). */

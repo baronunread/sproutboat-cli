@@ -25,6 +25,7 @@ export const ENV_VARS: readonly EnvVar[] = [
   { name: "SPROUTBOAT_API_URL", purpose: "Control-plane URL. Overrides the saved active endpoint." },
   { name: "SPROUTBOAT_TOKEN", purpose: "API token. Overrides the saved credential for the endpoint." },
   { name: "SPROUTBOAT_ZIG", purpose: "Path to a Zig binary to use instead of downloading the pinned one." },
+  { name: "SPROUTBOAT_UWS_TARBALL", purpose: "Path to a prebuilt uWebSockets (x86_64-linux-musl) tarball to seed the Porffor cache with, instead of downloading it (removes the first-build git + make need)." },
   { name: "SPROUTBOAT_COMPILE_TIMEOUT_MS", purpose: "Porffor compile timeout in ms (default 600000)." },
   { name: "SPROUTBOAT_CONFIG_DIR", purpose: "Directory for credentials.json (default ~/.config/sproutboat)." },
   { name: "XDG_CONFIG_HOME", purpose: "Base for the default credentials dir when SPROUTBOAT_CONFIG_DIR is unset." },
