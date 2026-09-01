@@ -70,6 +70,16 @@ function parseUrlResponse(source: string): { url: string } | undefined {
   return record && isString(record.url) ? { url: record.url } : undefined;
 }
 
+/** #55: `{ from, to }` when this deploy moves the live version onto a different
+ *  Porffor pin. Deployed artifacts are frozen at their build-time compiler, so
+ *  the pin only changes by redeploying — and the alpha compiler's output can
+ *  differ between pins. */
+function parsePorfforDrift(source: string): { from: string; to: string } | undefined {
+  const drift = (() => { try { return jsonObject(parseJsonValue(source))?.porfforDrift; } catch { return undefined; } })();
+  const record = drift && jsonObject(drift as JsonValue);
+  return record && isString(record.from) && isString(record.to) ? { from: record.from, to: record.to } : undefined;
+}
+
 function parseAuthorization(source: string): CliAuthorization | undefined {
   const record = jsonObject(parseJsonValue(source));
   if (!record || !isString(record.deviceCode) || !isString(record.userCode) || !isString(record.verificationUri) || !isSafeInteger(record.interval) || !isString(record.expiresAt)) return undefined;
@@ -209,6 +219,12 @@ async function deploy(args: string[]) {
   if (!deployed) fail("deployment response did not include a URL");
   console.log(`\nDeployed ${projectName}`);
   console.log(`  ${deployed.url}`);
+  const drift = parsePorfforDrift(body);
+  if (drift) {
+    console.warn(`\n! Porffor pin changed: ${drift.from} -> ${drift.to}`);
+    console.warn(`  The previous live version stays frozen at ${drift.from}; this one is built with ${drift.to}.`);
+    console.warn(`  The alpha compiler's output can differ between pins (see COMPAT.md) — roll back if this version misbehaves.`);
+  }
 }
 
 function parseLoginArgs(args: string[]) {

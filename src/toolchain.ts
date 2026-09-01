@@ -24,6 +24,10 @@ const ZIG_SHA256: Record<string, string> = {
 
 // Pinned Porffor identity — must match the `porffor` entry in package.json
 // (`github:CanadaHonk/porffor#alpha-4`, commit a415d19). PORFFOR_VERSION overrides.
+// When bumping this pin (#55): run the monorepo's `bun run diff` against the
+// frozen reference handlers and update its COMPAT.md for any new mismatch before
+// releasing — the alpha compiler's output can shift between pins. Checked by
+// hand at bump time, not in CI.
 const PORFFOR_CHANNEL = "alpha-4";
 const PORFFOR_COMMIT = "a415d19";
 
