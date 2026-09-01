@@ -1,6 +1,6 @@
 {
   "name": "sproutboat",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Wrangler-shaped CLI for Sproutboat. Deploys workers to any control plane via --api-url / SPROUTBOAT_API_URL.",
   "license": "MIT",
   "type": "module",
@@ -21,6 +21,16 @@
   ],
   "bin": {
     "sproutboat": "src/main.ts"
+  },
+  "exports": {
+    "./runtime/config": "./src/config.ts",
+    "./runtime/source": "./src/source.ts",
+    "./runtime/manifest": "./src/manifest.ts",
+    "./runtime/assets": "./src/assets.ts",
+    "./runtime/broker": "./src/broker.ts",
+    "./runtime/wrap": "./src/wrap.ts",
+    "./runtime/prelude": "./src/native-fetch-prelude.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "src",
