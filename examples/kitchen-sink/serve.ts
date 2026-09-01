@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * Like harness.ts but it stays up: compile the worker for the host, start the
- * broker + a stub upstream, boot the worker, print the URLs, and wait.
+ * Like harness.ts but it stays up: compile the sprout for the host, start the
+ * broker + a stub upstream, boot the sprout, print the URLs, and wait.
  *
  *   bun examples/kitchen-sink/serve.ts
  *
@@ -59,36 +59,36 @@ if (c.assets) {
 }
 
 const prelude = readFileSync(join(CLI, "src/native-fetch-prelude.js"), "utf8");
-const gen = join(workdir, "worker.generated.js");
-const bin = join(workdir, "worker.bin");
+const gen = join(workdir, "sprout.generated.js");
+const bin = join(workdir, "sprout.bin");
 writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"), "utf8"), prelude, vars, bindings));
 
-console.log("compiling worker (host native)…");
+console.log("compiling sprout (host native)…");
 const compile = Bun.spawnSync(["node", PORF, "native", gen, "-o", bin], {
   env: { ...process.env, PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}` }, stdout: "pipe", stderr: "pipe",
 });
 if (compile.exitCode !== 0) { console.error(compile.stderr.toString() + compile.stdout.toString()); process.exit(1); }
 
 const TOKEN = "dev-token";
-const workerPort = Number(process.env.PORT) || 8787;
+const sproutPort = Number(process.env.PORT) || 8787;
 const broker = createBroker({
   db: join(workdir, "state.sqlite"), dataDir: join(workdir, "d1"), token: TOKEN, bindings,
-  secrets: { ADMIN_TOKEN: "s3cr3t-admin" }, workerUrl: `http://127.0.0.1:${workerPort}/`,
+  secrets: { ADMIN_TOKEN: "s3cr3t-admin" }, sproutUrl: `http://127.0.0.1:${sproutPort}/`,
   assetsDir: c.assets ? assetsDir : undefined,
 });
 const brokerServer = listen(broker, "127.0.0.1", 0);
-const worker = Bun.spawn([bin], {
-  env: { ...process.env, PORT: String(workerPort), SB_BROKER_PORT: String(brokerServer.port), SB_BROKER_TOKEN: TOKEN },
+const sprout = Bun.spawn([bin], {
+  env: { ...process.env, PORT: String(sproutPort), SB_BROKER_PORT: String(brokerServer.port), SB_BROKER_TOKEN: TOKEN },
   stdout: "inherit", stderr: "inherit",
 });
 
-const stop = () => { worker.kill(9); brokerServer.stop(); broker.close(); upstream.stop(true); rmSync(workdir, { recursive: true, force: true }); process.exit(0); };
+const stop = () => { sprout.kill(9); brokerServer.stop(); broker.close(); upstream.stop(true); rmSync(workdir, { recursive: true, force: true }); process.exit(0); };
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 
-const base = `http://127.0.0.1:${workerPort}`;
+const base = `http://127.0.0.1:${sproutPort}`;
 for (let i = 0; i < 100; i++) { try { await fetch(base + "/"); break; } catch { await Bun.sleep(50); } }
-console.log(`\n  worker   ${base}`);
+console.log(`\n  sprout   ${base}`);
 console.log(`  broker   127.0.0.1:${brokerServer.port}  (state: ${workdir})`);
 console.log(`\n  open ${base}/ in a browser for the UI, or:`);
 console.log(`    curl ${base}/`);
@@ -100,4 +100,4 @@ console.log(`    curl ${base}/notes/1        # DO view counter, run twice`);
 console.log(`    curl ${base}/quote`);
 console.log(`    curl -H "x-admin-token: s3cr3t-admin" ${base}/admin/stats`);
 console.log(`\n  Ctrl-C to stop.`);
-await worker.exited;
+await sprout.exited;

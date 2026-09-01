@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * End-to-end check for the kitchen-sink example: compiles the worker for the
+ * End-to-end check for the kitchen-sink example: compiles the sprout for the
  * host, stands up an in-process broker (KV / D1 / R2 / queue / DO / analytics /
  * cron) plus a stub upstream, then drives every binding over HTTP.
  *
@@ -8,7 +8,7 @@
  *
  * This is the local stand-in for the platform: the real supervisor spawns the
  * same broker per deployment and passes SB_BROKER_PORT / SB_BROKER_TOKEN /
- * SB_WORKER_URL to the worker exactly as this script does.
+ * SB_SPROUT_URL to the sprout exactly as this script does.
  */
 import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,13 +76,13 @@ const assetManifest: AssetManifest = {
 };
 writeFileSync(join(workdir, "assets.json"), JSON.stringify(assetManifest, null, 2));
 
-// --- compile the worker for the host ----------------------------------
+// --- compile the sprout for the host ----------------------------------
 const prelude = readFileSync(join(CLI, "src/native-fetch-prelude.js"), "utf8");
-const gen = join(workdir, "worker.generated.js");
-const bin = join(workdir, "worker.bin");
+const gen = join(workdir, "sprout.generated.js");
+const bin = join(workdir, "sprout.bin");
 writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"), "utf8"), prelude, vars, bindings));
 
-console.log("compiling worker (host native)…");
+console.log("compiling sprout (host native)…");
 const compile = Bun.spawnSync(["node", PORF, "native", gen, "-o", bin], {
   env: { ...process.env, PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}` },
   stdout: "pipe", stderr: "pipe",
@@ -91,32 +91,32 @@ if (compile.exitCode !== 0) die("porffor compile failed:\n" + compile.stderr.toS
 
 // --- broker (in-process) --------------------------------------------
 const TOKEN = "harness-token";
-const workerPort = 8000 + Math.floor(Math.random() * 900);
+const sproutPort = 8000 + Math.floor(Math.random() * 900);
 const broker = createBroker({
   db: join(workdir, "state.sqlite"),
   dataDir: join(workdir, "d1"),
   token: TOKEN,
   bindings,
   secrets: { ADMIN_TOKEN: "s3cr3t-admin" },
-  workerUrl: `http://127.0.0.1:${workerPort}/`,
+  sproutUrl: `http://127.0.0.1:${sproutPort}/`,
   assetsDir,
 });
 const brokerServer = listen(broker, "127.0.0.1", 0);
 cleanup.push(() => { brokerServer.stop(); broker.close(); });
 
-// --- worker process -----------------------------------------------
-const worker = Bun.spawn([bin], {
-  env: { ...process.env, PORT: String(workerPort), SB_BROKER_PORT: String(brokerServer.port), SB_BROKER_TOKEN: TOKEN },
+// --- sprout process -----------------------------------------------
+const sprout = Bun.spawn([bin], {
+  env: { ...process.env, PORT: String(sproutPort), SB_BROKER_PORT: String(brokerServer.port), SB_BROKER_TOKEN: TOKEN },
   stdout: "inherit", stderr: "inherit",
 });
-cleanup.push(() => worker.kill(9));
+cleanup.push(() => sprout.kill(9));
 
-const base = `http://127.0.0.1:${workerPort}`;
+const base = `http://127.0.0.1:${sproutPort}`;
 async function up() {
   for (let i = 0; i < 100; i++) {
     try { await fetch(base + "/"); return; } catch { await Bun.sleep(50); }
   }
-  die("worker never listened");
+  die("sprout never listened");
 }
 await up();
 
