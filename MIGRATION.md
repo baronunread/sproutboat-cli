@@ -2,8 +2,9 @@
 
 The CLI was extracted from `sproutboat/apps/cli` on 2026-08-29 and is the
 canonical source for the shared runtime surface. As of 2026-09-01 the monorepo
-**depends on this package** — `"sproutboat": "file:../sproutboat-cli"`, pinned by
-its `bun.lock` — instead of hand-copying files. Nothing is vendored any more.
+**depends on this package** — `"sproutboat": "github:baronunread/sproutboat-cli#main"`,
+pinned to a resolved commit by its `bun.lock` — instead of hand-copying files.
+Nothing is vendored any more.
 
 **If you find yourself copying a file between the two repos, add an export
 instead.**
@@ -55,26 +56,20 @@ can use it in its own host-native compile path without pulling in `toolchain.ts`
 
 ## Making a change the monorepo needs
 
-Both repos are checked out as siblings, so `file:../sproutboat-cli` resolves
-directly — an edit here is visible in the monorepo with no reinstall. For a
-clean-room check, `cd ../sproutboat && bun install` re-links it.
+The monorepo's `bun.lock` pins a resolved `sproutboat-cli` commit. Push the CLI
+change, then `cd ../sproutboat && bun update sproutboat` to move the pin, and
+commit the `package.json` (unchanged) + `bun.lock` there. CI resolves the
+pinned commit, so you cannot land a monorepo lockfile that points at an
+unpushed CLI change.
 
-`bun link` also works for the inner loop:
+For the inner loop, `bun link` reads the CLI working tree with no reinstall:
 
 ```sh
 cd sproutboat-cli && bun link
-cd ../sproutboat  && bun link sproutboat
+cd ../sproutboat  && bun link sproutboat   # undo: bun unlink sproutboat && bun install
 ```
 
-CI never links — it checks out `sproutboat-cli` as a sibling and installs the
-`file:` path, so it always tests the committed CLI tree. You cannot land a
-monorepo `bun.lock` that points at an unpushed CLI change.
-
-> The CLI repo is private, so `bun`'s `github:`/`git+https:` resolver (which
-> hits the unauthenticated GitHub tarball API) can't fetch it. If the repo is
-> made public later, switch the monorepo dep to
-> `github:baronunread/sproutboat-cli#main` — `bun.lock` still pins the resolved
-> commit.
+CI never links.
 
 **Direction is one-way:** nothing in `sproutboat-cli/src/` may import from the
 monorepo. The CLI is the library; the monorepo is its client.
