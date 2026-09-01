@@ -209,6 +209,25 @@ async function deploy(args: string[]) {
   const form = new FormData();
   form.set("manifest", new File([await manifest.arrayBuffer()], "manifest.json", { type: "application/json" }));
   form.set("worker", new File([await worker.arrayBuffer()], "worker", { type: "application/octet-stream" }));
+
+  // #1 — ship the sidecars `sproutboat build` produced so the server can start
+  // the binding broker and serve static assets. Without bindings.json the broker
+  // never spawns and every KV/D1/R2/secret/queue/cron/DO call is dead on the box.
+  const bindingsFile = Bun.file(resolve(artifactDir, "bindings.json"));
+  if (await bindingsFile.exists()) {
+    form.set("bindings", new File([await bindingsFile.arrayBuffer()], "bindings.json", { type: "application/json" }));
+  }
+  const assetsManifestFile = Bun.file(resolve(artifactDir, "assets.json"));
+  if (await assetsManifestFile.exists()) {
+    const assetsManifest: { files?: Record<string, unknown> } = await assetsManifestFile.json();
+    form.set("assets_manifest", new File([await assetsManifestFile.arrayBuffer()], "assets.json", { type: "application/json" }));
+    for (const key of Object.keys(assetsManifest.files ?? {})) {
+      const file = Bun.file(resolve(artifactDir, "assets", `.${key}`));
+      if (!(await file.exists())) fail(`assets.json lists ${key} but assets${key} is missing — rebuild`);
+      form.append("asset", new File([await file.arrayBuffer()], key));
+    }
+  }
+
   const response = await fetch(`${apiUrl.replace(/\/$/, "")}/api/projects/${projectName}/deployments`, {
     method: "POST",
     headers: { "x-api-key": token },
