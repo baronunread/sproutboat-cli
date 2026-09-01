@@ -3,7 +3,7 @@
  * directory next to the artifact and writes `assets.json` (this manifest); the
  * edge serves matching files directly (assets-first, like Cloudflare), and the
  * broker's `assets.get` op backs `env.<ASSETS>.fetch(request)` for the paths
- * the worker chooses to serve itself.
+ * the sprout chooses to serve itself.
  */
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";

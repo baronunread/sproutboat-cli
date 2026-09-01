@@ -3,7 +3,7 @@ import { cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { walkAssets, type AssetManifest } from "./assets";
 import type { SproutboatConfig } from "./config";
-import { compileWorker } from "./compile";
+import { compileSprout } from "./compile";
 import { ARTIFACT_SCHEMA_VERSION, CAPABILITY_PROFILE, RUNTIME, type ArtifactManifest } from "./manifest";
 import { ensureZig, esbuildVersion, porfforVersion, toolchainStamp } from "./toolchain";
 
@@ -33,7 +33,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   const sourceHash = digest(source);
   const artifactId = sourceHash.slice("sha256:".length, 24);
   const artifactDir = resolve(input.projectDir, ".sproutboat/dist", artifactId);
-  const workerPath = resolve(artifactDir, "worker");
+  const sproutPath = resolve(artifactDir, "sprout");
   await mkdir(artifactDir, { recursive: true });
 
   const bindings = {
@@ -50,15 +50,15 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   };
 
   const zigBin = await ensureZig();
-  await compileWorker({
+  await compileSprout({
     sourcePath: input.sourcePath,
-    outPath: workerPath,
+    outPath: sproutPath,
     vars: input.config.vars ?? {},
     bindings,
     zigBin,
   });
 
-  const worker = await readFile(workerPath);
+  const sprout = await readFile(sproutPath);
   const manifest: ArtifactManifest = {
     schemaVersion: ARTIFACT_SCHEMA_VERSION,
     project: input.config.name,
@@ -69,8 +69,8 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     esbuildVersion: esbuildVersion(),
     buildImage: toolchainStamp(),
     sourceHash,
-    binaryHash: digest(worker),
-    binarySize: (await stat(workerPath)).size,
+    binaryHash: digest(sprout),
+    binarySize: (await stat(sproutPath)).size,
     builtAt: new Date().toISOString(),
   };
   await writeFile(resolve(artifactDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

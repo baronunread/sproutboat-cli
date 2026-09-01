@@ -158,7 +158,7 @@ test("Queues: send enqueues; the consumer delivers a batch and acked messages ar
     return new Response(JSON.stringify({ ack: body.messages.slice(1).map((m) => m.id), retry: [] }), { status: 200 });
   }) as typeof fetch;
 
-  const b = make({ bindings: { queues: ["JOBS"] }, workerUrl: "http://127.0.0.1:1/", fetchImpl });
+  const b = make({ bindings: { queues: ["JOBS"] }, sproutUrl: "http://127.0.0.1:1/", fetchImpl });
   await b.dispatch({ op: "queue.send", queue: "JOBS", body: JSON.stringify({ n: 1 }) });
   await b.dispatch({ op: "queue.send", queue: "JOBS", body: JSON.stringify({ n: 2 }) });
   await b.dispatch({ op: "queue.send", queue: "JOBS", body: JSON.stringify({ n: 3 }) });

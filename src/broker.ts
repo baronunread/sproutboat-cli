@@ -2,11 +2,11 @@
 /**
  * Per-deployment binding broker.
  *
- * A native-fetch worker has no syscalls of its own beyond an inbound HTTP
+ * A native-fetch sprout has no syscalls of its own beyond an inbound HTTP
  * server; the prelude's inline-C transport opens a loopback TCP connection to
  * this process for every `env.<KV>` / `env.<SECRET>` / `fetch()` call. The
  * supervisor starts one broker per deployment, on its own loopback port, and
- * passes `SB_BROKER_PORT` + `SB_BROKER_TOKEN` to the worker next to `$PORT`.
+ * passes `SB_BROKER_PORT` + `SB_BROKER_TOKEN` to the sprout next to `$PORT`.
  *
  * Wire frame (both directions): [u32 LE length][payload].
  *   request payload : "<token>\n<json>"
@@ -47,11 +47,11 @@ export type BrokerOptions = {
   bindings?: Partial<Bindings>;
   secrets?: Record<string, string>;
   /**
-   * `http://127.0.0.1:<PORT>` of this deployment's worker. When set, the broker
-   * runs the cron scheduler and the queue consumer, delivering to the worker
+   * `http://127.0.0.1:<PORT>` of this deployment's sprout. When set, the broker
+   * runs the cron scheduler and the queue consumer, delivering to the sprout
    * with an `x-sb-trigger` header authenticated by `token`.
    */
-  workerUrl?: string;
+  sproutUrl?: string;
   /** Directory of published static assets (its sibling `assets.json` is the manifest). Backs `assets.get`. */
   assetsDir?: string;
   /** Injected in tests; defaults to the global `fetch`. */
@@ -423,15 +423,15 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     }
   }
 
-  // --- cron + queue delivery (only when this broker knows its worker) --------
+  // --- cron + queue delivery (only when this broker knows its sprout) --------
   const timers: ReturnType<typeof setInterval>[] = [];
   const QUEUE_BATCH = 10;
   const QUEUE_MAX_ATTEMPTS = 5;
 
   async function deliverTrigger(kind: "scheduled" | "queue", body: unknown): Promise<Response | null> {
-    if (!opts.workerUrl) return null;
+    if (!opts.sproutUrl) return null;
     try {
-      return await doFetch(opts.workerUrl, {
+      return await doFetch(opts.sproutUrl, {
         method: "POST",
         headers: { "x-sb-trigger": kind, "x-sb-token": token, "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -442,7 +442,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   }
 
   function drainQueuesOnce(): void {
-    if (!opts.workerUrl || bindings.queues.length === 0) return;
+    if (!opts.sproutUrl || bindings.queues.length === 0) return;
     const now = Date.now();
     for (const q of bindings.queues) {
       const rows = db.query<{ id: string; body: string; attempts: number }, [string, number, number]>(
@@ -458,7 +458,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         queue: q,
         messages: rows.map((r) => ({ id: r.id, body: r.body, timestamp: now, attempts: r.attempts + 1 })),
       }).then(async (res) => {
-        let ack: string[] = rows.map((r) => r.id); // default: ack all if the worker didn't say
+        let ack: string[] = rows.map((r) => r.id); // default: ack all if the sprout did not say
         let retry: string[] = [];
         if (res && res.ok) {
           try {
@@ -479,7 +479,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     }
   }
 
-  if (opts.workerUrl) {
+  if (opts.sproutUrl) {
     if (bindings.queues.length > 0) timers.push(setInterval(drainQueuesOnce, 500));
     if (bindings.crons.length > 0) {
       let lastTick = "";
@@ -574,7 +574,7 @@ if (import.meta.main) {
       "data-dir": { type: "string" },
       bindings: { type: "string" },
       secrets: { type: "string" },
-      "worker-url": { type: "string" },
+      "sprout-url": { type: "string" },
       "assets-dir": { type: "string" },
     },
   });
@@ -590,9 +590,9 @@ if (import.meta.main) {
     token: values.token ?? process.env.SB_BROKER_TOKEN,
     bindings,
     secrets,
-    workerUrl: values["worker-url"] ?? process.env.SB_WORKER_URL,
+    sproutUrl: values["sprout-url"] ?? process.env.SB_SPROUT_URL,
     assetsDir: values["assets-dir"],
   });
   const { port } = listen(broker, "127.0.0.1", Number(values.port ?? process.env.SB_BROKER_PORT ?? 0));
-  console.log(`sproutboat broker: 127.0.0.1:${port} db=${values.db ?? ":memory:"} worker=${values["worker-url"] ?? process.env.SB_WORKER_URL ?? "(none)"}`);
+  console.log(`sproutboat broker: 127.0.0.1:${port} db=${values.db ?? ":memory:"} sprout=${values["sprout-url"] ?? process.env.SB_SPROUT_URL ?? "(none)"}`);
 }

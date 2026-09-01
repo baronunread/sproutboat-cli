@@ -24,7 +24,7 @@ test("deploy report: files table, sizes, and env bindings", () => {
   ));
   expect(out).toContain("🌱 sproutboat");
   expect(out).toContain("Porffor alpha-4 (a415d19)");
-  expect(out).toContain("2.00 KiB");        // worker size
+  expect(out).toContain("2.00 KiB");        // sprout size
   expect(out).toContain("512 B");           // manifest size
   expect(out).toContain("Total upload: 2.50 KiB");
   expect(out).toContain("env.GREETING");

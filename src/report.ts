@@ -27,11 +27,11 @@ function table(headers: string[], rows: string[][], align: boolean[] = []): stri
 export function printDeployReport(
   config: SproutboatConfig,
   manifest: ArtifactManifest,
-  worker: Uint8Array,
+  sprout: Uint8Array,
   manifestBytes: number,
 ): void {
-  const gz = gzipSync(Uint8Array.from(worker)).length;
-  const total = worker.length + manifestBytes;
+  const gz = gzipSync(Uint8Array.from(sprout)).length;
+  const total = sprout.length + manifestBytes;
 
   console.log(`\n🌱 sproutboat ${CLI_VERSION}`);
   console.log("─".repeat(19));
@@ -44,12 +44,12 @@ export function printDeployReport(
   console.log(table(
     ["File", "Type", "Size"],
     [
-      ["worker", manifest.runtime, bytes(worker.length)],
+      ["sprout", manifest.runtime, bytes(sprout.length)],
       ["manifest.json", "json", bytes(manifestBytes)],
     ],
     [false, false, true],
   ));
-  console.log(`Total upload: ${bytes(total)}  (worker gzip: ${bytes(gz)})`);
+  console.log(`Total upload: ${bytes(total)}  (sprout gzip: ${bytes(gz)})`);
   console.log();
 
   const vars = Object.entries(config.vars ?? {});

@@ -10,7 +10,7 @@ export type SproutboatConfig = {
   kv_namespaces?: string[];
   /** Secret binding names, exposed as `env.<NAME>` (value fetched at use). */
   secrets?: string[];
-  /** Hostnames the worker's `fetch()` may reach (exact host match). */
+  /** Hostnames the sprout's `fetch()` may reach (exact host match). */
   outbound?: string[];
   /** D1 (SQLite) database binding names, exposed as `env.<NAME>`. */
   d1_databases?: string[];
@@ -35,7 +35,7 @@ export type AssetsConfig = {
   binding?: string;
   /** What to serve when a request matches no file (applied by the broker on `env.<BINDING>.fetch`). */
   not_found_handling?: "none" | "single-page-application" | "404-page";
-  /** `true` = run the worker before serving any asset; string[] = selective route patterns (`!` negates). */
+  /** `true` = run the sprout before serving any asset; string[] = selective route patterns (`!` negates). */
   run_sprout_first?: boolean | string[];
 };
 

@@ -219,13 +219,13 @@ if (globalThis.crypto.randomUUID == null) {
 // Bindings: env.<KV>, env.<SECRET>, env.<D1>, env.<R2>, and globalThis.fetch,
 // backed by a Bun broker on a loopback TCP port. The transport is inline C —
 // blocking write/read per call over ONE long-lived connection (http-sync-v0: one
-// worker event-loop turn per request, so a blocking roundtrip is acceptable).
+// sprout event-loop turn per request, so a blocking roundtrip is acceptable).
 // Wire frame:
 //   [u32 LE len][ <token> "\n" <json> ]   reply: [u32 LE len][ <json> ]
 // SB_BROKER_PORT / SB_BROKER_TOKEN are set by the supervisor next to $PORT.
 // If SB_BROKER_PORT is unset the shims below are never installed (compile.ts
 // only emits the __sbInstallBindings call when the project declares bindings),
-// so a plain worker is byte-for-byte unchanged.
+// so a plain sprout is byte-for-byte unchanged.
 // ponytail: text values only; still AF_INET loopback, not AF_UNIX. A failed
 // exchange reconnects and resends once — a broker crash between "request applied"
 // and "reply read" can double-apply a non-idempotent op (queue.send, INSERT);
@@ -290,7 +290,7 @@ static int sb_broker_fd = -1;
 static int sb_broker_connect(void) {
   const char* port_s = getenv("SB_BROKER_PORT");
   if (!port_s) return -10;
-  signal(SIGPIPE, SIG_IGN); // a dead broker must yield EPIPE, not kill the worker
+  signal(SIGPIPE, SIG_IGN); // a dead broker must yield EPIPE, not kill the sprout
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) return -1;
   int one = 1;
@@ -460,7 +460,7 @@ function __sbMakeD1(dbName) {
 }
 
 // R2: a Cloudflare-shaped object. When `body` is present the sync accessors
-// mirror R2ObjectBody's async ones (a worker may `await` them harmlessly).
+// mirror R2ObjectBody's async ones (a sprout may `await` them harmlessly).
 function __sbR2Object(meta, body) {
   const obj = {
     key: meta.key,
@@ -610,7 +610,7 @@ globalThis.__sbInstallBindings = function (target, bindings) {
   }
 
   // Static assets: env.<ASSETS>.fetch(request) -> broker `assets.get`. The edge
-  // already serves matching files directly; the worker only calls this for paths
+  // already serves matching files directly; the sprout only calls this for paths
   // it wants to own (SPA fallback, auth-gated files). Text assets only — binary
   // files go through the edge (the broker frame is UTF-8 JSON).
   if (bindings.assets) {
@@ -650,13 +650,13 @@ globalThis.__sbInstallBindings = function (target, bindings) {
 };
 
 // ---------------------------------------------------------------------------
-// Durable Objects. The class runs here in the sandboxed worker. There is exactly
-// one worker process per deployment (the supervisor model) and the native-fetch
+// Durable Objects. The class runs here in the sandboxed sprout. There is exactly
+// one sprout process per deployment (the supervisor model) and the native-fetch
 // runtime processes one turn at a time, so calls to a given object id are
 // already serialized — `env.<NS>.get(id).fetch()` invokes the instance directly,
 // no round-trip. Only `state.storage.*` goes to the broker (so object state
-// outlives a worker restart), scoped to (class, id).
-// ponytail: serialization relies on the single worker process; a multi-worker
+// outlives a sprout restart), scoped to (class, id).
+// ponytail: serialization relies on the single sprout process; a multi-sprout
 // deployment needs the broker to hold a per-id lock (cloud). Storage ops are one
 // key at a time; blockConcurrencyWhile just runs the fn.
 

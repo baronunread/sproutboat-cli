@@ -28,7 +28,7 @@ export type CompileInput = {
 };
 
 /** Compile `sourcePath` to a native binary at `outPath` (mode 0555). */
-export async function compileWorker(input: CompileInput): Promise<void> {
+export async function compileSprout(input: CompileInput): Promise<void> {
   await ensurePorfforPatched();
 
   // Seed the Porffor uWebSockets cache from the prebuilt archive in `vendor/` so
@@ -54,7 +54,7 @@ export async function compileWorker(input: CompileInput): Promise<void> {
 
   const outDir = dirname(input.outPath);
   await mkdir(outDir, { recursive: true });
-  const generatedPath = resolve(outDir, "worker.generated.js");
+  const generatedPath = resolve(outDir, "sprout.generated.js");
   const [source, prelude] = await Promise.all([readFile(input.sourcePath, "utf8"), readFile(preludePath, "utf8")]);
   await writeFile(generatedPath, wrapNativeFetchHandler(source, prelude, input.vars, input.bindings ?? EMPTY_BINDINGS));
 

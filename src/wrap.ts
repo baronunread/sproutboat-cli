@@ -1,5 +1,5 @@
 /**
- * The build-independent half of worker compilation: the binding/trigger wrapper
+ * The build-independent half of sprout compilation: the binding/trigger wrapper
  * that turns a user's `export default { fetch }` into a native-fetch module, plus
  * the `Bindings` shape and the `SPROUTBOAT_*_JSON` env readers.
  *
@@ -54,12 +54,12 @@ function hasBindings(b: Bindings): boolean {
  * `__sbEntry` (HTTP → `handlers.fetch`; `x-sb-trigger` → scheduled / queue / DO).
  *
  * With no bindings and no `scheduled`/`queue`/DO the output behaves exactly like
- * a plain `export default { fetch }` worker.
+ * a plain `export default { fetch }` sprout.
  *
  * `port` is only the baked fallback in `export default { port }`; the runtime
  * reads `$PORT` first. The monorepo's bench path overrides it.
  *
- * ponytail: the worker process is long-lived, so a handler that mutates `env`
+ * ponytail: the sprout process is long-lived, so a handler that mutates `env`
  * leaks that change to later requests. Freeze upstream once Porffor supports
  * Object.freeze in native mode.
  */

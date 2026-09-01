@@ -176,8 +176,8 @@ async function deploy(args: string[]) {
     config = built.project.config;
   }
   const manifest = Bun.file(resolve(artifactDir, "manifest.json"));
-  const worker = Bun.file(resolve(artifactDir, "worker"));
-  if (!(await manifest.exists()) || !(await worker.exists())) fail("artifact must contain manifest.json and worker");
+  const sprout = Bun.file(resolve(artifactDir, "sprout"));
+  if (!(await manifest.exists()) || !(await sprout.exists())) fail("artifact must contain manifest.json and sprout");
   const manifestValidation = validateManifest(await manifest.json());
   if (!manifestValidation.ok) fail(`invalid artifact manifest: ${manifestValidation.errors.join(", ")}`);
   const artifactManifest: ArtifactManifest = manifestValidation.value;
@@ -186,7 +186,7 @@ async function deploy(args: string[]) {
   printDeployReport(
     config ?? { name: projectName, main: "", compatibility_date: "(prebuilt artifact)" },
     artifactManifest,
-    new Uint8Array(await worker.arrayBuffer()),
+    new Uint8Array(await sprout.arrayBuffer()),
     manifest.size,
   );
   if (dryRun) {
@@ -208,7 +208,7 @@ async function deploy(args: string[]) {
   }
   const form = new FormData();
   form.set("manifest", new File([await manifest.arrayBuffer()], "manifest.json", { type: "application/json" }));
-  form.set("worker", new File([await worker.arrayBuffer()], "worker", { type: "application/octet-stream" }));
+  form.set("sprout", new File([await sprout.arrayBuffer()], "sprout", { type: "application/octet-stream" }));
 
   // #1 — ship the sidecars `sproutboat build` produced so the server can start
   // the binding broker and serve static assets. Without bindings.json the broker
@@ -409,7 +409,7 @@ async function secrets(args: string[]) {
     await fetch(`${base}/${name}`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ value }) }),
     "set rejected",
   );
-  console.log(`Set ${name} — applies on the next deploy or worker restart`);
+  console.log(`Set ${name} — applies on the next deploy or sprout restart`);
 }
 
 async function deleteProject(args: string[]) {
