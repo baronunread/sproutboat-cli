@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Keep the workflow actions current (catches e.g. checkout/setup-node major bumps).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # npm deps. `porffor` is a branch-pinned git dep whose commit is coupled to
+  # src/toolchain.ts (PORFFOR_COMMIT + the uWebSockets sha — see MIGRATION.md),
+  # so it must be bumped by hand, not by Dependabot.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: porffor
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]
