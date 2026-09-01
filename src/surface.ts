@@ -17,6 +17,7 @@ export const COMMANDS: readonly Command[] = [
   { name: "versions", args: "list [project-dir]", summary: "List the project's deployed versions." },
   { name: "rollback", args: "<version-id> [project-dir]", summary: "Re-activate a previous version." },
   { name: "domains", args: "[list | add <host> | verify <host> | rm <host>] [project-dir]", summary: "Attach a custom domain to the project (TXT-verified). No sub-command lists." },
+  { name: "secrets", args: "[list | set <NAME> [value] | rm <NAME>] [project-dir]", summary: "Manage encrypted project secrets (read as env.NAME). `set` takes the value from the arg or stdin; applies on next deploy." },
   { name: "delete", args: "--yes [project-dir]", summary: "Delete the project and every version." },
 ];
 

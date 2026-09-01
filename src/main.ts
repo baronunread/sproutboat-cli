@@ -379,6 +379,39 @@ async function domains(args: string[]) {
   printDomain(domain);
 }
 
+async function secrets(args: string[]) {
+  const sub = args[0] && ["list", "set", "rm"].includes(args[0]) ? args.shift()! : "list";
+  const name = sub === "list" ? undefined : args.shift();
+  if (sub !== "list" && !name) fail(`usage: sproutboat secrets ${sub} <NAME> [project-dir]`);
+  if (name && !/^[A-Z][A-Z0-9_]*$/.test(name)) fail("secret name must be UPPER_SNAKE_CASE");
+  const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
+  const base = `${apiUrl}/api/projects/${project.config.name}/secrets`;
+  const auth = { "x-api-key": token };
+
+  if (sub === "list") {
+    const body = await responseText(await fetch(base, { headers: auth }), "could not list secrets");
+    const parsed = jsonObject(parseJsonValue(body));
+    const names = parsed && Array.isArray(parsed.names) ? parsed.names.filter(isString) : [];
+    console.log(names.length ? names.join("\n") : "no secrets");
+    return;
+  }
+  if (sub === "rm") {
+    await responseText(await fetch(`${base}/${name}`, { method: "DELETE", headers: auth }), "delete rejected");
+    console.log(`Removed ${name}`);
+    return;
+  }
+  // set: value from the next arg, else stdin (keeps it out of shell history).
+  const value = args[1] && !args[1].startsWith("-") && args[1] !== project.directory
+    ? args[1]
+    : (await Bun.stdin.text()).replace(/\r?\n$/, "");
+  if (!value) fail("no value — pass it as an argument or pipe it on stdin");
+  await responseText(
+    await fetch(`${base}/${name}`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ value }) }),
+    "set rejected",
+  );
+  console.log(`Set ${name} — applies on the next deploy or worker restart`);
+}
+
 async function deleteProject(args: string[]) {
   if (args[0] !== "--yes") fail("refusing to delete without --yes");
   const [project, { apiUrl, token }] = await Promise.all([readProject(args[1]), apiCredentials()]);
@@ -402,6 +435,7 @@ switch (command) {
   case "versions": await versions(args); break;
   case "rollback": await rollback(args); break;
   case "domains": await domains(args); break;
+  case "secrets": await secrets(args); break;
   case "tail": await tail(args); break;
   case "delete": await deleteProject(args); break;
   default: usage();
