@@ -3,17 +3,24 @@ on:
   push:
     tags: ["v*"]
 
-# Publishes @sproutboat/cli to npm on a version tag.
-# Requires: the `sproutboat` npm org to exist and an `NPM_TOKEN` repo secret
-# (an automation token with publish rights on the org).
+# Publishes the `sproutboat` package to npm on a `vX.Y.Z` tag whose number
+# matches package.json. Requires an `NPM_TOKEN` repo secret — an npm automation
+# token with publish rights on the `sproutboat` package. Provenance needs this
+# repo to stay public.
 jobs:
   publish:
     runs-on: ubuntu-latest
+    if: github.repository == 'baronunread/sproutboat-cli'
     permissions:
       contents: read
       id-token: write   # npm provenance
     steps:
       - uses: actions/checkout@v4
+      - name: tag matches package.json version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          test "$tag" = "$pkg" || { echo "tag $tag != package.json $pkg"; exit 1; }
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
@@ -24,11 +31,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
-      - name: tag matches package.json version
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(node -p "require('./package.json').version")"
-          test "$tag" = "$pkg" || { echo "tag $tag != package.json $pkg"; exit 1; }
       - run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
