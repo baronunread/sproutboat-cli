@@ -4,16 +4,19 @@ on:
     tags: ["v*"]
 
 # Publishes the `sproutboat` package to npm on a `vX.Y.Z` tag whose number
-# matches package.json. Requires an `NPM_TOKEN` repo secret — an npm automation
-# token with publish rights on the `sproutboat` package. Provenance needs this
-# repo to stay public.
+# matches package.json.
+#
+# Auth is npm Trusted Publishing (OIDC) — no token secret. One-time setup on
+# npmjs.com: the `sproutboat` package -> Settings -> Trusted Publisher ->
+# GitHub Actions, with user `baronunread`, repo `sproutboat-cli`, workflow
+# `release.yml`. Provenance is generated automatically; the repo must stay public.
 jobs:
   publish:
     runs-on: ubuntu-latest
     if: github.repository == 'baronunread/sproutboat-cli'
     permissions:
       contents: read
-      id-token: write   # npm provenance
+      id-token: write   # OIDC token for Trusted Publishing + provenance
     steps:
       - uses: actions/checkout@v4
       - name: tag matches package.json version
@@ -26,11 +29,10 @@ jobs:
           bun-version: 1.4.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest   # Trusted Publishing needs npm >= 11.5.1
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
-      - run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish
