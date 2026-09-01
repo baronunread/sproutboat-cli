@@ -413,11 +413,34 @@ async function secrets(args: string[]) {
 }
 
 async function deleteProject(args: string[]) {
-  if (args[0] !== "--yes") fail("refusing to delete without --yes");
-  const [project, { apiUrl, token }] = await Promise.all([readProject(args[1]), apiCredentials()]);
-  const response = await fetch(`${apiUrl}/api/projects/${project.config.name}`, { method: "DELETE", headers: { "x-api-key": token } });
-  await responseText(response, "delete rejected");
-  console.log(`Deleted ${project.config.name}`);
+  // `sproutboat delete [project-dir] [--name <project>] --yes` — flags in any order.
+  const positional: string[] = [];
+  let confirmed = false;
+  let explicitName: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--yes" || arg === "-y") confirmed = true;
+    else if (arg === "--name") explicitName = args[(index += 1)];
+    else if (!arg.startsWith("-")) positional.push(arg);
+    else fail(`unknown flag ${arg}\nusage: sproutboat delete [project-dir] [--name <project>] --yes`);
+  }
+
+  const { apiUrl, token } = await apiCredentials();
+  const name = explicitName ?? (await readProject(positional[0])).config.name;
+  if (!confirmed) fail(`this permanently removes "${name}", every version, and its route — re-run with --yes`);
+
+  const url = `${apiUrl}/api/projects/${encodeURIComponent(name)}?confirm=${encodeURIComponent(name)}`;
+  const body = await responseText(await fetch(url, { method: "DELETE", headers: { "x-api-key": token } }), "delete rejected");
+
+  let result: JsonObject = {};
+  try { result = jsonObject(parseJsonValue(body)) ?? {}; } catch { /* a 2xx already confirmed the delete */ }
+  const versions = isSafeInteger(result.versionsRemoved) ? result.versionsRemoved : 0;
+  const routes = Array.isArray(result.routeRemoved) ? result.routeRemoved.filter(isString) : [];
+  const failed = Array.isArray(result.artifactCleanupFailed) ? result.artifactCleanupFailed.filter(isString) : [];
+
+  console.log(`Deleted ${name}  (${versions} version${versions === 1 ? "" : "s"} removed)`);
+  for (const route of routes) console.log(`  released ${route}`);
+  if (failed.length) console.log(`  ! ${failed.length} artifact file(s) left on disk — remove them manually`);
 }
 
 function usage(): never {

@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
 import { gzipSync } from "bun";
 import type { SproutboatConfig } from "./config";
 import type { ArtifactManifest } from "./manifest";
 
-const CLI_VERSION = "0.1.0";
+// Read from package.json so the banner never drifts from the published version.
+const CLI_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
