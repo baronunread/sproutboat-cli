@@ -31,6 +31,44 @@ function __sbStartupMark() {
 }
 __sbStartupMark();
 
+// #28 — process CPU time in ms (CLOCK_PROCESS_CPUTIME_ID). Marshalled back as a
+// string via the same primitives as __sbEnv / __sbRandomBytes (proven working),
+// then parsed — Porffor's number boxing for a bare inline-C assignment is not
+// relied on. `__sbEntry` samples it around the handler for per-invocation CPU.
+function __sbCpuMs() {
+  let res = '';
+  Porffor.c`
+    struct timespec __ts;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &__ts);
+    double __ms = (double)__ts.tv_sec * 1000.0 + (double)__ts.tv_nsec / 1000000.0;
+    char __b[32];
+    int __n = snprintf(__b, sizeof(__b), "%.3f", __ms);
+    if (__n > 0) res = porf_box((f64)porf_native_fetch_alloc_bytestring(__b, (size_t)__n), 195);
+  `;
+  return res === '' ? 0 : parseFloat(res);
+}
+
+// #28 — stamp `x-sb-cpu-ms` onto a handler Response. Porffor alpha-4's
+// native-fetch serializer only reads headers from the plain object passed to
+// `new Response(body, { headers })` — a later `.set()` or a `Headers` instance
+// is ignored on the wire — so the metric is carried by rebuilding the Response
+// with one extra header. Safe only for a string body (the norm under
+// http-sync-v0) with no Set-Cookie to comma-fold; anything else is returned
+// untouched and the edge simply omits cpuMs for that request.
+function __sbTagCpu(res, t0) {
+  const cpu = __sbCpuMs() - t0;
+  try {
+    const body = res && res.body;
+    if (typeof body === 'string' && !res.headers.has('set-cookie')) {
+      const headers = {};
+      res.headers.forEach(function (value, name) { headers[name] = value; });
+      headers['x-sb-cpu-ms'] = (cpu >= 0 ? cpu : 0).toFixed(3);
+      return new Response(body, { status: res.status, headers: headers });
+    }
+  } catch (e) { /* fall through to the original response */ }
+  return res;
+}
+
 class __SproutboatURLSearchParams {
   constructor(init) {
     this._keys = [];
@@ -747,7 +785,19 @@ function __sbTriggerAuthed(request) {
 
 globalThis.__sbEntry = function (handlers, request) {
   const trigger = request.headers.get('x-sb-trigger');
-  if (!trigger) return handlers.fetch(request);
+  if (!trigger) {
+    // #28 — per-invocation CPU time. One fetch turn per process (serial), so the
+    // process CPU delta across the handler is this invocation's CPU. Covers both
+    // sync handlers and async ones (via `.then`); the delta spans the whole turn.
+    // ponytail: serial-turn assumption; revisit if the profile ever allows
+    // concurrent in-process requests.
+    const __t0 = __sbCpuMs();
+    const __res = handlers.fetch(request);
+    if (__res && typeof __res.then === 'function') {
+      return __res.then(function (resolved) { return __sbTagCpu(resolved, __t0); });
+    }
+    return __sbTagCpu(__res, __t0);
+  }
   if (!__sbTriggerAuthed(request)) return new Response('forbidden', { status: 403 });
 
   if (trigger === 'scheduled') {
