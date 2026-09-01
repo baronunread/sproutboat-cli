@@ -17,10 +17,11 @@
 | `tail` | `[project-dir]` | Print the project's recent request logs. |
 | `versions` | `list [project-dir]` | List the project's deployed versions. |
 | `rollback` | `<version-id> [project-dir]` | Re-activate a previous version. |
+| `domains` | `[list | add <host> | verify <host> | rm <host>] [project-dir]` | Attach a custom domain to the project (TXT-verified). No sub-command lists. |
 | `delete` | `--yes [project-dir]` | Delete the project and every version. |
 
 ```
-usage: sproutboat <init [name] | check [project-dir] | build [project-dir] | deploy [project-dir] [--dry-run] [--artifact <dir>] | login [--api-url <url>] [--token <token>] | tail [project-dir] | versions list [project-dir] | rollback <version-id> [project-dir] | delete --yes [project-dir]>
+usage: sproutboat <init [name] | check [project-dir] | build [project-dir] | deploy [project-dir] [--dry-run] [--artifact <dir>] | login [--api-url <url>] [--token <token>] | tail [project-dir] | versions list [project-dir] | rollback <version-id> [project-dir] | domains [list | add <host> | verify <host> | rm <host>] [project-dir] | delete --yes [project-dir]>
 ```
 
 ## Environment variables

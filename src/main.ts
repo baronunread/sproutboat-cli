@@ -310,6 +310,56 @@ async function tail(args: string[]) {
   process.stdout.write(await responseText(response, "could not read logs"));
 }
 
+type DomainView = { hostname: string; verified: boolean; verification: { type: string; name: string; value: string } | null };
+function parseDomain(source: string): DomainView | undefined {
+  const record = jsonObject(parseJsonValue(source));
+  if (!record || !isString(record.hostname) || typeof record.verified !== "boolean") return undefined;
+  const v = jsonObject(record.verification ?? null);
+  const verification = v && isString(v.type) && isString(v.name) && isString(v.value) ? { type: v.type, name: v.name, value: v.value } : null;
+  return { hostname: record.hostname, verified: record.verified, verification };
+}
+function printDomain(domain: DomainView) {
+  const status = domain.verified ? "verified" : "unverified";
+  console.log(`${status.padEnd(10)} ${domain.hostname}`);
+  if (domain.verification) {
+    console.log(`  add this DNS record, then run: sproutboat domains verify ${domain.hostname}`);
+    console.log(`  ${domain.verification.type}  ${domain.verification.name}  "${domain.verification.value}"`);
+  }
+}
+
+async function domains(args: string[]) {
+  const sub = args[0] && !args[0].startsWith("-") && ["list", "add", "verify", "rm"].includes(args[0]) ? args.shift()! : "list";
+  const host = sub === "list" ? undefined : args.shift();
+  if (sub !== "list" && !host) fail(`usage: sproutboat domains ${sub} <hostname> [project-dir]`);
+  const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
+  const base = `${apiUrl}/api/projects/${project.config.name}/domains`;
+  const auth = { "x-api-key": token };
+
+  if (sub === "list") {
+    const response = await fetch(base, { headers: auth });
+    const body = await responseText(response, "could not list domains");
+    const list = parseJsonValue(body);
+    if (!Array.isArray(list)) fail("could not parse domains response");
+    if (list.length === 0) { console.log("no custom domains"); return; }
+    for (const entry of list) { const d = parseDomain(JSON.stringify(entry)); if (d) printDomain(d); }
+    return;
+  }
+  if (sub === "rm") {
+    const response = await fetch(`${base}/${host}`, { method: "DELETE", headers: auth });
+    await responseText(response, "delete rejected");
+    console.log(`Removed ${host}`);
+    return;
+  }
+  const url = sub === "add" ? base : `${base}/${host}/verify`;
+  const init = sub === "add"
+    ? { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ hostname: host }) }
+    : { method: "POST", headers: auth };
+  const response = await fetch(url, init);
+  const domain = parseDomain(await responseText(response, `${sub} rejected`));
+  if (!domain) fail(`${sub} response was not a domain record`);
+  printDomain(domain);
+}
+
 async function deleteProject(args: string[]) {
   if (args[0] !== "--yes") fail("refusing to delete without --yes");
   const [project, { apiUrl, token }] = await Promise.all([readProject(args[1]), apiCredentials()]);
@@ -332,6 +382,7 @@ switch (command) {
   case "deploy": await deploy(args); break;
   case "versions": await versions(args); break;
   case "rollback": await rollback(args); break;
+  case "domains": await domains(args); break;
   case "tail": await tail(args); break;
   case "delete": await deleteProject(args); break;
   default: usage();
