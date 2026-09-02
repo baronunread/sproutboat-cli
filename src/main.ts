@@ -409,21 +409,32 @@ async function tail(args: string[]) {
   process.stdout.write(await responseText(response, "could not read logs"));
 }
 
-type DomainView = { hostname: string; verified: boolean; verification: { type: string; name: string; value: string } | null };
+type DomainView = {
+  hostname: string;
+  verified: boolean;
+  verification: { type: string; name: string; value: string } | null;
+  serverAddresses: string[];
+  warning?: string;
+};
 function parseDomain(source: string): DomainView | undefined {
   const record = jsonObject(parseJsonValue(source));
   if (!record || !isString(record.hostname) || typeof record.verified !== "boolean") return undefined;
   const v = jsonObject(record.verification ?? null);
   const verification = v && isString(v.type) && isString(v.name) && isString(v.value) ? { type: v.type, name: v.name, value: v.value } : null;
-  return { hostname: record.hostname, verified: record.verified, verification };
+  const serverAddresses = Array.isArray(record.serverAddresses) ? record.serverAddresses.filter(isString) : [];
+  return { hostname: record.hostname, verified: record.verified, verification, serverAddresses, warning: isString(record.warning) ? record.warning : undefined };
 }
 function printDomain(domain: DomainView) {
   const status = domain.verified ? "verified" : "unverified";
   console.log(`${status.padEnd(10)} ${domain.hostname}`);
   if (domain.verification) {
-    console.log(`  add this DNS record, then run: sproutboat domains verify ${domain.hostname}`);
+    console.log("  add these DNS records, then run: sproutboat domains verify " + domain.hostname);
     console.log(`  ${domain.verification.type}  ${domain.verification.name}  "${domain.verification.value}"`);
+    if (domain.serverAddresses[0]) {
+      console.log(`  A    ${domain.hostname}  ${domain.serverAddresses[0]}   (point the hostname here, DNS-only / not proxied)`);
+    }
   }
+  if (domain.warning) console.log(amber(`  ! ${domain.warning}`));
 }
 
 async function domains(args: string[]) {
