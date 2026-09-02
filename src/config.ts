@@ -14,6 +14,26 @@ export function resourceRefs(field: readonly ResourceRef[] | undefined): Array<{
   return (field ?? []).map((entry) => (isString(entry) ? { binding: entry } : { binding: entry.binding, id: entry.id }));
 }
 
+/**
+ * Rewrite a bare `"BINDING"` token inside `<field>: [ … ]` to
+ * `{ "binding": "BINDING", "id": "<id>" }`, leaving the rest of the source
+ * (comments, spacing) untouched — used by `deploy`'s auto-provisioner to pin an
+ * id back into `sproutboat.jsonc`. Binding names are UPPER_SNAKE, so a plain
+ * `"BINDING"` match inside the array is unambiguous. No-op if not found.
+ */
+export function pinBindingId(source: string, field: string, binding: string, id: string): string {
+  const array = new RegExp(`("${field}"\\s*:\\s*\\[)([\\s\\S]*?)(\\])`);
+  // the bare token must be a whole array element — at the start of the array or
+  // right after a comma — never `"binding": "NAME"` inside an already-pinned
+  // { … } object.
+  const element = new RegExp(`(^\\s*|,\\s*)"${binding}"(\\s*,|\\s*$)`);
+  return source.replace(array, (whole, open: string, inner: string, close: string) =>
+    element.test(inner)
+      ? open + inner.replace(element, `$1{ "binding": "${binding}", "id": "${id}" }$2`) + close
+      : whole,
+  );
+}
+
 export type SproutboatConfig = {
   $schema?: string;
   name: string;

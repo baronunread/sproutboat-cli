@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
-import { parseConfig, type SproutboatConfig } from "./config";
+import { parseConfig, pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
 import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
 import { validateManifest, type ArtifactManifest } from "./manifest";
@@ -177,6 +177,52 @@ async function build(directory?: string) {
   return { project, artifact };
 }
 
+const PROVISION_FIELDS = [
+  ["kv_namespaces", "kv"],
+  ["d1_databases", "d1"],
+  ["r2_buckets", "r2"],
+  ["queues", "queue"],
+] as const;
+
+/**
+ * #74 auto-provisioning, wrangler-style. A bare-string KV/D1/R2/queue binding
+ * with no id gets an account-level resource created (`<project>-<binding>`) on
+ * deploy, and the id is written back into `sproutboat.jsonc`. `--no-provision`
+ * skips this — those bindings then get an ephemeral deploy-scoped store.
+ */
+async function provisionBindings(directory = process.cwd()): Promise<void> {
+  const configPath = resolve(directory, "sproutboat.jsonc");
+  let source = await readFile(configPath, "utf8");
+  const parsed = parseConfig(source);
+  if (!parsed.ok) return; // build() re-reads and reports the config error
+
+  const bare: Array<{ field: string; kind: string; binding: string }> = [];
+  for (const [field, kind] of PROVISION_FIELDS) {
+    for (const ref of resourceRefs(parsed.value[field])) {
+      if (!ref.id) bare.push({ field, kind, binding: ref.binding });
+    }
+  }
+  if (bare.length === 0) return;
+
+  const { apiUrl, token } = await apiCredentials();
+  for (const { field, kind, binding } of bare) {
+    const name = `${parsed.value.name}-${binding.toLowerCase().replace(/_/g, "-")}`;
+    const body = await responseText(
+      await fetch(`${apiUrl}/api/resources`, {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: JSON.stringify({ kind, name, ifExists: "return" }),
+      }),
+      `could not provision a ${kind} resource for env.${binding}`,
+    );
+    const record = jsonObject(jsonObject(parseJsonValue(body))?.resource ?? null);
+    if (!record || !isString(record.id)) fail(`provision response for env.${binding} was not a resource`);
+    source = pinBindingId(source, field, binding, record.id);
+    console.log(ok(`provisioned ${kind} ${bold(name)} → ${record.id}`));
+  }
+  await writeFile(configPath, source);
+}
+
 async function deploy(args: string[]) {
   const artifactIndex = args.indexOf("--artifact");
   const dryRun = args.includes("--dry-run");
@@ -190,6 +236,9 @@ async function deploy(args: string[]) {
       : usageError("deploy: --artifact needs a directory", "deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait]");
     projectName = "";
   } else {
+    // wrangler-style: create resources for id-less bindings and pin the ids
+    // back into sproutboat.jsonc before the build bakes them into the artifact.
+    if (!args.includes("--no-provision") && !dryRun) await provisionBindings(directory);
     const built = await build(directory);
     projectName = built.project.config.name;
     artifactDir = built.artifact.artifactDir;
