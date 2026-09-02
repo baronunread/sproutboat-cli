@@ -18,7 +18,7 @@
 | `tail` | `[project-dir] [--sprout]` | Print recent request logs; --sprout prints the running sprout + broker stdout/stderr instead. |
 | `domains` | `[list | add <host> | verify <host> | rm <host>] [project-dir]` | Attach a custom domain to the project (TXT-verified). No sub-command lists. |
 | `secrets` | `[list | set <NAME> [value] | rm <NAME>] [project-dir]` | Manage encrypted project secrets (read as env.NAME). `set` takes the value from the arg or stdin; applies on next deploy. |
-| `resource` | `[list [kind] | create <kind> <name> | rename <id> <name> | delete <id>]` | Manage account-level storage resources (kv | d1 | r2 | queue | analytics). `create` prints the id to reference from sproutboat.jsonc bindings. |
+| `resource` | `[list [kind] | create <kind> <name> | rename <id> <name> | delete <id>]` | Manage account-level storage resources (kv | d1 | r2 | queue). `create` prints the id to reference from sproutboat.jsonc bindings. |
 | `delete` | `[project-dir] [--name <project>] --yes` | Delete the project, every version, and its route. |
 | `login` | `[--api-url <url>] [--token <token>]` | Device-code browser flow, or store <token> for <url> directly. |
 

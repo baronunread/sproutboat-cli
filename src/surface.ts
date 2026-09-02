@@ -48,7 +48,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Manage encrypted project secrets (read as env.NAME). `set` takes the value from the arg or stdin; applies on next deploy." },
   { name: "resource", group: "Configure", emoji: "📦",
     args: "[list [kind] | create <kind> <name> | rename <id> <name> | delete <id>]", brief: "[list | create | rename | delete]",
-    summary: "Manage account-level storage resources (kv | d1 | r2 | queue | analytics). `create` prints the id to reference from sproutboat.jsonc bindings." },
+    summary: "Manage account-level storage resources (kv | d1 | r2 | queue). `create` prints the id to reference from sproutboat.jsonc bindings." },
   { name: "delete", group: "Configure", emoji: "🗑",
     args: "[project-dir] [--name <project>] --yes", brief: "[project-dir] --yes",
     summary: "Delete the project, every version, and its route." },

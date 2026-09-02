@@ -34,6 +34,30 @@ test("a var and a binding may not share a name (any binding kind)", () => {
   if (!r.ok) expect(r.errors.join(" ")).toContain("must not collide");
 });
 
+// #74 — storage bindings accept `{ binding, id }` alongside a bare name.
+const id24 = "0123456789abcdef01234567";
+
+test("accepts { binding, id } with a kind-matched id", () => {
+  const r = parseConfig(`${base}, "kv_namespaces": [{ "binding": "LINKS", "id": "kv_${id24}" }], "d1_databases": ["DB"] }`);
+  expect(r.ok && r.value.kv_namespaces).toEqual([{ binding: "LINKS", id: `kv_${id24}` }]);
+  expect(r.ok && r.value.d1_databases).toEqual(["DB"]);
+});
+
+test("rejects an id whose prefix is the wrong kind", () => {
+  const r = parseConfig(`${base}, "kv_namespaces": [{ "binding": "LINKS", "id": "r2_${id24}" }] }`);
+  expect(r.ok).toBe(false);
+});
+
+test("rejects a malformed id and stray keys in the object", () => {
+  expect(parseConfig(`${base}, "queues": [{ "binding": "Q", "id": "queue_short" }] }`).ok).toBe(false);
+  expect(parseConfig(`${base}, "queues": [{ "binding": "Q", "id": "queue_${id24}", "extra": 1 }] }`).ok).toBe(false);
+});
+
+test("the { binding } name still collides with a var of the same name", () => {
+  const r = parseConfig(`${base}, "vars": { "LINKS": "x" }, "kv_namespaces": [{ "binding": "LINKS", "id": "kv_${id24}" }] }`);
+  expect(r.ok).toBe(false);
+});
+
 test("assets: accepts a full block and passes it through", () => {
   const r = parseConfig(
     `${base}, "assets": { "directory": "./public/", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_sprout_first": ["/api/*", "!/api/docs/*"] } }`,

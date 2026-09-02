@@ -462,7 +462,7 @@ async function secrets(args: string[]) {
   console.log(`Set ${name} — applies on the next deploy or sprout restart`);
 }
 
-const RESOURCE_KINDS = ["kv", "d1", "r2", "queue", "analytics"];
+const RESOURCE_KINDS = ["kv", "d1", "r2", "queue"];
 
 /**
  * #74 — account-level storage resources. Unlike `secrets`/`domains` these are

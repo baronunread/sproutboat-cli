@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { walkAssets, type AssetManifest } from "./assets";
-import type { SproutboatConfig } from "./config";
+import { resourceRefs, type SproutboatConfig } from "./config";
 import { compileSprout } from "./compile";
 import { ARTIFACT_SCHEMA_VERSION, CAPABILITY_PROFILE, RUNTIME, type ArtifactManifest } from "./manifest";
 import { ensureZig, esbuildVersion, porfforVersion, toolchainStamp } from "./toolchain";
@@ -36,17 +36,31 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   const sproutPath = resolve(artifactDir, "sprout");
   await mkdir(artifactDir, { recursive: true });
 
+  // #74 — split each storage-binding array into its binding-name list (the
+  // legacy shape the prelude/broker read) plus a `resources` map { binding ->
+  // { kind, id } } for the entries that name an account-level resource id.
+  const refsByKind = {
+    kv: resourceRefs(input.config.kv_namespaces),
+    d1: resourceRefs(input.config.d1_databases),
+    r2: resourceRefs(input.config.r2_buckets),
+    queue: resourceRefs(input.config.queues),
+  };
+  const resources: Record<string, { kind: string; id: string }> = {};
+  for (const [kind, refs] of Object.entries(refsByKind)) {
+    for (const ref of refs) if (ref.id) resources[ref.binding] = { kind, id: ref.id };
+  }
   const bindings = {
-    kv: input.config.kv_namespaces ?? [],
+    kv: refsByKind.kv.map((ref) => ref.binding),
     secrets: input.config.secrets ?? [],
     outbound: input.config.outbound ?? [],
-    d1: input.config.d1_databases ?? [],
-    r2: input.config.r2_buckets ?? [],
-    queues: input.config.queues ?? [],
+    d1: refsByKind.d1.map((ref) => ref.binding),
+    r2: refsByKind.r2.map((ref) => ref.binding),
+    queues: refsByKind.queue.map((ref) => ref.binding),
     analytics: input.config.analytics_engine_datasets ?? [],
     do: Object.entries(input.config.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
     crons: input.config.triggers?.crons ?? [],
     assets: input.config.assets?.binding ?? "",
+    resources,
   };
 
   const zigBin = await ensureZig();
@@ -78,7 +92,9 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   // frozen at v2. The control plane reads this to configure the per-deployment
   // broker (KV / D1 / R2 / queue names, secret names, outbound allowlist, cron
   // schedules, Durable Object classes).
-  if (Object.values(bindings).some((names) => names.length > 0)) {
+  const hasBindings = Object.values(bindings).some((value) => Array.isArray(value) && value.length > 0)
+    || Object.keys(bindings.resources).length > 0;
+  if (hasBindings) {
     await writeFile(resolve(artifactDir, "bindings.json"), `${JSON.stringify(bindings, null, 2)}\n`);
   }
 
