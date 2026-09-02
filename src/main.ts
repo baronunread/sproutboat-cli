@@ -7,7 +7,7 @@ import { buildArtifact } from "./build";
 import { validateManifest, type ArtifactManifest } from "./manifest";
 import { printDeployReport } from "./report";
 import { activeApiUrl, savedToken, saveToken } from "./credentials";
-import { usageLine } from "./surface";
+import { helpText, usageLine } from "./surface";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
 
 const defaultApiUrl = "https://dashboard.sproutboat.com";
@@ -473,12 +473,20 @@ async function deleteProject(args: string[]) {
   if (failed.length) console.log(`  ! ${failed.length} artifact file(s) left on disk — remove them manually`);
 }
 
+/** `sproutboat` alone or with -h/--help/help: the friendly grouped list, exit 0. */
+function help(): never {
+  console.log(helpText());
+  process.exit(0);
+}
+
+/** An unrecognised command: a short pointer on stderr, exit 1. */
 function usage(): never {
-  console.error(usageLine());
+  console.error(`unknown command "${command}"\n${usageLine()}\nrun \`sproutboat\` with no arguments for the grouped command list`);
   process.exit(1);
 }
 
 const [command, ...args] = process.argv.slice(2);
+if (command === undefined || command === "help" || command === "-h" || command === "--help") help();
 switch (command) {
   case "init": await init(args[0]); break;
   case "check": await check(args[0]); break;
