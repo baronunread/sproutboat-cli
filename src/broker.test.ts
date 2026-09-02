@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createBroker, cronMatches, encodeFrame, listen, type Broker } from "./broker";
@@ -213,6 +213,55 @@ test("cronMatches: fields, steps, ranges, lists (UTC)", () => {
   expect(cronMatches("0 9-17 * * 1", at("2026-08-31T12:00:00Z"))).toBe(true); // 2026-08-31 is a Monday
   expect(cronMatches("0 9-17 * * 1", at("2026-08-30T12:00:00Z"))).toBe(false); // Sunday
   expect(cronMatches("0 0 1,15 * *", at("2026-08-15T00:00:00Z"))).toBe(true);
+});
+
+// #74 — a binding wired to an account-level resource stores in its own file
+// under resourceDir, keyed by id, so the data outlives a "redeploy" (a new
+// broker with a fresh per-deployment db but the same resourceDir).
+test("resource-backed KV persists across brokers and is shared by id", async () => {
+  const root = mkdtempSync(join(tmpdir(), "sb-broker-res-"));
+  try {
+    const resourceDir = join(root, "resources");
+    const kvId = "kv_0123456789abcdef01234567";
+    mkdirSync(join(root, "dep-a"), { recursive: true });
+    mkdirSync(join(root, "dep-b"), { recursive: true });
+
+    const first = createBroker({
+      db: join(root, "dep-a", "state.sqlite"),
+      resourceDir,
+      bindings: { kv: ["LINKS"], resources: { LINKS: { kind: "kv", id: kvId } } },
+    });
+    await first.dispatch({ op: "kv.put", ns: "LINKS", key: "a", value: "1" });
+    first.close();
+    // stored in the per-resource file, not a per-deployment one
+    expect(existsSync(join(resourceDir, `${kvId}.sqlite`))).toBe(true);
+
+    // a different deployment, different binding name, same id → same data
+    const second = createBroker({
+      db: join(root, "dep-b", "state.sqlite"),
+      resourceDir,
+      bindings: { kv: ["SHORTENER"], resources: { SHORTENER: { kind: "kv", id: kvId } } },
+    });
+    expect(await second.dispatch({ op: "kv.get", ns: "SHORTENER", key: "a" })).toEqual({ ok: true, found: true, value: "1" });
+    second.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a bare-string binding still uses the per-broker db, not resourceDir", async () => {
+  const root = mkdtempSync(join(tmpdir(), "sb-broker-bare-"));
+  try {
+    const resourceDir = join(root, "resources");
+    mkdirSync(join(root, "dep"), { recursive: true });
+    const b = createBroker({ db: join(root, "dep", "state.sqlite"), resourceDir, bindings: { kv: ["CACHE"] } });
+    await b.dispatch({ op: "kv.put", ns: "CACHE", key: "k", value: "v" });
+    b.close();
+    expect(existsSync(resourceDir)).toBe(false);
+    expect(existsSync(join(root, "dep", "state.sqlite"))).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("token line is enforced by handlePayload", async () => {

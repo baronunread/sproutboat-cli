@@ -17,7 +17,7 @@
  * re-validation and private-IP blocking are v2 — the exact-host allowlist is
  * the only SSRF control today.
  */
-import { Database } from "bun:sqlite";
+import { Database, type Statement } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
@@ -36,6 +36,13 @@ export type Bindings = {
   crons: string[];
   /** Static-asset binding name, or `""` when assets are edge-only. */
   assets: string;
+  /**
+   * #74 — binding name -> account-level resource it resolves to. A binding with
+   * an entry here stores in a per-resource SQLite file under `resourceDir`,
+   * keyed by `id`, shared across this owner's deployments; a binding without one
+   * falls back to the per-broker `db` partitioned by its own name (local dev).
+   */
+  resources: Record<string, { kind: "kv" | "d1" | "r2" | "queue"; id: string }>;
 };
 export type Frame = Record<string, unknown>;
 
@@ -43,6 +50,13 @@ export type BrokerOptions = {
   db?: string;
   /** Directory for per-D1-binding SQLite files. Defaults to `<dirname(db)>/d1`, or in-memory when `db` is `:memory:`. */
   dataDir?: string;
+  /**
+   * #74 — directory holding one `<resource-id>.sqlite` per account-level KV / R2 /
+   * queue / D1 resource. Defaults to `<dirname(db)>/resources`, in-memory when
+   * `db` is `:memory:`. The supervisor points this at an owner-stable path so the
+   * data outlives a redeploy.
+   */
+  resourceDir?: string;
   token?: string;
   bindings?: Partial<Bindings>;
   secrets?: Record<string, string>;
@@ -80,7 +94,7 @@ export type Broker = {
 };
 
 export function createBroker(opts: BrokerOptions = {}): Broker {
-  const bindings: Bindings = { kv: [], secrets: [], outbound: [], d1: [], r2: [], queues: [], analytics: [], do: [], crons: [], assets: "", ...opts.bindings };
+  const bindings: Bindings = { kv: [], secrets: [], outbound: [], d1: [], r2: [], queues: [], analytics: [], do: [], crons: [], assets: "", resources: {}, ...opts.bindings };
   const secrets = opts.secrets ?? {};
 
   // Static assets: read the manifest once. Files are read from disk per request
@@ -106,24 +120,32 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   const dbPath = opts.db ?? ":memory:";
   const inMemory = dbPath === ":memory:" || dbPath === "";
   const d1Dir = opts.dataDir ?? (inMemory ? null : join(dirname(resolve(dbPath)), "d1"));
+  const resourceDir = opts.resourceDir ?? (inMemory ? null : join(dirname(resolve(dbPath)), "resources"));
 
-  const db = new Database(dbPath);
-  db.exec("PRAGMA journal_mode = WAL");
   // WAL + NORMAL is the standard pairing: a write no longer fsyncs the WAL, so
   // host power loss can drop the last few committed txns, but a process crash
   // never can and the file never corrupts. Right trade for a single-VPS
   // KV/queue/DO store; on real block storage this is ~10-100x on writes.
-  db.exec("PRAGMA synchronous = NORMAL");
-  db.exec("CREATE TABLE IF NOT EXISTS kv (ns TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (ns, key))");
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS r2 (bucket TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, " +
-      "etag TEXT NOT NULL, uploaded TEXT NOT NULL, http_json TEXT NOT NULL DEFAULT '{}', custom_json TEXT NOT NULL DEFAULT '{}', " +
-      "PRIMARY KEY (bucket, key))",
-  );
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS mq (queue TEXT NOT NULL, id TEXT PRIMARY KEY, body TEXT NOT NULL, " +
-      "visible_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, dead INTEGER NOT NULL DEFAULT 0)",
-  );
+  const openStore = (path: string): Database => {
+    const conn = new Database(path, { create: true });
+    conn.exec("PRAGMA journal_mode = WAL");
+    conn.exec("PRAGMA synchronous = NORMAL");
+    conn.exec("CREATE TABLE IF NOT EXISTS kv (ns TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (ns, key))");
+    conn.exec(
+      "CREATE TABLE IF NOT EXISTS r2 (bucket TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, " +
+        "etag TEXT NOT NULL, uploaded TEXT NOT NULL, http_json TEXT NOT NULL DEFAULT '{}', custom_json TEXT NOT NULL DEFAULT '{}', " +
+        "PRIMARY KEY (bucket, key))",
+    );
+    conn.exec(
+      "CREATE TABLE IF NOT EXISTS mq (queue TEXT NOT NULL, id TEXT PRIMARY KEY, body TEXT NOT NULL, " +
+        "visible_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, dead INTEGER NOT NULL DEFAULT 0)",
+    );
+    return conn;
+  };
+
+  const db = openStore(dbPath);
+  // Durable Object storage and Analytics Engine rows stay in the per-broker db —
+  // neither is an account-level resource (#74).
   db.exec(
     "CREATE TABLE IF NOT EXISTS do_storage (cls TEXT NOT NULL, id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, " +
       "PRIMARY KEY (cls, id, key))",
@@ -132,10 +154,51 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     "CREATE TABLE IF NOT EXISTS ae (dataset TEXT NOT NULL, ts INTEGER NOT NULL, indexes_json TEXT NOT NULL, " +
       "blobs_json TEXT NOT NULL, doubles_json TEXT NOT NULL)",
   );
-  const kvGet = db.query<{ value: string }, [string, string]>("SELECT value FROM kv WHERE ns = ? AND key = ?");
-  const kvPut = db.query("INSERT INTO kv (ns, key, value) VALUES (?1, ?2, ?3) ON CONFLICT (ns, key) DO UPDATE SET value = ?3");
-  const kvDel = db.query("DELETE FROM kv WHERE ns = ? AND key = ?");
-  const kvList = db.query<{ key: string }, [string, string]>("SELECT key FROM kv WHERE ns = ? AND key LIKE ? || '%' ORDER BY key LIMIT 1000");
+
+  // #74 — one SQLite file per account-level resource id, opened on first use.
+  const resourceDbs = new Map<string, Database>();
+  const resourceDb = (id: string): Database => {
+    let conn = resourceDbs.get(id);
+    if (!conn) {
+      if (resourceDir) mkdirSync(resourceDir, { recursive: true });
+      conn = openStore(resourceDir ? join(resourceDir, `${id}.sqlite`) : ":memory:");
+      resourceDbs.set(id, conn);
+    }
+    return conn;
+  };
+
+  /**
+   * Where a KV / R2 / queue binding stores: its resource's own file keyed by
+   * `id` when the config bound it to one, else the per-broker `db` partitioned
+   * by the binding name (bare-string bindings / local dev).
+   */
+  const storeFor = (kind: "kv" | "r2" | "queue", binding: string): { store: Database; part: string } => {
+    const resource = bindings.resources[binding];
+    return resource && resource.kind === kind
+      ? { store: resourceDb(resource.id), part: resource.id }
+      : { store: db, part: binding };
+  };
+
+  type KvStmts = {
+    get: Statement<{ value: string }, [string, string]>;
+    put: Statement<unknown, [string, string, string]>;
+    del: Statement<unknown, [string, string]>;
+    list: Statement<{ key: string }, [string, string]>;
+  };
+  const kvStmtCache = new Map<Database, KvStmts>();
+  const kvStmts = (store: Database): KvStmts => {
+    let stmts = kvStmtCache.get(store);
+    if (!stmts) {
+      stmts = {
+        get: store.query<{ value: string }, [string, string]>("SELECT value FROM kv WHERE ns = ? AND key = ?"),
+        put: store.query("INSERT INTO kv (ns, key, value) VALUES (?1, ?2, ?3) ON CONFLICT (ns, key) DO UPDATE SET value = ?3"),
+        del: store.query("DELETE FROM kv WHERE ns = ? AND key = ?"),
+        list: store.query<{ key: string }, [string, string]>("SELECT key FROM kv WHERE ns = ? AND key LIKE ? || '%' ORDER BY key LIMIT 1000"),
+      };
+      kvStmtCache.set(store, stmts);
+    }
+    return stmts;
+  };
 
   const bound = (list: string[], kind: string) => (name: unknown): string => {
     const n = str(name);
@@ -155,16 +218,22 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   };
   const newId = () => createHash("sha256").update(`${Date.now()}:${Math.random()}`).digest("hex").slice(0, 24);
 
-  // One SQLite database per bound D1 name — they are independent SQL namespaces.
+  // One SQLite database per bound D1 binding — independent SQL namespaces. A
+  // binding wired to an account-level resource (#74) opens `<resource-id>.sqlite`
+  // under `resourceDir` (survives redeploys); a bare-string binding keeps its
+  // per-broker `<name>.sqlite` under `d1Dir`.
   const d1Conns = new Map<string, Database>();
   const d1 = (name: string): Database => {
-    let conn = d1Conns.get(name);
+    const resource = bindings.resources[name];
+    const key = resource && resource.kind === "d1" ? resource.id : name;
+    let conn = d1Conns.get(key);
     if (!conn) {
-      if (d1Dir) mkdirSync(d1Dir, { recursive: true });
-      conn = new Database(d1Dir ? join(d1Dir, `${name}.sqlite`) : ":memory:", { create: true });
+      const dir = resource && resource.kind === "d1" ? resourceDir : d1Dir;
+      if (dir) mkdirSync(dir, { recursive: true });
+      conn = new Database(dir ? join(dir, `${key}.sqlite`) : ":memory:", { create: true });
       conn.exec("PRAGMA journal_mode = WAL");
       conn.exec("PRAGMA synchronous = NORMAL");
-      d1Conns.set(name, conn);
+      d1Conns.set(key, conn);
     }
     return conn;
   };
@@ -224,17 +293,24 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       case "ping":
         return { ok: true, op: "pong", echo: msg.msg ?? null, pid: process.pid };
       case "kv.get": {
-        const row = kvGet.get(requireKv(msg.ns), str(msg.key));
+        const { store, part } = storeFor("kv", requireKv(msg.ns));
+        const row = kvStmts(store).get.get(part, str(msg.key));
         return row ? { ok: true, found: true, value: row.value } : { ok: true, found: false, value: null };
       }
-      case "kv.put":
-        kvPut.run(requireKv(msg.ns), str(msg.key), str(msg.value));
+      case "kv.put": {
+        const { store, part } = storeFor("kv", requireKv(msg.ns));
+        kvStmts(store).put.run(part, str(msg.key), str(msg.value));
         return { ok: true };
-      case "kv.delete":
-        kvDel.run(requireKv(msg.ns), str(msg.key));
+      }
+      case "kv.delete": {
+        const { store, part } = storeFor("kv", requireKv(msg.ns));
+        kvStmts(store).del.run(part, str(msg.key));
         return { ok: true };
-      case "kv.list":
-        return { ok: true, keys: kvList.all(requireKv(msg.ns), str(msg.prefix)).map((r) => r.key) };
+      }
+      case "kv.list": {
+        const { store, part } = storeFor("kv", requireKv(msg.ns));
+        return { ok: true, keys: kvStmts(store).list.all(part, str(msg.prefix)).map((r) => r.key) };
+      }
       case "secret.get": {
         const name = str(msg.name);
         if (!bindings.secrets.includes(name)) throw new Error(`secret not bound: ${name}`);
@@ -261,10 +337,10 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       }
 
       case "r2.put": {
-        const bucket = requireR2(msg.bucket);
+        const { store, part: bucket } = storeFor("r2", requireR2(msg.bucket));
         const body = str(msg.body);
         const etag = createHash("sha256").update(body).digest("hex");
-        db.query(
+        store.query(
           "INSERT INTO r2 (bucket, key, body, size, etag, uploaded, http_json, custom_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) " +
             "ON CONFLICT (bucket, key) DO UPDATE SET body=?3, size=?4, etag=?5, uploaded=?6, http_json=?7, custom_json=?8",
         ).run(
@@ -281,22 +357,22 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       }
       case "r2.get":
       case "r2.head": {
-        const bucket = requireR2(msg.bucket);
-        const row = db.query<R2Row, [string, string]>("SELECT * FROM r2 WHERE bucket = ? AND key = ?").get(bucket, str(msg.key));
+        const { store, part: bucket } = storeFor("r2", requireR2(msg.bucket));
+        const row = store.query<R2Row, [string, string]>("SELECT * FROM r2 WHERE bucket = ? AND key = ?").get(bucket, str(msg.key));
         if (!row) return { ok: true, found: false };
         return { ok: true, found: true, object: r2Row(row), body: msg.op === "r2.get" ? row.body : undefined };
       }
       case "r2.delete": {
-        const bucket = requireR2(msg.bucket);
-        db.query("DELETE FROM r2 WHERE bucket = ? AND key = ?").run(bucket, str(msg.key));
+        const { store, part: bucket } = storeFor("r2", requireR2(msg.bucket));
+        store.query("DELETE FROM r2 WHERE bucket = ? AND key = ?").run(bucket, str(msg.key));
         return { ok: true };
       }
       case "r2.list": {
-        const bucket = requireR2(msg.bucket);
+        const { store, part: bucket } = storeFor("r2", requireR2(msg.bucket));
         const prefix = str(msg.prefix);
         const cursor = str(msg.cursor);
         const limit = Math.min(Math.max(Number(msg.limit) || 1000, 1), 1000);
-        const rows = db.query<R2Row, [string, string, string, number]>(
+        const rows = store.query<R2Row, [string, string, string, number]>(
           "SELECT * FROM r2 WHERE bucket = ? AND key LIKE ? || '%' AND key > ? ORDER BY key LIMIT ?",
         ).all(bucket, prefix, cursor, limit + 1);
         const truncated = rows.length > limit;
@@ -310,16 +386,16 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       }
 
       case "queue.send": {
-        const q = requireQueue(msg.queue);
+        const { store, part: q } = storeFor("queue", requireQueue(msg.queue));
         const at = Date.now() + Math.max(0, Number(msg.delaySeconds) || 0) * 1000;
-        db.query("INSERT INTO mq (queue, id, body, visible_at) VALUES (?, ?, ?, ?)").run(q, newId(), str(msg.body), at);
+        store.query("INSERT INTO mq (queue, id, body, visible_at) VALUES (?, ?, ?, ?)").run(q, newId(), str(msg.body), at);
         return { ok: true };
       }
       case "queue.send_batch": {
-        const q = requireQueue(msg.queue);
+        const { store, part: q } = storeFor("queue", requireQueue(msg.queue));
         const msgs = Array.isArray(msg.messages) ? (msg.messages as Frame[]) : [];
-        const ins = db.query("INSERT INTO mq (queue, id, body, visible_at) VALUES (?, ?, ?, ?)");
-        db.transaction(() => {
+        const ins = store.query("INSERT INTO mq (queue, id, body, visible_at) VALUES (?, ?, ?, ?)");
+        store.transaction(() => {
           for (const m of msgs) ins.run(q, newId(), str(m.body), Date.now() + Math.max(0, Number(m.delaySeconds) || 0) * 1000);
         })();
         return { ok: true, count: msgs.length };
@@ -444,18 +520,21 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   function drainQueuesOnce(): void {
     if (!opts.sproutUrl || bindings.queues.length === 0) return;
     const now = Date.now();
-    for (const q of bindings.queues) {
-      const rows = db.query<{ id: string; body: string; attempts: number }, [string, number, number]>(
+    for (const binding of bindings.queues) {
+      // `store`/`part` route the rows to this queue's backing file (#74); the
+      // trigger payload still carries the binding name the sprout matches on.
+      const { store, part } = storeFor("queue", binding);
+      const rows = store.query<{ id: string; body: string; attempts: number }, [string, number, number]>(
         "SELECT id, body, attempts FROM mq WHERE queue = ? AND dead = 0 AND visible_at <= ? ORDER BY visible_at LIMIT ?",
-      ).all(q, now, QUEUE_BATCH);
+      ).all(part, now, QUEUE_BATCH);
       if (rows.length === 0) continue;
       // hide the batch so the next tick doesn't re-deliver it while in flight
       const hideUntil = now + 30_000;
-      const hide = db.query("UPDATE mq SET visible_at = ? WHERE id = ?");
+      const hide = store.query("UPDATE mq SET visible_at = ? WHERE id = ?");
       for (const r of rows) hide.run(hideUntil, r.id);
 
       void deliverTrigger("queue", {
-        queue: q,
+        queue: binding,
         messages: rows.map((r) => ({ id: r.id, body: r.body, timestamp: now, attempts: r.attempts + 1 })),
       }).then(async (res) => {
         let ack: string[] = rows.map((r) => r.id); // default: ack all if the sprout did not say
@@ -469,9 +548,9 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         } else {
           ack = []; retry = rows.map((r) => r.id); // delivery failed → retry all
         }
-        const del = db.query("DELETE FROM mq WHERE id = ?");
+        const del = store.query("DELETE FROM mq WHERE id = ?");
         for (const id of ack) del.run(id);
-        const bump = db.query(
+        const bump = store.query(
           "UPDATE mq SET attempts = attempts + 1, visible_at = ?, dead = CASE WHEN attempts + 1 >= ? THEN 1 ELSE 0 END WHERE id = ?",
         );
         for (const id of retry) bump.run(Date.now() + 5_000, QUEUE_MAX_ATTEMPTS, id);
@@ -501,6 +580,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     close: () => {
       for (const t of timers) clearInterval(t);
       for (const conn of d1Conns.values()) conn.close();
+      for (const conn of resourceDbs.values()) conn.close();
       db.close();
     },
   };
@@ -572,6 +652,7 @@ if (import.meta.main) {
       token: { type: "string" },
       db: { type: "string" },
       "data-dir": { type: "string" },
+      "resource-dir": { type: "string" },
       bindings: { type: "string" },
       secrets: { type: "string" },
       "sprout-url": { type: "string" },
@@ -587,6 +668,7 @@ if (import.meta.main) {
   const broker = createBroker({
     db: values.db,
     dataDir: values["data-dir"],
+    resourceDir: values["resource-dir"],
     token: values.token ?? process.env.SB_BROKER_TOKEN,
     bindings,
     secrets,
