@@ -39,21 +39,8 @@ function jsonObject(value: JsonValue): JsonObject | undefined {
   return value instanceof Object && !Array.isArray(value) ? value : undefined;
 }
 
-type DeploymentSummary = { artifact: string; hostname: string; active: boolean };
 type VersionSummary = { id: string; artifact: string; deployedAt: string; active: boolean };
 type CliAuthorization = { deviceCode: string; userCode: string; verificationUri: string; interval: number; expiresAt: string };
-
-function parseDeploymentList(source: string): DeploymentSummary[] | undefined {
-  const value = parseJsonValue(source);
-  if (!Array.isArray(value)) return undefined;
-  const deployments: DeploymentSummary[] = [];
-  for (const item of value) {
-    const record = jsonObject(item);
-    if (!record || !isString(record.artifact) || !isString(record.hostname) || (record.active !== true && record.active !== false)) return undefined;
-    deployments.push({ artifact: record.artifact, hostname: record.hostname, active: record.active });
-  }
-  return deployments;
-}
 
 function parseVersionList(source: string): VersionSummary[] | undefined {
   const value = parseJsonValue(source);
@@ -67,13 +54,14 @@ function parseVersionList(source: string): VersionSummary[] | undefined {
   return deployments;
 }
 
-function parseUrlResponse(source: string): { url: string; id?: string; artifact?: string } | undefined {
+function parseUrlResponse(source: string): { url: string; id?: string; artifact?: string; unchanged: boolean } | undefined {
   const record = jsonObject(parseJsonValue(source));
   if (!record || !isString(record.url)) return undefined;
   return {
     url: record.url,
     id: isString(record.id) ? record.id : undefined,
     artifact: isString(record.artifact) ? record.artifact : undefined,
+    unchanged: record.unchanged === true,
   };
 }
 
@@ -263,23 +251,6 @@ async function deploy(args: string[]) {
     return;
   }
   const { apiUrl, token } = await apiCredentials();
-  const digest = artifactManifest.binaryHash.replace(/^sha256:/, "");
-  // The "already active" shortcut keys on the sprout binary hash alone. Assets
-  // and bindings.json can change while the handler stays byte-identical, so skip
-  // it whenever the artifact ships either sidecar (or the caller passed --force).
-  const hasSidecars = (await Bun.file(resolve(artifactDir, "assets.json")).exists())
-    || (await Bun.file(resolve(artifactDir, "bindings.json")).exists());
-  if (digest && !hasSidecars && !args.includes("--force")) {
-    const response = await fetch(`${apiUrl.replace(/\/$/, "")}/api/projects/${projectName}/deployments`, { headers: { "x-api-key": token } });
-    const deployments = parseDeploymentList(await responseText(response, "could not check existing deployments"));
-    if (!deployments) fail("could not parse deployment list response");
-    const active = deployments.find((deployment) => deployment.active && deployment.artifact === digest);
-    if (active) {
-      console.log(ok(`nothing to deploy — artifact ${digest.slice(0, 12)} is already active`));
-      console.log(`https://${active.hostname}`);
-      return;
-    }
-  }
   const form = new FormData();
   form.set("manifest", new File([await manifest.arrayBuffer()], "manifest.json", { type: "application/json" }));
   form.set("sprout", new File([await sprout.arrayBuffer()], "sprout", { type: "application/octet-stream" }));
@@ -310,6 +281,11 @@ async function deploy(args: string[]) {
   const body = await responseText(response, "deployment rejected");
   const deployed = parseUrlResponse(body);
   if (!deployed) fail("deployment response did not include a URL");
+  if (deployed.unchanged) {
+    console.log(ok(`nothing to deploy — ${projectName} is already serving this exact artifact`));
+    console.log(`  ${deployed.url}`);
+    return;
+  }
   console.log(`\n${leaf("🌱")} ${bold(leaf(`Deployed ${projectName}`))}`);
   console.log(`  ${bold(deployed.url)}`);
   if (deployed.id) console.log(dim(`  version ${deployed.id}${deployed.artifact ? `  ·  artifact ${deployed.artifact.slice(0, 12)}` : ""}`));
