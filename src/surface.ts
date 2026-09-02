@@ -31,8 +31,8 @@ export const COMMANDS: readonly Command[] = [
     summary: "Cross-compile the native-fetch sprout (Porffor + Zig)." },
 
   { name: "deploy", group: "Ship", emoji: "🚀",
-    args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision]", brief: "[project-dir] [--dry-run]",
-    summary: "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores." },
+    args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] [--force]", brief: "[project-dir] [--dry-run]",
+    summary: "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores; --force uploads even if the sprout binary is unchanged." },
   { name: "versions", group: "Ship", emoji: "📜", args: "list [project-dir]",
     summary: "List the project's deployed versions." },
   { name: "rollback", group: "Ship", emoji: "⏮", args: "<version-id> [project-dir]", brief: "<version-id>",

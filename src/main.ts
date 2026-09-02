@@ -264,7 +264,12 @@ async function deploy(args: string[]) {
   }
   const { apiUrl, token } = await apiCredentials();
   const digest = artifactManifest.binaryHash.replace(/^sha256:/, "");
-  if (digest) {
+  // The "already active" shortcut keys on the sprout binary hash alone. Assets
+  // and bindings.json can change while the handler stays byte-identical, so skip
+  // it whenever the artifact ships either sidecar (or the caller passed --force).
+  const hasSidecars = (await Bun.file(resolve(artifactDir, "assets.json")).exists())
+    || (await Bun.file(resolve(artifactDir, "bindings.json")).exists());
+  if (digest && !hasSidecars && !args.includes("--force")) {
     const response = await fetch(`${apiUrl.replace(/\/$/, "")}/api/projects/${projectName}/deployments`, { headers: { "x-api-key": token } });
     const deployments = parseDeploymentList(await responseText(response, "could not check existing deployments"));
     if (!deployments) fail("could not parse deployment list response");
