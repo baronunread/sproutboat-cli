@@ -266,11 +266,10 @@ async function deploy(args: string[]) {
     console.warn(dim(`  The previous live version stays frozen at ${drift.from}; this one is built with ${drift.to}.`));
     console.warn(dim(`  The alpha compiler's output can differ between pins (see COMPAT.md) — roll back if this version misbehaves.`));
   }
-  if (!args.includes("--no-wait")) {
-    const healthy = await waitForHealthy(deployed.url, 90_000);
-    console.log(healthy
-      ? `  ${ok("serving")}`
-      : amber("  ! not serving after 90s — Caddy may still be issuing the cert, or the sprout is crashing (`sproutboat tail`)"));
+  // Verify the edge actually answers (cert issuance + sprout boot). Say nothing
+  // on success — "Deployed" already implied that; only speak up if it doesn't.
+  if (!args.includes("--no-wait") && !(await waitForHealthy(deployed.url, 90_000))) {
+    console.warn(amber("  ! not serving after 90s — Caddy may still be issuing the cert, or the sprout is crashing (`sproutboat tail`)"));
   }
 }
 
