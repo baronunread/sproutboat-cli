@@ -59,12 +59,29 @@ export async function activeApiUrl(): Promise<string | undefined> {
   return (await readCredentials()).activeApiUrl;
 }
 
+/** #79 `logout`: drop one endpoint's token. Returns false when none was stored. */
+export async function forgetToken(apiUrl: string): Promise<boolean> {
+  const credentials = await readCredentials();
+  if (!credentials.profiles[apiUrl]) return false;
+  delete credentials.profiles[apiUrl];
+  if (credentials.activeApiUrl === apiUrl) {
+    credentials.activeApiUrl = Object.keys(credentials.profiles)[0];
+  }
+  await writeCredentials(credentials);
+  return true;
+}
+
 export async function saveToken(apiUrl: string, token: string): Promise<void> {
-  const directory = configDirectory();
-  const path = credentialsPath();
   const credentials = await readCredentials();
   credentials.profiles[apiUrl] = { token };
   credentials.activeApiUrl = apiUrl;
+  await writeCredentials(credentials);
+}
+
+/** Atomic 0600 write of the whole credentials file. */
+async function writeCredentials(credentials: Credentials): Promise<void> {
+  const directory = configDirectory();
+  const path = credentialsPath();
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
   const temporary = `${path}.tmp-${crypto.randomUUID()}`;

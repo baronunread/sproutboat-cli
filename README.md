@@ -38,12 +38,23 @@ of that file).
 | `deploy [--dry-run] [--no-wait] [--no-provision] [--artifact <dir>]` | Build, auto-provision id-less storage bindings, upload, wait until the URL serves |
 | `login [--api-url <url>] [--token <token>]` | Browser device flow, or store a token directly |
 | `tail [name] [--sprout]` | Recent request logs; `--sprout` streams the running sprout + broker output |
-| `versions list [name]` | Deployed versions |
+| `versions <list \| view <id>>` | Deployed versions, or one version's artifact and bindings |
 | `rollback <id>` | Activate a previous version |
-| `secrets [list \| set <NAME> [value] \| rm <NAME>]` | Encrypted project secrets, read as `env.NAME` |
-| `resource [list \| create <kind> <name> \| rename <id> <name> \| delete <id>]` | Account-level KV / D1 / R2 / queue stores |
-| `domains [list \| add <host> \| verify <host> \| rm <host>]` | Attach your own hostname (TXT + A, apex allowed) |
+| `logout [--api-url <url>]` | Forget the stored credential |
+| `whoami` | Active endpoint and the account the token belongs to |
+| `kv <list \| create \| info \| rename \| delete>` | KV namespaces |
+| `d1 <list \| create \| info \| rename \| delete>` | D1 databases |
+| `r2 <list \| create \| info \| rename \| delete>` | R2 buckets |
+| `queues <list \| create \| info \| rename \| delete>` | Queues |
+| `secrets <list \| put <NAME> [--value <v>] \| delete <NAME>>` | Encrypted project secrets, read as `env.NAME` |
+| `domains <list \| add <host> \| verify <host> \| delete <host>>` | Attach your own hostname (TXT + A, apex allowed) |
 | `delete --yes` | Delete the project, every version, and its route |
+
+Each storage product is its own command with the same five verbs. Wrangler nests
+two of its four (`kv namespace create`, `r2 bucket create`) and leaves the other
+two flat; the nesting separates a container from its contents, which the verb
+already does, so ours are uniform. Contents get their own noun when they arrive
+(`kv key get`, `r2 object put`).
 
 Run `sproutboat` with no arguments for the grouped list.
 [`SURFACE.md`](SURFACE.md) is the generated inventory of every command and env var.
@@ -75,7 +86,7 @@ Run `sproutboat` with no arguments for the grouped list.
 A bare `"CACHE"` binding is auto-provisioned on `deploy`: the CLI creates an
 account-level resource, writes its id back into `sproutboat.jsonc`, and the
 store then survives redeploys. Pass `--no-provision` to keep it a throwaway
-per-deploy store instead, or `sproutboat resource create` to make one up front
+per-deploy store instead, or `sproutboat kv create <name>` (or `d1`/`r2`/`queues`) to make one up front
 and share its id across projects.
 
 The handler is one `export default { fetch(request) }`, optionally with

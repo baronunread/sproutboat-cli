@@ -11,7 +11,7 @@
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { CLI_NAME, COMMANDS, ENV_VARS, usageLine } from "./surface";
+import { CLI_NAME, COMMANDS, ENV_VARS, STORAGE_PRODUCTS, STORAGE_VERBS, usageLine } from "./surface";
 import { ARTIFACT_SCHEMA_VERSION, CAPABILITY_PROFILE, RUNTIME } from "./manifest";
 import { ZIG_VERSION, toolchainStamp } from "./toolchain";
 
@@ -75,7 +75,7 @@ test("SURFACE.md is up to date", () => {
 
 test("the command switch and COMMANDS agree", () => {
   const main = readFileSync(resolve(srcDir, "main.ts"), "utf8");
-  const switched = new Set([...main.matchAll(/case "([a-z-]+)":/g)].map((m) => m[1]));
+  const switched = new Set([...main.matchAll(/case "([a-z0-9-]+)":/g)].map((m) => m[1]));
   const documented = new Set(COMMANDS.map((c) => c.name));
   expect([...switched].sort()).toEqual([...documented].sort());
 });
@@ -106,4 +106,24 @@ test("no COMMANDS entry documents an env var that src/ never reads", () => {
   }
   const stale = ENV_VARS.map((e) => e.name).filter((name) => !referenced.has(name));
   expect(stale, `ENV_VARS lists names not found anywhere in src/: ${stale.join(", ")}`).toEqual([]);
+});
+
+/**
+ * #79 — the storage products are the CLI's one place where four commands must
+ * stay identical. These guard the promise the help text makes.
+ */
+test("every storage product is a command with the same verbs", () => {
+  const documented = new Set(COMMANDS.filter((c) => c.group === "Storage").map((c) => c.name));
+  expect([...documented].sort()).toEqual([...STORAGE_PRODUCTS.map((p) => p.name)].sort());
+
+  const briefs = new Set(COMMANDS.filter((c) => c.group === "Storage").map((c) => c.brief));
+  expect(briefs.size, "storage products must offer an identical verb set").toBe(1);
+  expect([...briefs][0]).toBe(`<${STORAGE_VERBS.join(" | ")}>`);
+});
+
+test("main.ts dispatches every storage product to the shared handler", () => {
+  const main = readFileSync(resolve(srcDir, "main.ts"), "utf8");
+  for (const product of STORAGE_PRODUCTS) {
+    expect(main, `no dispatch case for ${product.name}`).toContain(`case "${product.name}":`);
+  }
 });

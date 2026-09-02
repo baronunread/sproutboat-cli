@@ -9,7 +9,7 @@ export const CLI_NAME = "sproutboat";
 export const TAGLINE = "Deploy JavaScript handlers as tiny native binaries on your own VPS.";
 export const REPO_URL = "https://github.com/baronunread/sproutboat";
 
-export type Group = "Develop" | "Ship" | "Configure" | "Account";
+export type Group = "Develop" | "Ship" | "Storage" | "Configure" | "Account";
 
 export type Command = {
   name: string;
@@ -22,6 +22,46 @@ export type Command = {
   summary: string;
 };
 
+/**
+ * The storage products. Each is its own command with the same five verbs over
+ * its own `/api/<segment>` collection.
+ *
+ * Wrangler nests two of its four (`kv namespace create`, `r2 bucket create`)
+ * and leaves `d1 create` and `queues create` flat. That nesting separates a
+ * container from its contents, which the verb already does — so ours are
+ * uniform, and contents take their own noun when they exist (`kv key get`).
+ */
+export type StorageProduct = {
+  /** Command name, URL segment, and the dashboard's product page. */
+  name: "kv" | "d1" | "r2" | "queues";
+  /** One of them, for buttons and messages: "namespace", "bucket". */
+  noun: string;
+  /** Many of them, for list output and empty states. */
+  plural: string;
+  emoji: string;
+};
+
+export const STORAGE_PRODUCTS: readonly StorageProduct[] = [
+  { name: "kv", noun: "namespace", plural: "KV namespaces", emoji: "🗄" },
+  { name: "d1", noun: "database", plural: "D1 databases", emoji: "🛢" },
+  { name: "r2", noun: "bucket", plural: "R2 buckets", emoji: "🪣" },
+  { name: "queues", noun: "queue", plural: "queues", emoji: "📨" },
+];
+
+/** Every storage product answers to exactly these, in this order. */
+export const STORAGE_VERBS = ["list", "create", "info", "rename", "delete"] as const;
+
+const STORAGE_ARGS = "<list | create <name> | info <name> | rename <name> <new> | delete <name>>";
+
+const storageCommands: readonly Command[] = STORAGE_PRODUCTS.map((product) => ({
+  name: product.name,
+  group: "Storage" as const,
+  emoji: product.emoji,
+  args: STORAGE_ARGS,
+  brief: `<${STORAGE_VERBS.join(" | ")}>`,
+  summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "queues" ? "; consumers are not implemented yet" : ""}.`,
+}));
+
 export const COMMANDS: readonly Command[] = [
   { name: "init", group: "Develop", emoji: "🌱", args: "[name]",
     summary: "Scaffold sproutboat.jsonc + src/index.js in ./<name>." },
@@ -33,28 +73,31 @@ export const COMMANDS: readonly Command[] = [
   { name: "deploy", group: "Ship", emoji: "🚀",
     args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision]", brief: "[project-dir] [--dry-run]",
     summary: "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores." },
-  { name: "versions", group: "Ship", emoji: "📜", args: "list [project-dir]",
-    summary: "List the project's deployed versions." },
+  { name: "versions", group: "Ship", emoji: "📜", args: "<list | view <version-id>> [project-dir]", brief: "<list | view>",
+    summary: "List the project's deployed versions, or show one version's artifact and bindings." },
   { name: "rollback", group: "Ship", emoji: "⏮", args: "<version-id> [project-dir]", brief: "<version-id>",
     summary: "Re-activate a previous version." },
   { name: "tail", group: "Ship", emoji: "📡", args: "[project-dir] [--sprout]",
     summary: "Print recent request logs; --sprout prints the running sprout + broker stdout/stderr instead." },
 
+  ...storageCommands,
+
   { name: "domains", group: "Configure", emoji: "🌐",
-    args: "[list | add <host> | verify <host> | rm <host>] [project-dir]", brief: "[list | add | verify | rm]",
+    args: "<list | add <host> | verify <host> | delete <host>> [project-dir]", brief: "<list | add | verify | delete>",
     summary: "Attach a custom domain to the project (TXT-verified). No sub-command lists." },
   { name: "secrets", group: "Configure", emoji: "🔑",
-    args: "[list | set <NAME> [value] | rm <NAME>] [project-dir]", brief: "[list | set | rm]",
-    summary: "Manage encrypted project secrets (read as env.NAME). `set` takes the value from the arg or stdin; applies on next deploy." },
-  { name: "resource", group: "Configure", emoji: "📦",
-    args: "[list [kind] | create <kind> <name> | rename <id> <name> | delete <id>]", brief: "[list | create | rename | delete]",
-    summary: "Manage account-level storage resources (kv | d1 | r2 | queue). `create` prints the id to reference from sproutboat.jsonc bindings." },
+    args: "<list | put <NAME> [--value <value>] | delete <NAME>> [project-dir]", brief: "<list | put | delete>",
+    summary: "Manage encrypted project secrets (read as env.NAME). `put` reads the value from stdin unless --value is given, so it stays out of shell history; applies on next deploy." },
   { name: "delete", group: "Configure", emoji: "🗑",
     args: "[project-dir] [--name <project>] --yes", brief: "[project-dir] --yes",
     summary: "Delete the project, every version, and its route." },
 
   { name: "login", group: "Account", emoji: "🔓", args: "[--api-url <url>] [--token <token>]", brief: "[--token <token>]",
     summary: "Device-code browser flow, or store <token> for <url> directly." },
+  { name: "logout", group: "Account", emoji: "🔒", args: "[--api-url <url>]",
+    summary: "Forget the stored credential for the active endpoint, or for <url>." },
+  { name: "whoami", group: "Account", emoji: "👤", args: "",
+    summary: "Show the active endpoint and the account the stored token belongs to." },
 ];
 
 export type EnvVar = { name: string; purpose: string };
@@ -77,7 +120,7 @@ export const ENV_VARS: readonly EnvVar[] = [
   { name: "SB_SPROUT_URL", purpose: "http://127.0.0.1:<PORT> of the sprout; when set, `src/broker.ts` runs the cron scheduler and queue consumer and delivers triggers to it." },
 ];
 
-const GROUP_ORDER: readonly Group[] = ["Develop", "Ship", "Configure", "Account"];
+const GROUP_ORDER: readonly Group[] = ["Develop", "Ship", "Storage", "Configure", "Account"];
 
 /** One-line usage string, e.g. for `usage()` and SURFACE.md. */
 export function usageLine(): string {
