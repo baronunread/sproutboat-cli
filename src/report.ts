@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { gzipSync } from "bun";
-import type { SproutboatConfig } from "./config";
+import { resourceRefs, type SproutboatConfig } from "./config";
 import type { ArtifactManifest } from "./manifest";
 import { bold, dim, leaf, sprout } from "./style";
 
@@ -33,11 +33,16 @@ function bindingRows(config: SproutboatConfig): string[][] {
   const list = (names: string[] | undefined, type: string, detail = "") => {
     for (const name of names ?? []) rows.push([`env.${name}`, type, detail]);
   };
-  list(config.kv_namespaces, "kv");
+  const resourceList = (refs: Parameters<typeof resourceRefs>[0], type: string) => {
+    for (const ref of resourceRefs(refs)) {
+      rows.push([`env.${ref.binding}`, type, ref.id ?? "no id — local dev only, a deploy needs `sproutboat resource create`"]);
+    }
+  };
+  resourceList(config.kv_namespaces, "kv");
   list(config.secrets, "secret", "value withheld — set with `sproutboat secrets`");
-  list(config.d1_databases, "d1");
-  list(config.r2_buckets, "r2");
-  list(config.queues, "queue");
+  resourceList(config.d1_databases, "d1");
+  resourceList(config.r2_buckets, "r2");
+  resourceList(config.queues, "queue");
   list(config.analytics_engine_datasets, "analytics");
   for (const [name, className] of Object.entries(config.durable_objects ?? {})) rows.push([`env.${name}`, "durable object", className]);
   for (const host of config.outbound ?? []) rows.push([`fetch()`, "outbound", host]);

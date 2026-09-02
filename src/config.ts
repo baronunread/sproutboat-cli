@@ -1,24 +1,38 @@
 const slugPattern = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/;
 
+/**
+ * A storage binding entry (#74). Either a bare `"BINDING"` — resolved to an
+ * ephemeral local resource for `sproutboat dev`, rejected by a real deploy — or
+ * `{ binding, id }` pointing at an account-level resource created with
+ * `sproutboat resource create`. The id carries its own `<kind>_` prefix.
+ */
+export type ResourceBinding = { binding: string; id: string };
+export type ResourceRef = string | ResourceBinding;
+
+/** Normalizes a storage-binding array to `{ binding, id? }` rows. */
+export function resourceRefs(field: readonly ResourceRef[] | undefined): Array<{ binding: string; id?: string }> {
+  return (field ?? []).map((entry) => (isString(entry) ? { binding: entry } : { binding: entry.binding, id: entry.id }));
+}
+
 export type SproutboatConfig = {
   $schema?: string;
   name: string;
   main: string;
   compatibility_date: string;
   vars?: Record<string, string>;
-  /** KV namespace binding names, exposed as `env.<NAME>`. */
-  kv_namespaces?: string[];
+  /** KV namespace bindings, exposed as `env.<NAME>`. */
+  kv_namespaces?: ResourceRef[];
   /** Secret binding names, exposed as `env.<NAME>` (value fetched at use). */
   secrets?: string[];
   /** Hostnames the sprout's `fetch()` may reach (exact host match). */
   outbound?: string[];
-  /** D1 (SQLite) database binding names, exposed as `env.<NAME>`. */
-  d1_databases?: string[];
-  /** R2 (object storage) bucket binding names, exposed as `env.<NAME>`. */
-  r2_buckets?: string[];
-  /** Queue producer binding names, exposed as `env.<NAME>.send()`. A `queue(batch)` handler consumes them. */
-  queues?: string[];
-  /** Analytics Engine dataset binding names, exposed as `env.<NAME>.writeDataPoint()`. */
+  /** D1 (SQLite) database bindings, exposed as `env.<NAME>`. */
+  d1_databases?: ResourceRef[];
+  /** R2 (object storage) bucket bindings, exposed as `env.<NAME>`. */
+  r2_buckets?: ResourceRef[];
+  /** Queue producer bindings, exposed as `env.<NAME>.send()`. A `queue(batch)` handler consumes them. */
+  queues?: ResourceRef[];
+  /** Analytics Engine dataset binding names, exposed as `env.<NAME>.writeDataPoint()`. No id — the dataset is created on first write. */
   analytics_engine_datasets?: string[];
   /** Durable Object bindings: `{ BINDING_NAME: "ClassName" }`. The class is defined in the handler module. */
   durable_objects?: Record<string, string>;
@@ -101,7 +115,7 @@ function validateConfig(value: ConfigInput): ConfigValidation {
   const bindingName = /^[A-Z][A-Z0-9_]*$/;
   const hostPattern = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
   const stringArray = (
-    field: "kv_namespaces" | "secrets" | "outbound" | "d1_databases" | "r2_buckets" | "queues" | "analytics_engine_datasets",
+    field: "secrets" | "outbound" | "analytics_engine_datasets",
     item: RegExp,
     label: string,
   ): string[] | undefined => {
@@ -118,13 +132,48 @@ function validateConfig(value: ConfigInput): ConfigValidation {
     }
     return out;
   };
-  const kv_namespaces = stringArray("kv_namespaces", bindingName, "binding names (UPPER_SNAKE_CASE)");
+
+  /**
+   * A storage-binding array (#74): each entry is a bare `"BINDING"` or
+   * `{ binding: "BINDING", id: "<kind>_<24hex>" }`. `kind` is the field's own
+   * resource kind, so an r2 id can't be pasted into `kv_namespaces`.
+   */
+  const resourceArray = (
+    field: "kv_namespaces" | "d1_databases" | "r2_buckets" | "queues",
+    kind: string,
+  ): ResourceRef[] | undefined => {
+    if (value[field] === undefined) return undefined;
+    const raw = value[field];
+    if (!Array.isArray(raw)) {
+      errors.push(`${field} must be an array of binding names or { binding, id } objects`);
+      return undefined;
+    }
+    const idPattern = new RegExp(`^${kind}_[0-9a-f]{24}$`);
+    const out: ResourceRef[] = [];
+    for (const entry of raw) {
+      if (isString(entry)) {
+        if (bindingName.test(entry)) out.push(entry);
+        else errors.push(`${field}: "${entry}" must be an UPPER_SNAKE binding name`);
+      } else if (isRecord(entry) && isString(entry.binding) && isString(entry.id)
+        && bindingName.test(entry.binding) && idPattern.test(entry.id)
+        && Object.keys(entry).every((key) => key === "binding" || key === "id")) {
+        out.push({ binding: entry.binding, id: entry.id });
+      } else {
+        errors.push(`${field} entries must be an UPPER_SNAKE name or { binding: "NAME", id: "${kind}_…" }`);
+      }
+    }
+    return out;
+  };
+
   const secrets = stringArray("secrets", bindingName, "binding names (UPPER_SNAKE_CASE)");
   const outbound = stringArray("outbound", hostPattern, "hostnames");
-  const d1_databases = stringArray("d1_databases", bindingName, "binding names (UPPER_SNAKE_CASE)");
-  const r2_buckets = stringArray("r2_buckets", bindingName, "binding names (UPPER_SNAKE_CASE)");
-  const queues = stringArray("queues", bindingName, "binding names (UPPER_SNAKE_CASE)");
+  // Analytics Engine datasets aren't provisioned — the dataset name springs into
+  // existence on first writeDataPoint(), so there's no resource id to bind (#74).
   const analytics_engine_datasets = stringArray("analytics_engine_datasets", bindingName, "binding names (UPPER_SNAKE_CASE)");
+  const kv_namespaces = resourceArray("kv_namespaces", "kv");
+  const d1_databases = resourceArray("d1_databases", "d1");
+  const r2_buckets = resourceArray("r2_buckets", "r2");
+  const queues = resourceArray("queues", "queue");
 
   let durable_objects: Record<string, string> | undefined;
   if (value.durable_objects !== undefined) {
@@ -190,9 +239,11 @@ function validateConfig(value: ConfigInput): ConfigValidation {
     }
   }
 
+  const resourceNames = (refs: ResourceRef[] | undefined): string[] =>
+    resourceRefs(refs).map((ref) => ref.binding);
   const bindingSlots = [
-    ...(kv_namespaces ?? []), ...(secrets ?? []), ...(d1_databases ?? []), ...(r2_buckets ?? []),
-    ...(queues ?? []), ...(analytics_engine_datasets ?? []), ...Object.keys(durable_objects ?? {}), ...Object.keys(vars ?? {}),
+    ...resourceNames(kv_namespaces), ...(secrets ?? []), ...resourceNames(d1_databases), ...resourceNames(r2_buckets),
+    ...resourceNames(queues), ...(analytics_engine_datasets ?? []), ...Object.keys(durable_objects ?? {}), ...Object.keys(vars ?? {}),
     ...(assets?.binding ? [assets.binding] : []),
   ];
   if (new Set(bindingSlots).size !== bindingSlots.length) errors.push("vars and binding names must not collide");
