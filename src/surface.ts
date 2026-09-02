@@ -66,6 +66,7 @@ export const ENV_VARS: readonly EnvVar[] = [
   { name: "SPROUTBOAT_BINDINGS_JSON", purpose: "The artifact's bindings.json, read by the wrapper to emit the `__sbInstallBindings` line." },
   { name: "SPROUTBOAT_CONFIG_DIR", purpose: "Directory for credentials.json (default ~/.config/sproutboat)." },
   { name: "NO_COLOR", purpose: "When set, disables coloured terminal output (https://no-color.org). Output is also plain whenever stdout is not a TTY." },
+  { name: "SPROUTBOAT_NO_UPDATE_CHECK", purpose: "When set, skips the once-a-day npm check for a newer `sproutboat` release (also skipped when CI is set)." },
   { name: "XDG_CONFIG_HOME", purpose: "Base for the default credentials dir when SPROUTBOAT_CONFIG_DIR is unset." },
   { name: "PORFFOR_VERSION", purpose: "Override the Porffor identity string recorded in the manifest." },
   { name: "SB_BROKER_PORT", purpose: "Loopback port of the binding broker, read by the compiled sprout at runtime (set by the control plane, or by `src/broker.ts` for local runs)." },

@@ -28,7 +28,7 @@ function parseCredentials(value: JsonValue): Credentials | undefined {
   return { version: 1, activeApiUrl: isString(input.activeApiUrl) ? input.activeApiUrl : undefined, profiles };
 }
 
-function configDirectory(): string {
+export function configDirectory(): string {
   const configured = process.env.SPROUTBOAT_CONFIG_DIR || process.env.XDG_CONFIG_HOME;
   if (configured && isAbsolute(configured)) return resolve(configured, "sproutboat");
   return resolve(homedir(), ".config", "sproutboat");

@@ -88,8 +88,8 @@ test("every env var read in src/ is documented in ENV_VARS", () => {
     const text = readFileSync(resolve(srcDir, file), "utf8");
     for (const m of text.matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)) {
       const name = m[1];
-      // internal/plumbing vars that aren't part of the user-facing contract
-      if (name === "PATH" || name === "HOME") continue;
+      // internal/plumbing + ambient vars that aren't part of the user-facing contract
+      if (name === "PATH" || name === "HOME" || name === "CI") continue;
       seen.add(name);
     }
   }

@@ -5,9 +5,10 @@ import { parseConfig, type SproutboatConfig } from "./config";
 import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
 import { validateManifest, type ArtifactManifest } from "./manifest";
-import { printDeployReport } from "./report";
+import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, savedToken, saveToken } from "./credentials";
-import { helpText, usageLine } from "./surface";
+import { helpText } from "./surface";
+import { notifyIfOutdated } from "./update-check";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
 
 const defaultApiUrl = "https://dashboard.sproutboat.com";
@@ -66,9 +67,14 @@ function parseVersionList(source: string): VersionSummary[] | undefined {
   return deployments;
 }
 
-function parseUrlResponse(source: string): { url: string } | undefined {
+function parseUrlResponse(source: string): { url: string; id?: string; artifact?: string } | undefined {
   const record = jsonObject(parseJsonValue(source));
-  return record && isString(record.url) ? { url: record.url } : undefined;
+  if (!record || !isString(record.url)) return undefined;
+  return {
+    url: record.url,
+    id: isString(record.id) ? record.id : undefined,
+    artifact: isString(record.artifact) ? record.artifact : undefined,
+  };
 }
 
 /** #55: `{ from, to }` when this deploy moves the live version onto a different
@@ -106,9 +112,20 @@ const starterHandler = `export default {
 };
 `;
 
+/** An operational failure — the command was invoked correctly but could not complete. Exit 1. */
 function fail(message: string): never {
   console.error(`${rose("✗")} ${message}`);
   process.exit(1);
+}
+
+/**
+ * The command was invoked wrong (missing/unknown arg). Exit 2, the getopt/argparse
+ * convention, so scripts can tell "you typed it wrong" apart from "it broke".
+ * `usage` is the grammar line without the `usage: ` prefix.
+ */
+function usageError(what: string, usage: string): never {
+  console.error(`${rose("✗")} ${what}\n  ${dim(`usage: sproutboat ${usage}`)}`);
+  process.exit(2);
 }
 
 async function readProject(directory = process.cwd()) {
@@ -168,7 +185,9 @@ async function deploy(args: string[]) {
   let artifactDir: string;
   let config: SproutboatConfig | undefined;
   if (artifactIndex >= 0) {
-    artifactDir = args[artifactIndex + 1] ? resolve(args[artifactIndex + 1]) : fail("--artifact requires a directory");
+    artifactDir = args[artifactIndex + 1]
+      ? resolve(args[artifactIndex + 1])
+      : usageError("deploy: --artifact needs a directory", "deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait]");
     projectName = "";
   } else {
     const built = await build(directory);
@@ -239,6 +258,8 @@ async function deploy(args: string[]) {
   if (!deployed) fail("deployment response did not include a URL");
   console.log(`\n${leaf("🌱")} ${bold(leaf(`Deployed ${projectName}`))}`);
   console.log(`  ${bold(deployed.url)}`);
+  if (deployed.id) console.log(dim(`  version ${deployed.id}${deployed.artifact ? `  ·  artifact ${deployed.artifact.slice(0, 12)}` : ""}`));
+  for (const cron of config?.triggers?.crons ?? []) console.log(dim(`  schedule ${cron}`));
   const drift = parsePorfforDrift(body);
   if (drift) {
     console.warn(amber(`\n! Porffor pin changed: ${drift.from} -> ${drift.to}`));
@@ -280,7 +301,7 @@ function parseLoginArgs(args: string[]) {
     const value = args[index + 1];
     if (args[index] === "--api-url" && value) apiUrl = value;
     else if (args[index] === "--token" && value) token = value;
-    else fail("usage: sproutboat login [--api-url <url>] [--token <token>]");
+    else usageError(`login: unexpected argument "${args[index]}"`, "login [--api-url <url>] [--token <token>]");
   }
   return { apiUrl: apiUrl.replace(/\/$/, ""), token };
 }
@@ -331,7 +352,7 @@ async function apiCredentials() {
 }
 
 async function versions(args: string[]) {
-  if (args[0] !== "list") fail("usage: sproutboat versions list [project-directory]");
+  if (args[0] !== "list") usageError(args[0] ? `versions: unknown subcommand "${args[0]}"` : "versions: missing subcommand", "versions list [project-dir]");
   const [project, { apiUrl, token }] = await Promise.all([readProject(args[1]), apiCredentials()]);
   const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/deployments`, { headers: { "x-api-key": token } });
   const deployments = parseVersionList(await responseText(response, "could not list versions"));
@@ -341,7 +362,7 @@ async function versions(args: string[]) {
 
 async function rollback(args: string[]) {
   const id = args[0];
-  if (!id) fail("usage: sproutboat rollback <version-id> [project-directory]");
+  if (!id) usageError("rollback: missing <version-id>", "rollback <version-id> [project-dir]");
   const [project, { apiUrl, token }] = await Promise.all([readProject(args[1]), apiCredentials()]);
   const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/deployments/${id}/activate`, { method: "POST", headers: { "x-api-key": token } });
   const deployment = parseUrlResponse(await responseText(response, "rollback rejected"));
@@ -379,7 +400,7 @@ function printDomain(domain: DomainView) {
 async function domains(args: string[]) {
   const sub = args[0] && !args[0].startsWith("-") && ["list", "add", "verify", "rm"].includes(args[0]) ? args.shift()! : "list";
   const host = sub === "list" ? undefined : args.shift();
-  if (sub !== "list" && !host) fail(`usage: sproutboat domains ${sub} <hostname> [project-dir]`);
+  if (sub !== "list" && !host) usageError(`domains ${sub}: missing <hostname>`, `domains ${sub} <hostname> [project-dir]`);
   const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
   const base = `${apiUrl}/api/projects/${project.config.name}/domains`;
   const auth = { "x-api-key": token };
@@ -412,7 +433,7 @@ async function domains(args: string[]) {
 async function secrets(args: string[]) {
   const sub = args[0] && ["list", "set", "rm"].includes(args[0]) ? args.shift()! : "list";
   const name = sub === "list" ? undefined : args.shift();
-  if (sub !== "list" && !name) fail(`usage: sproutboat secrets ${sub} <NAME> [project-dir]`);
+  if (sub !== "list" && !name) usageError(`secrets ${sub}: missing <NAME>`, `secrets ${sub} <NAME> [project-dir]`);
   if (name && !/^[A-Z][A-Z0-9_]*$/.test(name)) fail("secret name must be UPPER_SNAKE_CASE");
   const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
   const base = `${apiUrl}/api/projects/${project.config.name}/secrets`;
@@ -452,7 +473,7 @@ async function deleteProject(args: string[]) {
     if (arg === "--yes" || arg === "-y") confirmed = true;
     else if (arg === "--name") explicitName = args[(index += 1)];
     else if (!arg.startsWith("-")) positional.push(arg);
-    else fail(`unknown flag ${arg}\nusage: sproutboat delete [project-dir] [--name <project>] --yes`);
+    else usageError(`delete: unknown flag "${arg}"`, "delete [project-dir] [--name <project>] --yes");
   }
 
   const { apiUrl, token } = await apiCredentials();
@@ -479,14 +500,18 @@ function help(): never {
   process.exit(0);
 }
 
-/** An unrecognised command: a short pointer on stderr, exit 1. */
+/** An unrecognised command: a short pointer on stderr, exit 2 (misuse, not failure). */
 function usage(): never {
-  console.error(`unknown command "${command}"\n${usageLine()}\nrun \`sproutboat\` with no arguments for the grouped command list`);
-  process.exit(1);
+  console.error(`${rose("✗")} unknown command "${command}"\n  ${dim("run `sproutboat` for the list of commands")}`);
+  process.exit(2);
 }
 
 const [command, ...args] = process.argv.slice(2);
 if (command === undefined || command === "help" || command === "-h" || command === "--help") help();
+if (command === "--version" || command === "-v") { console.log(`sproutboat ${CLI_VERSION}`); process.exit(0); }
+
+await notifyIfOutdated(CLI_VERSION);
+
 switch (command) {
   case "init": await init(args[0]); break;
   case "check": await check(args[0]); break;

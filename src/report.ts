@@ -5,7 +5,7 @@ import type { ArtifactManifest } from "./manifest";
 import { bold, dim, leaf, sprout } from "./style";
 
 // Read from package.json so the banner never drifts from the published version.
-const CLI_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+export const CLI_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
