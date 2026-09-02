@@ -462,6 +462,63 @@ async function secrets(args: string[]) {
   console.log(`Set ${name} — applies on the next deploy or sprout restart`);
 }
 
+const RESOURCE_KINDS = ["kv", "d1", "r2", "queue", "analytics"];
+
+/**
+ * #74 — account-level storage resources. Unlike `secrets`/`domains` these are
+ * not project-scoped, so there's no `readProject` here. `create` prints the
+ * `<kind>_<id>` handle to paste into `sproutboat.jsonc` bindings.
+ */
+async function resource(args: string[]) {
+  const sub = args[0] && ["list", "create", "rename", "delete"].includes(args[0]) ? args.shift()! : "list";
+  const { apiUrl, token } = await apiCredentials();
+  const base = `${apiUrl}/api/resources`;
+  const auth = { "x-api-key": token };
+
+  if (sub === "list") {
+    const kindFilter = args[0];
+    const body = await responseText(await fetch(base, { headers: auth }), "could not list resources");
+    const parsed = jsonObject(parseJsonValue(body));
+    const rows = (parsed && Array.isArray(parsed.resources) ? parsed.resources : [])
+      .map((entry) => jsonObject(entry))
+      .filter((entry): entry is JsonObject => Boolean(entry) && (!kindFilter || entry!.kind === kindFilter));
+    if (rows.length === 0) { console.log(kindFilter ? `no ${kindFilter} resources` : "no resources"); return; }
+    for (const row of rows) console.log(`${String(row.kind).padEnd(9)} ${String(row.id).padEnd(30)} ${String(row.name)}`);
+    return;
+  }
+
+  if (sub === "create") {
+    const [kind, name] = args;
+    if (!kind || !RESOURCE_KINDS.includes(kind)) usageError(`resource create: kind must be one of ${RESOURCE_KINDS.join(", ")}`, "resource create <kind> <name>");
+    if (!name) usageError("resource create: missing <name>", "resource create <kind> <name>");
+    const body = await responseText(
+      await fetch(base, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ kind, name }) }),
+      "create rejected",
+    );
+    const record = jsonObject(jsonObject(parseJsonValue(body))?.resource ?? null);
+    if (!record || !isString(record.id)) fail("create response was not a resource");
+    console.log(ok(`created ${kind} ${bold(String(record.name))}`));
+    console.log(record.id);
+    return;
+  }
+
+  if (sub === "rename") {
+    const [id, name] = args;
+    if (!id || !name) usageError("resource rename: need <id> <name>", "resource rename <id> <name>");
+    await responseText(
+      await fetch(`${base}/${id}`, { method: "PATCH", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ name }) }),
+      "rename rejected",
+    );
+    console.log(ok(`renamed ${id} → ${name}`));
+    return;
+  }
+
+  const id = args[0];
+  if (!id) usageError("resource delete: missing <id>", "resource delete <id>");
+  await responseText(await fetch(`${base}/${id}`, { method: "DELETE", headers: auth }), "delete rejected");
+  console.log(ok(`deleted ${id}`));
+}
+
 async function deleteProject(args: string[]) {
   // `sproutboat delete [project-dir] [--name <project>] --yes` — flags in any order.
   const positional: string[] = [];
@@ -521,6 +578,7 @@ switch (command) {
   case "rollback": await rollback(args); break;
   case "domains": await domains(args); break;
   case "secrets": await secrets(args); break;
+  case "resource": await resource(args); break;
   case "tail": await tail(args); break;
   case "delete": await deleteProject(args); break;
   default: usage();
