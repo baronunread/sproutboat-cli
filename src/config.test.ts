@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseConfig } from "./config";
+import { parseConfig, pinBindingId } from "./config";
 
 const base = `{ "name": "app", "main": "src/index.js", "compatibility_date": "2026-08-26"`;
 
@@ -90,4 +90,34 @@ test("omitting the binding fields is still valid", () => {
   const r = parseConfig(`${base} }`);
   expect(r.ok).toBe(true);
   if (r.ok) expect(r.value.kv_namespaces).toBeUndefined();
+});
+
+// #74 auto-provision write-back — pinBindingId edits sproutboat.jsonc in place.
+test("pinBindingId turns a bare binding into { binding, id } and keeps comments", () => {
+  const src = `{
+  "name": "app",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-26",
+  // storage
+  "kv_namespaces": ["WAITLIST", "SESSIONS"],
+  "d1_databases": ["DB"], // one db
+}
+`;
+  const out = pinBindingId(src, "kv_namespaces", "WAITLIST", "kv_0123456789abcdef01234567");
+  expect(out).toContain(`{ "binding": "WAITLIST", "id": "kv_0123456789abcdef01234567" }`);
+  expect(out).toContain(`"SESSIONS"`);        // sibling untouched
+  expect(out).toContain("// storage");         // comment untouched
+  expect(out).toContain(`"d1_databases": ["DB"], // one db`); // other field untouched
+  // re-parses and normalizes to the pinned ref
+  const parsed = parseConfig(out);
+  expect(parsed.ok && parsed.value.kv_namespaces).toEqual([
+    { binding: "WAITLIST", id: "kv_0123456789abcdef01234567" }, "SESSIONS",
+  ]);
+});
+
+test("pinBindingId is a no-op when the binding is already an object or absent", () => {
+  const already = `{ "name": "a", "kv_namespaces": [{ "binding": "X", "id": "kv_${"0".repeat(24)}" }] }`;
+  expect(pinBindingId(already, "kv_namespaces", "X", "kv_new")).toBe(already);
+  const absent = `{ "name": "a", "kv_namespaces": ["Y"] }`;
+  expect(pinBindingId(absent, "kv_namespaces", "Z", "kv_z")).toBe(absent);
 });

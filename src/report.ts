@@ -35,7 +35,7 @@ function bindingRows(config: SproutboatConfig): string[][] {
   };
   const resourceList = (refs: Parameters<typeof resourceRefs>[0], type: string) => {
     for (const ref of resourceRefs(refs)) {
-      rows.push([`env.${ref.binding}`, type, ref.id ?? "no id — local dev only, a deploy needs `sproutboat resource create`"]);
+      rows.push([`env.${ref.binding}`, type, ref.id ?? "deploy-scoped store (--no-provision) — drop the flag to auto-provision a persistent resource"]);
     }
   };
   resourceList(config.kv_namespaces, "kv");

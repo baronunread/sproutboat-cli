@@ -12,7 +12,7 @@
 | `init` | `[name]` | Scaffold sproutboat.jsonc + src/index.js in ./<name>. |
 | `check` | `[project-dir]` | Validate the config and entry point without building. |
 | `build` | `[project-dir]` | Cross-compile the native-fetch sprout (Porffor + Zig). |
-| `deploy` | `[project-dir] [--dry-run] [--artifact <dir>] [--no-wait]` | Build (unless --artifact), print the report, upload, wait until the URL serves. --dry-run stops before upload; --no-wait skips the health check. |
+| `deploy` | `[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision]` | Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores. |
 | `versions` | `list [project-dir]` | List the project's deployed versions. |
 | `rollback` | `<version-id> [project-dir]` | Re-activate a previous version. |
 | `tail` | `[project-dir] [--sprout]` | Print recent request logs; --sprout prints the running sprout + broker stdout/stderr instead. |
@@ -23,7 +23,7 @@
 | `login` | `[--api-url <url>] [--token <token>]` | Device-code browser flow, or store <token> for <url> directly. |
 
 ```
-usage: sproutboat <init [name] | check [project-dir] | build [project-dir] | deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait] | versions list [project-dir] | rollback <version-id> [project-dir] | tail [project-dir] [--sprout] | domains [list | add <host> | verify <host> | rm <host>] [project-dir] | secrets [list | set <NAME> [value] | rm <NAME>] [project-dir] | resource [list [kind] | create <kind> <name> | rename <id> <name> | delete <id>] | delete [project-dir] [--name <project>] --yes | login [--api-url <url>] [--token <token>]>
+usage: sproutboat <init [name] | check [project-dir] | build [project-dir] | deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] | versions list [project-dir] | rollback <version-id> [project-dir] | tail [project-dir] [--sprout] | domains [list | add <host> | verify <host> | rm <host>] [project-dir] | secrets [list | set <NAME> [value] | rm <NAME>] [project-dir] | resource [list [kind] | create <kind> <name> | rename <id> <name> | delete <id>] | delete [project-dir] [--name <project>] --yes | login [--api-url <url>] [--token <token>]>
 ```
 
 ## Environment variables
