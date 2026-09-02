@@ -13,7 +13,7 @@ export const COMMANDS: readonly Command[] = [
   { name: "build", args: "[project-dir]", summary: "Cross-compile the native-fetch sprout (Porffor + Zig)." },
   { name: "deploy", args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait]", summary: "Build (unless --artifact), print the report, upload, wait until the URL serves. --dry-run stops before upload; --no-wait skips the health check." },
   { name: "login", args: "[--api-url <url>] [--token <token>]", summary: "Device-code browser flow, or store <token> for <url> directly." },
-  { name: "tail", args: "[project-dir]", summary: "Print the project's recent request logs." },
+  { name: "tail", args: "[project-dir] [--sprout]", summary: "Print recent request logs; --sprout prints the running sprout + broker stdout/stderr instead." },
   { name: "versions", args: "list [project-dir]", summary: "List the project's deployed versions." },
   { name: "rollback", args: "<version-id> [project-dir]", summary: "Re-activate a previous version." },
   { name: "domains", args: "[list | add <host> | verify <host> | rm <host>] [project-dir]", summary: "Attach a custom domain to the project (TXT-verified). No sub-command lists." },

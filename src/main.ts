@@ -351,8 +351,11 @@ async function rollback(args: string[]) {
 }
 
 async function tail(args: string[]) {
-  const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
-  const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/logs/recent`, { headers: { "x-api-key": token } });
+  const sproutLog = args.includes("--sprout");
+  const dir = args.find((arg) => !arg.startsWith("-"));
+  const [project, { apiUrl, token }] = await Promise.all([readProject(dir), apiCredentials()]);
+  const path = sproutLog ? "logs/sprout" : "logs/recent";
+  const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/${path}`, { headers: { "x-api-key": token } });
   process.stdout.write(await responseText(response, "could not read logs"));
 }
 
