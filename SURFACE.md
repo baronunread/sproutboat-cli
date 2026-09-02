@@ -12,7 +12,7 @@
 | `init` | `[name]` | Scaffold sproutboat.jsonc + src/index.js in ./<name>. |
 | `check` | `[project-dir]` | Validate the config and entry point without building. |
 | `build` | `[project-dir]` | Cross-compile the native-fetch sprout (Porffor + Zig). |
-| `deploy` | `[project-dir] [--dry-run] [--artifact <dir>]` | Build (unless --artifact), print the report, upload. --dry-run stops before upload. |
+| `deploy` | `[project-dir] [--dry-run] [--artifact <dir>] [--no-wait]` | Build (unless --artifact), print the report, upload, wait until the URL serves. --dry-run stops before upload; --no-wait skips the health check. |
 | `login` | `[--api-url <url>] [--token <token>]` | Device-code browser flow, or store <token> for <url> directly. |
 | `tail` | `[project-dir]` | Print the project's recent request logs. |
 | `versions` | `list [project-dir]` | List the project's deployed versions. |
@@ -22,7 +22,7 @@
 | `delete` | `[project-dir] [--name <project>] --yes` | Delete the project, every version, and its route. |
 
 ```
-usage: sproutboat <init [name] | check [project-dir] | build [project-dir] | deploy [project-dir] [--dry-run] [--artifact <dir>] | login [--api-url <url>] [--token <token>] | tail [project-dir] | versions list [project-dir] | rollback <version-id> [project-dir] | domains [list | add <host> | verify <host> | rm <host>] [project-dir] | secrets [list | set <NAME> [value] | rm <NAME>] [project-dir] | delete [project-dir] [--name <project>] --yes>
+usage: sproutboat <init [name] | check [project-dir] | build [project-dir] | deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait] | login [--api-url <url>] [--token <token>] | tail [project-dir] | versions list [project-dir] | rollback <version-id> [project-dir] | domains [list | add <host> | verify <host> | rm <host>] [project-dir] | secrets [list | set <NAME> [value] | rm <NAME>] [project-dir] | delete [project-dir] [--name <project>] --yes>
 ```
 
 ## Environment variables
@@ -37,6 +37,7 @@ usage: sproutboat <init [name] | check [project-dir] | build [project-dir] | dep
 | `SPROUTBOAT_VARS_JSON` | JSON object of baked `vars` (UPPER_SNAKE -> string), read by the wrapper when generating the sprout module. |
 | `SPROUTBOAT_BINDINGS_JSON` | The artifact's bindings.json, read by the wrapper to emit the `__sbInstallBindings` line. |
 | `SPROUTBOAT_CONFIG_DIR` | Directory for credentials.json (default ~/.config/sproutboat). |
+| `NO_COLOR` | When set, disables coloured terminal output (https://no-color.org). Output is also plain whenever stdout is not a TTY. |
 | `XDG_CONFIG_HOME` | Base for the default credentials dir when SPROUTBOAT_CONFIG_DIR is unset. |
 | `PORFFOR_VERSION` | Override the Porffor identity string recorded in the manifest. |
 | `SB_BROKER_PORT` | Loopback port of the binding broker, read by the compiled sprout at runtime (set by the control plane, or by `src/broker.ts` for local runs). |

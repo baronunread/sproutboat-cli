@@ -8,6 +8,7 @@ import { validateManifest, type ArtifactManifest } from "./manifest";
 import { printDeployReport } from "./report";
 import { activeApiUrl, savedToken, saveToken } from "./credentials";
 import { usageLine } from "./surface";
+import { amber, bold, dim, leaf, ok, rose } from "./style";
 
 const defaultApiUrl = "https://dashboard.sproutboat.com";
 
@@ -106,7 +107,7 @@ const starterHandler = `export default {
 `;
 
 function fail(message: string): never {
-  console.error(`sproutboat: ${message}`);
+  console.error(`${rose("✗")} ${message}`);
   process.exit(1);
 }
 
@@ -147,14 +148,14 @@ async function init(name = "hello") {
 
 async function check(directory?: string) {
   const project = await readProject(directory);
-  console.log(`check passed: ${project.config.name} (${project.config.main}, native-fetch)`);
+  console.log(ok(`check passed — ${project.config.name} (${project.config.main}, native-fetch)`));
 }
 
 async function build(directory?: string) {
   const project = await readProject(directory);
-  console.log("Compiling the native-fetch server with Porffor + Zig (linux-x86_64, static)...");
+  console.log(dim("Compiling the native-fetch server with Porffor + Zig (linux-x86_64, static)…"));
   const artifact = await buildArtifact({ projectDir: project.directory, config: project.config, sourcePath: project.sourcePath });
-  console.log(`Built ${project.config.name}`);
+  console.log(ok(`built ${project.config.name}`));
   console.log(artifact.artifactDir);
   return { project, artifact };
 }
@@ -201,7 +202,7 @@ async function deploy(args: string[]) {
     if (!deployments) fail("could not parse deployment list response");
     const active = deployments.find((deployment) => deployment.active && deployment.artifact === digest);
     if (active) {
-      console.log(`Nothing to deploy — artifact ${digest.slice(0, 12)} is already active`);
+      console.log(ok(`nothing to deploy — artifact ${digest.slice(0, 12)} is already active`));
       console.log(`https://${active.hostname}`);
       return;
     }
@@ -236,14 +237,40 @@ async function deploy(args: string[]) {
   const body = await responseText(response, "deployment rejected");
   const deployed = parseUrlResponse(body);
   if (!deployed) fail("deployment response did not include a URL");
-  console.log(`\nDeployed ${projectName}`);
-  console.log(`  ${deployed.url}`);
+  console.log(`\n${leaf("🌱")} ${bold(leaf(`Deployed ${projectName}`))}`);
+  console.log(`  ${bold(deployed.url)}`);
   const drift = parsePorfforDrift(body);
   if (drift) {
-    console.warn(`\n! Porffor pin changed: ${drift.from} -> ${drift.to}`);
-    console.warn(`  The previous live version stays frozen at ${drift.from}; this one is built with ${drift.to}.`);
-    console.warn(`  The alpha compiler's output can differ between pins (see COMPAT.md) — roll back if this version misbehaves.`);
+    console.warn(amber(`\n! Porffor pin changed: ${drift.from} -> ${drift.to}`));
+    console.warn(dim(`  The previous live version stays frozen at ${drift.from}; this one is built with ${drift.to}.`));
+    console.warn(dim(`  The alpha compiler's output can differ between pins (see COMPAT.md) — roll back if this version misbehaves.`));
   }
+  if (!args.includes("--no-wait")) {
+    const healthy = await waitForHealthy(deployed.url, 90_000);
+    console.log(healthy
+      ? `  ${ok("serving")}`
+      : amber("  ! not serving after 90s — Caddy may still be issuing the cert, or the sprout is crashing (`sproutboat tail`)"));
+  }
+}
+
+/**
+ * Poll the deployment URL until the edge returns any non-5xx response. Connection
+ * and TLS errors (the cert is issued on the first HTTPS request) count as "not
+ * ready yet". Returns false on timeout without failing the deploy — the artifact
+ * is already active server-side.
+ */
+async function waitForHealthy(url: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  let wait = 1000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, { method: "HEAD", redirect: "manual" });
+      if (response.status < 500) return true;
+    } catch { /* DNS / TLS-not-yet-issued / connection refused — keep waiting */ }
+    await Bun.sleep(Math.min(wait, Math.max(0, deadline - Date.now())));
+    if (wait < 5000) wait += 1000;
+  }
+  return false;
 }
 
 function parseLoginArgs(args: string[]) {
@@ -290,7 +317,7 @@ async function login(args: string[]) {
     const token = parseToken(result);
     if (!token) fail("login response did not include a CLI token");
     await saveToken(apiUrl, token);
-    console.log("Login approved. Credentials were saved locally for this API endpoint.");
+    console.log(ok("login approved — credentials saved for this endpoint"));
     return;
   }
   fail("login expired before approval");
@@ -319,7 +346,7 @@ async function rollback(args: string[]) {
   const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/deployments/${id}/activate`, { method: "POST", headers: { "x-api-key": token } });
   const deployment = parseUrlResponse(await responseText(response, "rollback rejected"));
   if (!deployment) fail("rollback response did not include a URL");
-  console.log(`Rolled back ${project.config.name}`);
+  console.log(ok(`rolled back ${project.config.name}`));
   console.log(deployment.url);
 }
 
@@ -366,7 +393,7 @@ async function domains(args: string[]) {
   if (sub === "rm") {
     const response = await fetch(`${base}/${host}`, { method: "DELETE", headers: auth });
     await responseText(response, "delete rejected");
-    console.log(`Removed ${host}`);
+    console.log(ok(`removed ${host}`));
     return;
   }
   const url = sub === "add" ? base : `${base}/${host}/verify`;
@@ -397,7 +424,7 @@ async function secrets(args: string[]) {
   }
   if (sub === "rm") {
     await responseText(await fetch(`${base}/${name}`, { method: "DELETE", headers: auth }), "delete rejected");
-    console.log(`Removed ${name}`);
+    console.log(ok(`removed ${name}`));
     return;
   }
   // set: value from the next arg, else stdin (keeps it out of shell history).
@@ -438,7 +465,7 @@ async function deleteProject(args: string[]) {
   const routes = Array.isArray(result.routeRemoved) ? result.routeRemoved.filter(isString) : [];
   const failed = Array.isArray(result.artifactCleanupFailed) ? result.artifactCleanupFailed.filter(isString) : [];
 
-  console.log(`Deleted ${name}  (${versions} version${versions === 1 ? "" : "s"} removed)`);
+  console.log(ok(`deleted ${name} — ${versions} version${versions === 1 ? "" : "s"} removed`));
   for (const route of routes) console.log(`  released ${route}`);
   if (failed.length) console.log(`  ! ${failed.length} artifact file(s) left on disk — remove them manually`);
 }

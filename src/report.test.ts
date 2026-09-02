@@ -17,9 +17,15 @@ function capture(fn: () => void): string {
   return lines.join("\n");
 }
 
-test("deploy report: files table, sizes, and env bindings", () => {
+test("deploy report: files table, sizes, and every binding kind", () => {
   const out = capture(() => printDeployReport(
-    { name: "hello", main: "src/index.js", compatibility_date: "2026-08-26", vars: { GREETING: "hej", N: "3" } },
+    {
+      name: "hello", main: "src/index.js", compatibility_date: "2026-08-26",
+      vars: { GREETING: "hej", N: "3" },
+      kv_namespaces: ["CACHE"], secrets: ["API_KEY"], outbound: ["api.example.com"],
+      triggers: { crons: ["0 3 * * *"] },
+      assets: { binding: "ASSETS", directory: "web/dist" },
+    },
     manifest, new Uint8Array(2048), 512,
   ));
   expect(out).toContain("🌱 sproutboat");
@@ -30,12 +36,17 @@ test("deploy report: files table, sizes, and env bindings", () => {
   expect(out).toContain("env.GREETING");
   expect(out).toContain('"hej"');
   expect(out).toContain("env.N");
+  expect(out).toContain("env.CACHE");       // kv
+  expect(out).toContain("env.API_KEY");     // secret — name only, no value
+  expect(out).toContain("api.example.com"); // outbound
+  expect(out).toContain("0 3 * * *");       // cron
+  expect(out).toContain("env.ASSETS");
 });
 
-test("deploy report: no vars -> hint, not a table", () => {
+test("deploy report: no bindings -> hint, not a table", () => {
   const out = capture(() => printDeployReport(
     { name: "h", main: "s", compatibility_date: "2026-08-26" }, manifest, new Uint8Array(10), 10,
   ));
-  expect(out).toContain("(none — add [vars] to sproutboat.jsonc)");
+  expect(out).toContain("(none — add vars");
   expect(out).not.toContain("env.");
 });

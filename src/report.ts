@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { gzipSync } from "bun";
 import type { SproutboatConfig } from "./config";
 import type { ArtifactManifest } from "./manifest";
+import { bold, dim, leaf, sprout } from "./style";
 
 // Read from package.json so the banner never drifts from the published version.
 const CLI_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
@@ -13,55 +14,75 @@ function bytes(n: number): string {
   return `${(kib / 1024).toFixed(2)} MiB`;
 }
 
-/** Minimal box table. `align` marks columns to right-pad-left (numbers). */
+/** Minimal box table with a green frame. `align` marks columns to right-pad-left (numbers). */
 function table(headers: string[], rows: string[][], align: boolean[] = []): string {
   const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)));
-  const line = (l: string, m: string, r: string) => l + widths.map((w) => "─".repeat(w + 2)).join(m) + r;
-  const row = (cells: string[]) =>
-    "│ " + cells.map((c, i) => (align[i] ? (c ?? "").padStart(widths[i]) : (c ?? "").padEnd(widths[i]))).join(" │ ") + " │";
-  return [line("┌", "┬", "┐"), row(headers), line("├", "┼", "┤"), ...rows.map(row), line("└", "┴", "┘")].join("\n");
+  const rule = (l: string, m: string, r: string) => leaf(l + widths.map((w) => "─".repeat(w + 2)).join(m) + r);
+  const row = (cells: string[], head = false) =>
+    leaf("│ ") + cells.map((c, i) => {
+      const cell = align[i] ? (c ?? "").padStart(widths[i]) : (c ?? "").padEnd(widths[i]);
+      return head ? bold(cell) : cell;
+    }).join(leaf(" │ ")) + leaf(" │");
+  return [rule("┌", "┬", "┐"), row(headers, true), rule("├", "┼", "┤"), ...rows.map((r) => row(r)), rule("└", "┴", "┘")].join("\n");
+}
+
+/** Every binding the compiled sprout will see, flattened to (name, type, detail) rows. */
+function bindingRows(config: SproutboatConfig): string[][] {
+  const rows: string[][] = [];
+  for (const [name, value] of Object.entries(config.vars ?? {})) rows.push([`env.${name}`, "var", JSON.stringify(value)]);
+  const list = (names: string[] | undefined, type: string, detail = "") => {
+    for (const name of names ?? []) rows.push([`env.${name}`, type, detail]);
+  };
+  list(config.kv_namespaces, "kv");
+  list(config.secrets, "secret", "value withheld — set with `sproutboat secrets`");
+  list(config.d1_databases, "d1");
+  list(config.r2_buckets, "r2");
+  list(config.queues, "queue");
+  list(config.analytics_engine_datasets, "analytics");
+  for (const [name, className] of Object.entries(config.durable_objects ?? {})) rows.push([`env.${name}`, "durable object", className]);
+  for (const host of config.outbound ?? []) rows.push([`fetch()`, "outbound", host]);
+  for (const cron of config.triggers?.crons ?? []) rows.push([`scheduled()`, "cron", cron]);
+  if (config.assets?.binding) rows.push([`env.${config.assets.binding}`, "assets", config.assets.directory ?? ""]);
+  return rows;
 }
 
 /**
- * Wrangler-shaped build/deploy summary. Prints what the artifact contains, its
- * upload size, and the bindings the handler will see. Returns nothing.
+ * Wrangler-shaped build/deploy summary: what the artifact contains, its upload
+ * size, and every binding the handler will see. Returns nothing.
  */
 export function printDeployReport(
   config: SproutboatConfig,
   manifest: ArtifactManifest,
-  sprout: Uint8Array,
+  sproutBin: Uint8Array,
   manifestBytes: number,
 ): void {
-  const gz = gzipSync(Uint8Array.from(sprout)).length;
-  const total = sprout.length + manifestBytes;
+  const gz = gzipSync(Uint8Array.from(sproutBin)).length;
+  const total = sproutBin.length + manifestBytes;
 
-  console.log(`\n🌱 sproutboat ${CLI_VERSION}`);
-  console.log("─".repeat(19));
-  console.log(`Compiled ${manifest.project} with Porffor ${manifest.porfforVersion}`);
-  console.log(`  toolchain  ${manifest.buildImage}`);
-  console.log(`  compat     ${config.compatibility_date}`);
+  console.log(`\n${sprout("🌱")} ${bold(leaf(`sproutboat ${CLI_VERSION}`))}`);
+  console.log(leaf("─".repeat(19)));
+  console.log(`Compiled ${bold(manifest.project)} with Porffor ${manifest.porfforVersion}`);
+  console.log(dim(`  toolchain  ${manifest.buildImage}`));
+  console.log(dim(`  compat     ${config.compatibility_date}`));
   console.log();
 
-  console.log("Artifact:");
+  console.log(bold("Artifact"));
   console.log(table(
     ["File", "Type", "Size"],
     [
-      ["sprout", manifest.runtime, bytes(sprout.length)],
+      ["sprout", manifest.runtime, bytes(sproutBin.length)],
       ["manifest.json", "json", bytes(manifestBytes)],
     ],
     [false, false, true],
   ));
-  console.log(`Total upload: ${bytes(total)}  (sprout gzip: ${bytes(gz)})`);
+  console.log(`Total upload: ${bold(bytes(total))}  ${dim(`(sprout gzip: ${bytes(gz)})`)}`);
   console.log();
 
-  const vars = Object.entries(config.vars ?? {});
-  console.log("Bindings the handler will see:");
-  if (vars.length === 0) {
-    console.log("  (none — add [vars] to sproutboat.jsonc)");
+  const rows = bindingRows(config);
+  console.log(bold("Bindings the handler will see"));
+  if (rows.length === 0) {
+    console.log(dim("  (none — add vars / kv_namespaces / secrets / … to sproutboat.jsonc)"));
   } else {
-    console.log(table(
-      ["Binding", "Type", "Value"],
-      vars.map(([k, v]) => [`env.${k}`, "var", JSON.stringify(v)]),
-    ));
+    console.log(table(["Binding", "Type", "Detail"], rows));
   }
 }
