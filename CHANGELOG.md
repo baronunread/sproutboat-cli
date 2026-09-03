@@ -10,8 +10,7 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
-On `wrangler-shaped` (PR [#6](https://github.com/baronunread/sproutboat-cli/pull/6)).
-
+## [0.5.0] — 2026-09-03
 ### Added
 - `dev [--port <n>] [--no-watch]` — run the project on this machine against a
   real broker (KV/D1/secrets/etc. all work), rebuilding on save.
@@ -150,7 +149,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.11...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.11...v0.5.0
 [0.4.11]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.10...v0.4.11
 [0.4.10]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.9...v0.4.10
 [0.4.9]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.8...v0.4.9
