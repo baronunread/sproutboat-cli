@@ -32,6 +32,10 @@ function json(data, status) {
   return new Response(JSON.stringify(data), { status: status || 200, headers: { "content-type": "application/json" } });
 }
 
+async function asyncEcho(path) {
+  return json({ async: true, path });
+}
+
 function ensureSchema(env) {
   env.DB.exec(
     "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, body TEXT, attachment TEXT, created TEXT);" +
@@ -147,6 +151,13 @@ export default {
         last_heartbeat: env.DB.prepare("SELECT at, cron FROM heartbeat ORDER BY id DESC LIMIT 1").first(),
       });
     }
+
+    // GET /async -> the one promise-returning route. Everything else here is
+    // sync (http-sync-v0), but a handler may return a promise and the prelude
+    // has to hand it straight back — Porffor's server resolves the handler's
+    // own promise and nothing derived from it. Without a route exercising this,
+    // an async-hostile prelude change hangs every async worker silently.
+    if (path === "/async" && request.method === "GET") return asyncEcho(path);
 
     // Anything else GET -> static assets (env.ASSETS), so `/` serves the UI and
     // `/app.js` etc. resolve. run_sprout_first:true routes every path here first.

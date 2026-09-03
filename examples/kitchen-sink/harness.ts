@@ -172,6 +172,10 @@ check("R2: GET /attach returns the body + etag", (await file.text()) === "the fi
 const atts = await jget("/attachments");
 check("R2: GET /attachments lists the object", arr(atts.body).some((o) => obj(o).key === obj(att.body).key), atts.body);
 
+// async handler: the prelude must return the handler's own promise untouched
+const asyncRes = await jget("/async");
+check("async: a promise-returning route resolves", asyncRes.status === 200 && obj(asyncRes.body).async === true, asyncRes.body);
+
 // outbound fetch (allowlisted)
 const quote = await jget("/quote");
 check("fetch: /quote proxies the allowlisted upstream", quote.status === 200 && isString(obj(quote.body).content) && String(obj(quote.body).author).length > 0, quote.body);
