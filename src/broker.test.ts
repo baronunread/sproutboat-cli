@@ -2,8 +2,13 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createBroker, cronMatches, encodeFrame, listen, type Broker } from "./broker";
+import { createBroker, cronMatches, encodeFrame, listen, type Broker, type FetchLike } from "./broker";
 import { walkAssets, type AssetManifest } from "./assets";
+import { jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "./json";
+
+/** Reply frames are JSON; these narrow one field down to what an assertion reads. */
+const obj = (value: JsonValue | undefined): JsonObject => jsonObject(value ?? null) ?? {};
+const arr = (value: JsonValue | undefined): JsonValue[] => (Array.isArray(value) ? value : []);
 
 const brokers: Broker[] = [];
 afterEach(() => {
@@ -47,10 +52,10 @@ test("secrets resolve only when both bound and present", async () => {
 
 test("fetch is gated by the exact-host allowlist", async () => {
   const calls: string[] = [];
-  const fetchImpl = (async (url: string | URL) => {
+  const fetchImpl: FetchLike = async (url) => {
     calls.push(String(url));
     return new Response("body", { status: 200, headers: { "x-mark": "1" } });
-  }) as typeof fetch;
+  };
   const b = make({ bindings: { outbound: ["api.example.com"] }, fetchImpl });
 
   await expect(b.dispatch({ op: "fetch", url: "https://evil.example.com/x" })).rejects.toThrow("allowlist");
@@ -66,8 +71,8 @@ test("D1: query / run / batch on a bound database, isolated per name", async () 
   await b.dispatch({ op: "d1.exec", db: "DB", sql: "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)" });
   const ins = await b.dispatch({ op: "d1.query", db: "DB", sql: "INSERT INTO t (name) VALUES (?)", params: ["ada"] });
   expect(ins).toMatchObject({ ok: true, results: [] });
-  expect((ins.meta as Record<string, number>).changes).toBe(1);
-  expect((ins.meta as Record<string, number>).last_row_id).toBe(1);
+  expect(obj(ins.meta).changes).toBe(1);
+  expect(obj(ins.meta).last_row_id).toBe(1);
 
   const sel = await b.dispatch({ op: "d1.query", db: "DB", sql: "SELECT * FROM t", params: [] });
   expect(sel.results).toEqual([{ id: 1, name: "ada" }]);
@@ -80,7 +85,7 @@ test("D1: query / run / batch on a bound database, isolated per name", async () 
       { sql: "SELECT count(*) AS n FROM t", params: [] },
     ],
   });
-  expect((batch.results as Array<{ results: unknown[] }>)[1].results).toEqual([{ n: 2 }]);
+  expect(obj(arr(batch.results)[1]).results).toEqual([{ n: 2 }]);
 
   // a different bound name is a different database
   await expect(b.dispatch({ op: "d1.query", db: "OTHER", sql: "SELECT * FROM t", params: [] })).rejects.toThrow("no such table");
@@ -91,11 +96,11 @@ test("R2: put / get / head / list / delete on a bound bucket", async () => {
   const b = make({ bindings: { r2: ["ASSETS"] } });
   const put = await b.dispatch({ op: "r2.put", bucket: "ASSETS", key: "a/1.txt", body: "hello", customMetadata: { k: "v" } });
   expect(put).toMatchObject({ ok: true });
-  expect((put.object as Record<string, unknown>).size).toBe(5);
+  expect(obj(put.object).size).toBe(5);
 
   const got = await b.dispatch({ op: "r2.get", bucket: "ASSETS", key: "a/1.txt" });
   expect(got).toMatchObject({ ok: true, found: true, body: "hello" });
-  expect((got.object as Record<string, unknown>).customMetadata).toEqual({ k: "v" });
+  expect(obj(got.object).customMetadata).toEqual({ k: "v" });
 
   const head = await b.dispatch({ op: "r2.head", bucket: "ASSETS", key: "a/1.txt" });
   expect(head).toMatchObject({ found: true });
@@ -104,7 +109,7 @@ test("R2: put / get / head / list / delete on a bound bucket", async () => {
   await b.dispatch({ op: "r2.put", bucket: "ASSETS", key: "a/2.txt", body: "two" });
   await b.dispatch({ op: "r2.put", bucket: "ASSETS", key: "b/3.txt", body: "three" });
   const list = await b.dispatch({ op: "r2.list", bucket: "ASSETS", prefix: "a/" });
-  expect((list.objects as Array<{ key: string }>).map((o) => o.key)).toEqual(["a/1.txt", "a/2.txt"]);
+  expect(arr(list.objects).map((o) => obj(o).key)).toEqual(["a/1.txt", "a/2.txt"]);
 
   await b.dispatch({ op: "r2.delete", bucket: "ASSETS", key: "a/1.txt" });
   expect(await b.dispatch({ op: "r2.get", bucket: "ASSETS", key: "a/1.txt" })).toMatchObject({ found: false });
@@ -115,10 +120,10 @@ test("R2: list paginates with a cursor", async () => {
   const b = make({ bindings: { r2: ["ASSETS"] } });
   for (let i = 0; i < 5; i++) await b.dispatch({ op: "r2.put", bucket: "ASSETS", key: `k${i}`, body: "x" });
   const p1 = await b.dispatch({ op: "r2.list", bucket: "ASSETS", limit: 2 });
-  expect((p1.objects as Array<{ key: string }>).map((o) => o.key)).toEqual(["k0", "k1"]);
+  expect(arr(p1.objects).map((o) => obj(o).key)).toEqual(["k0", "k1"]);
   expect(p1.truncated).toBe(true);
   const p2 = await b.dispatch({ op: "r2.list", bucket: "ASSETS", limit: 2, cursor: p1.cursor });
-  expect((p2.objects as Array<{ key: string }>).map((o) => o.key)).toEqual(["k2", "k3"]);
+  expect(arr(p2.objects).map((o) => obj(o).key)).toEqual(["k2", "k3"]);
 });
 
 test("Durable Object storage: get / put / delete / list / deleteAll scoped to (class, id)", async () => {
@@ -144,19 +149,19 @@ test("Analytics Engine: write is bound-gated; query reads back count + recent ro
 
   const q = await b.dispatch({ op: "ae.query", dataset: "METRICS", limit: 5 });
   expect(q.count).toBe(2);
-  const rows = q.rows as Array<{ blobs: string[] }>;
-  expect(rows[0].blobs).toEqual(["POST", "/b"]); // newest first
+  const rows = arr(q.rows);
+  expect(obj(rows[0]).blobs).toEqual(["POST", "/b"]); // newest first
   await expect(b.dispatch({ op: "ae.query", dataset: "OTHER" })).rejects.toThrow("not bound");
 });
 
 test("Queues: send enqueues; the consumer delivers a batch and acked messages are removed", async () => {
-  const delivered: unknown[] = [];
-  const fetchImpl = (async (_url: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body)) as { messages: Array<{ id: string }> };
+  const delivered: JsonObject[] = [];
+  const fetchImpl: FetchLike = async (_url, init) => {
+    const body = obj(parseJsonValue(String(init?.body)));
     delivered.push(body);
     // ack all but the first
-    return new Response(JSON.stringify({ ack: body.messages.slice(1).map((m) => m.id), retry: [] }), { status: 200 });
-  }) as typeof fetch;
+    return new Response(JSON.stringify({ ack: arr(body.messages).slice(1).map((m) => obj(m).id), retry: [] }), { status: 200 });
+  };
 
   const b = make({ bindings: { queues: ["JOBS"] }, sproutUrl: "http://127.0.0.1:1/", fetchImpl });
   await b.dispatch({ op: "queue.send", queue: "JOBS", body: JSON.stringify({ n: 1 }) });
@@ -166,9 +171,9 @@ test("Queues: send enqueues; the consumer delivers a batch and acked messages ar
   // the consumer runs on a 500ms interval
   await Bun.sleep(900);
   expect(delivered.length).toBeGreaterThan(0);
-  const first = delivered[0] as { queue: string; messages: unknown[] };
+  const first = obj(delivered[0]);
   expect(first.queue).toBe("JOBS");
-  expect(first.messages.length).toBe(3);
+  expect(arr(first.messages).length).toBe(3);
 
   await expect(b.dispatch({ op: "queue.send", queue: "NOPE", body: "x" })).rejects.toThrow("not bound");
 });
@@ -289,7 +294,7 @@ test("listen(): framed request/reply over a real socket, delivered split", async
         },
       },
     });
-    const frame = encodeFrame({ op: "ping", msg: "x" } as never);
+    const frame = encodeFrame({ op: "ping", msg: "x" });
     sock.write(frame.subarray(0, 3)); // header split mid-length
     await Bun.sleep(5);
     sock.write(frame.subarray(3));

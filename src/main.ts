@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
+import { isBoolean, isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject } from "./json";
+import type { AssetFiles } from "./assets";
 import { parseConfig, pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
 import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
@@ -16,27 +18,6 @@ const defaultApiUrl = "https://dashboard.sproutboat.com";
 async function responseText(response: Response, failure: string): Promise<string> {
   if (response.ok) return response.text();
   fail(`${failure} (${response.status}): ${await response.text()}`);
-}
-
-type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
-type JsonObject = { [key: string]: JsonValue };
-
-function isString(value: JsonValue | undefined): value is string {
-  return value !== undefined && value === String(value);
-}
-
-function isSafeInteger(value: JsonValue | undefined): value is number {
-  return Number.isSafeInteger(value);
-}
-
-function parseJsonValue(source: string): JsonValue {
-  const value = JSON.parse(source);
-  if (value === null || value === true || value === false || value === String(value) || Number.isFinite(value) || value instanceof Object) return value;
-  throw new Error("response was not valid JSON");
-}
-
-function jsonObject(value: JsonValue): JsonObject | undefined {
-  return value instanceof Object && !Array.isArray(value) ? value : undefined;
 }
 
 type VersionSummary = { id: string; artifact: string; deployedAt: string; active: boolean };
@@ -71,7 +52,7 @@ function parseUrlResponse(source: string): { url: string; id?: string; artifact?
  *  differ between pins. */
 function parsePorfforDrift(source: string): { from: string; to: string } | undefined {
   const drift = (() => { try { return jsonObject(parseJsonValue(source))?.porfforDrift; } catch { return undefined; } })();
-  const record = drift && jsonObject(drift as JsonValue);
+  const record = drift && jsonObject(drift);
   return record && isString(record.from) && isString(record.to) ? { from: record.from, to: record.to } : undefined;
 }
 
@@ -296,7 +277,8 @@ async function deploy(args: string[]) {
   }
   const assetsManifestFile = Bun.file(resolve(artifactDir, "assets.json"));
   if (await assetsManifestFile.exists()) {
-    const assetsManifest: { files?: Record<string, unknown> } = await assetsManifestFile.json();
+    // assets.json is written by `sproutboat build` from the AssetManifest contract.
+    const assetsManifest: { files?: AssetFiles } = await assetsManifestFile.json();
     form.set("assets_manifest", new File([await assetsManifestFile.arrayBuffer()], "assets.json", { type: "application/json" }));
     for (const key of Object.keys(assetsManifest.files ?? {})) {
       const file = Bun.file(resolve(artifactDir, "assets", `.${key}`));
@@ -482,7 +464,7 @@ type DomainView = {
 };
 function parseDomain(source: string): DomainView | undefined {
   const record = jsonObject(parseJsonValue(source));
-  if (!record || !isString(record.hostname) || typeof record.verified !== "boolean") return undefined;
+  if (!record || !isString(record.hostname) || !isBoolean(record.verified)) return undefined;
   const v = jsonObject(record.verification ?? null);
   const verification = v && isString(v.type) && isString(v.name) && isString(v.value) ? { type: v.type, name: v.name, value: v.value } : null;
   const serverAddresses = Array.isArray(record.serverAddresses) ? record.serverAddresses.filter(isString) : [];
@@ -605,7 +587,7 @@ function idForName(rows: JsonObject[], name: string, product: StorageProduct): s
 
 async function storage(key: string, args: string[]) {
   const product = STORAGE_PRODUCTS.find((entry) => entry.name === key)!;
-  const sub = args[0] && (STORAGE_VERBS as readonly string[]).includes(args[0]) ? args.shift()! : "list";
+  const sub = args[0] && STORAGE_VERBS.some((verb) => verb === args[0]) ? args.shift()! : "list";
   const { apiUrl, token } = await apiCredentials();
   const base = `${apiUrl}/api/${product.name}`;
   const auth = { "x-api-key": token };

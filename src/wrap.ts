@@ -105,15 +105,13 @@ function isVarsString(value: VarsJson): value is string {
 /** `SPROUTBOAT_VARS_JSON` (set by the build) → a validated flat string map. */
 export function readVarsFromEnv(): Record<string, string> {
   const raw = process.env.SPROUTBOAT_VARS_JSON;
-  const vars: Record<string, string> = {};
-  if (!raw) return vars;
+  if (!raw) return {};
   const parsed: VarsJson = JSON.parse(raw);
   if (!isVarsObject(parsed)) throw new Error("SPROUTBOAT_VARS_JSON must be a JSON object");
-  for (const [key, value] of Object.entries(parsed)) {
+  return Object.fromEntries(Object.entries(parsed).map(([key, value]): [string, string] => {
     if (!/^[A-Z][A-Z0-9_]*$/.test(key) || !isVarsString(value)) throw new Error(`SPROUTBOAT_VARS_JSON.${key} must map an UPPER_SNAKE name to a string`);
-    vars[key] = value;
-  }
-  return vars;
+    return [key, value];
+  }));
 }
 
 /**
