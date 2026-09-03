@@ -82,6 +82,14 @@ const starterHandler = `export default {
   }
 };
 `;
+// .sproutboat/ holds build output (dist/) and `dev`'s local broker state
+// (dev/, including its SQLite files) — neither belongs in version control.
+// .dev.vars carries secret values for `sproutboat dev`, same convention as
+// Wrangler's file of the same name.
+const starterGitignore = `.sproutboat/
+.dev.vars
+node_modules/
+`;
 
 /** An operational failure — the command was invoked correctly but could not complete. Exit 1. */
 function fail(message: string): never {
@@ -141,6 +149,14 @@ async function init(name = "hello") {
   await writeFile(resolve(directory, "src/index.js"), starterHandler, { flag: "wx" });
   console.log(`Created ${basename(directory)}/sproutboat.jsonc`);
   console.log(`Created ${basename(directory)}/src/index.js`);
+  // Unlike the two files above, an existing .gitignore here is not a sign this
+  // isn't a fresh project (`name` can collide with an unrelated directory) —
+  // leave it alone rather than failing init or clobbering it.
+  const gitignorePath = resolve(directory, ".gitignore");
+  if (!(await Bun.file(gitignorePath).exists())) {
+    await writeFile(gitignorePath, starterGitignore, { flag: "wx" });
+    console.log(`Created ${basename(directory)}/.gitignore`);
+  }
 }
 
 async function check(directory?: string) {
