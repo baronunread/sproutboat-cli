@@ -143,10 +143,17 @@ async function init(name = "hello") {
   if (!/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/.test(name)) fail("project name must be a 3–32 character lowercase slug");
   const directory = resolve(process.cwd(), name);
   const configPath = resolve(directory, "sproutboat.jsonc");
-  if (await Bun.file(configPath).exists()) fail(`${basename(directory)} already contains sproutboat.jsonc`);
+  const handlerPath = resolve(directory, "src/index.js");
+  // Check both targets before writing either — `name` can collide with an
+  // unrelated existing directory, and a second `wx` write failing partway
+  // through used to crash with a raw EEXIST stack trace after already having
+  // created sproutboat.jsonc, leaving a half-scaffolded project behind.
+  for (const [path, label] of [[configPath, "sproutboat.jsonc"], [handlerPath, "src/index.js"]] as const) {
+    if (await Bun.file(path).exists()) fail(`${basename(directory)} already contains ${label}`);
+  }
   await mkdir(resolve(directory, "src"), { recursive: true });
   await writeFile(configPath, starterConfig(name), { flag: "wx" });
-  await writeFile(resolve(directory, "src/index.js"), starterHandler, { flag: "wx" });
+  await writeFile(handlerPath, starterHandler, { flag: "wx" });
   console.log(`Created ${basename(directory)}/sproutboat.jsonc`);
   console.log(`Created ${basename(directory)}/src/index.js`);
   // Unlike the two files above, an existing .gitignore here is not a sign this
