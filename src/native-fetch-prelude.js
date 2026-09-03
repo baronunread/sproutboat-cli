@@ -794,15 +794,18 @@ globalThis.__sbEntry = function (handlers, request) {
   const trigger = request.headers.get('x-sb-trigger');
   if (!trigger) {
     // #28 — per-invocation CPU time. One fetch turn per process (serial), so the
-    // process CPU delta across the handler is this invocation's CPU. Covers both
-    // sync handlers and async ones (via `.then`); the delta spans the whole turn.
+    // process CPU delta across the handler is this invocation's CPU.
     // ponytail: serial-turn assumption; revisit if the profile ever allows
     // concurrent in-process requests.
+    //
+    // Sync handlers only. An async handler's promise is handed straight back:
+    // Porffor alpha-4's native-fetch server resolves the promise the handler
+    // itself returned, but never one derived from `.then()`, so chaining the
+    // tag on hangs the request forever. cpuMs is documented as absent for
+    // async handlers (see LogEvent in services/edge) — that is this.
     const __t0 = __sbCpuMs();
     const __res = handlers.fetch(request);
-    if (__res && __sbIsFn(__res.then)) {
-      return __res.then(function (resolved) { return __sbTagCpu(resolved, __t0); });
-    }
+    if (__res && __sbIsFn(__res.then)) return __res;
     return __sbTagCpu(__res, __t0);
   }
   if (!__sbTriggerAuthed(request)) return new Response('forbidden', { status: 403 });
