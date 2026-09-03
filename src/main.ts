@@ -7,6 +7,7 @@ import { parseConfig, pinBindingId, resourceRefs, type SproutboatConfig } from "
 import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
 import { bundleHandler, BundleError, type BundleResult } from "./bundle";
+import { runDev } from "./dev";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
@@ -157,6 +158,28 @@ async function build(directory?: string, target: "linux-x86_64" | "host" = "linu
   if (target === "host") console.log(dim("  host build — runs here, not deployable; drop --target host to build for a box"));
   console.log(artifact.artifactDir);
   return { project, artifact };
+}
+
+/** #62 — build for this machine, run it against a real broker, rebuild on save. */
+async function dev(args: string[]) {
+  const directory = args.find((arg) => !arg.startsWith("--") && !/^\d+$/.test(arg));
+  const portIndex = args.indexOf("--port");
+  const portArg = portIndex >= 0 ? args[portIndex + 1] : undefined;
+  const port = Number(portArg ?? 8787);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) usageError(`invalid --port: ${portArg}`, "dev [project-dir] [--port <n>] [--no-watch]");
+  const project = await readProject(directory);
+  console.log(dim(`Building ${project.config.name} for this machine (${hostTarget()})…`));
+  await runDev({
+    projectDir: project.directory,
+    config: project.config,
+    sourcePath: project.sourcePath,
+    source: project.bundle.code,
+    port,
+    watch: !args.includes("--no-watch"),
+    // Re-read from disk on every rebuild: the point of watching is that the
+    // files changed, so the bundle captured at startup is stale by definition.
+    rebuild: async () => (await readProject(directory)).bundle.code,
+  });
 }
 
 const PROVISION_FIELDS = [
@@ -709,6 +732,7 @@ await notifyIfOutdated(CLI_VERSION);
 switch (command) {
   case "init": await init(args[0]); break;
   case "check": await check(args[0]); break;
+  case "dev": await dev(args); break;
   case "build": {
     const hostBuild = args.includes("--target") && args[args.indexOf("--target") + 1] === "host";
     await build(args.find((arg) => !arg.startsWith("--") && arg !== "host"), hostBuild ? "host" : "linux-x86_64");

@@ -9,7 +9,7 @@
  * shipped in `vendor/` so this needs no `git` or `make`; if that archive is
  * unusable it falls back to Porffor's own git + make path (needs both on PATH).
  */
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
 import { ensureUWebSockets, porfforRoot, UwsUnavailableError } from "./toolchain";
@@ -64,6 +64,11 @@ export async function compileSprout(input: CompileInput): Promise<void> {
 
   const outDir = dirname(input.outPath);
   await mkdir(outDir, { recursive: true });
+  // The artifact dir is content-addressed, so rebuilding unchanged source lands
+  // on the previous binary — which `chmod 0555` left read-only, and which the
+  // OS may still be executing. The linker cannot overwrite either, so clear it
+  // first rather than failing with "can't write output file".
+  await rm(input.outPath, { force: true });
   const generatedPath = resolve(outDir, "sprout.generated.js");
   const [source, prelude] = await Promise.all([
     input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),

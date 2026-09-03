@@ -11,6 +11,7 @@
 | --- | --- | --- |
 | `init` | `[name]` | Scaffold sproutboat.jsonc + src/index.js in ./<name>. |
 | `check` | `[project-dir]` | Validate the config and entry point without building. |
+| `dev` | `[project-dir] [--port <n>] [--no-watch]` | Run the project on this machine against a real broker, rebuilding on save. |
 | `build` | `[project-dir] [--target host]` | Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. |
 | `deploy` | `[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision]` | Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores. |
 | `versions` | `<list | view <version-id>> [project-dir]` | List the project's deployed versions, or show one version's artifact and bindings. |
@@ -28,7 +29,7 @@
 | `whoami` | — | Show the active endpoint and the account the stored token belongs to. |
 
 ```
-usage: sproutboat <init [name] | check [project-dir] | build [project-dir] [--target host] | deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] | versions <list | view <version-id>> [project-dir] | rollback <version-id> [project-dir] | tail [project-dir] [--sprout] | kv <list | create <name> | info <name> | rename <name> <new> | delete <name>> | d1 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | r2 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | queues <list | create <name> | info <name> | rename <name> <new> | delete <name>> | domains <list | add <host> | verify <host> | delete <host>> [project-dir] | secrets <list | put <NAME> [--value <value>] | delete <NAME>> [project-dir] | delete [project-dir] [--name <project>] --yes | login [--api-url <url>] [--token <token>] | logout [--api-url <url>] | whoami>
+usage: sproutboat <init [name] | check [project-dir] | dev [project-dir] [--port <n>] [--no-watch] | build [project-dir] [--target host] | deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] | versions <list | view <version-id>> [project-dir] | rollback <version-id> [project-dir] | tail [project-dir] [--sprout] | kv <list | create <name> | info <name> | rename <name> <new> | delete <name>> | d1 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | r2 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | queues <list | create <name> | info <name> | rename <name> <new> | delete <name>> | domains <list | add <host> | verify <host> | delete <host>> [project-dir] | secrets <list | put <NAME> [--value <value>] | delete <NAME>> [project-dir] | delete [project-dir] [--name <project>] --yes | login [--api-url <url>] [--token <token>] | logout [--api-url <url>] | whoami>
 ```
 
 ## Environment variables
