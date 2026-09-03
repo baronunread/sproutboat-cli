@@ -21,6 +21,8 @@ const COMPILE_TIMEOUT_MS = Number(process.env.SPROUTBOAT_COMPILE_TIMEOUT_MS || 6
 
 export type CompileInput = {
   sourcePath: string;
+  /** The bundled module (#89). Falls back to reading `sourcePath` verbatim. */
+  source?: string;
   outPath: string;
   vars: Record<string, string>;
   bindings?: Bindings;
@@ -63,7 +65,10 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   const outDir = dirname(input.outPath);
   await mkdir(outDir, { recursive: true });
   const generatedPath = resolve(outDir, "sprout.generated.js");
-  const [source, prelude] = await Promise.all([readFile(input.sourcePath, "utf8"), readFile(preludePath, "utf8")]);
+  const [source, prelude] = await Promise.all([
+    input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),
+    readFile(preludePath, "utf8"),
+  ]);
   await writeFile(generatedPath, wrapNativeFetchHandler(source, prelude, input.vars, input.bindings ?? EMPTY_BINDINGS));
 
   const porffor = porfforRoot();
