@@ -12,6 +12,11 @@ const alwaysForbidden: Array<[RegExp, string]> = [
   [/\brequire\s*\(/, "CommonJS require is not supported"],
   [/\b(WebSocket|XMLHttpRequest)\s*\(/, "WebSocket / XMLHttpRequest are not supported"],
   [/\b(process|Bun|Deno|Buffer|node:)\b/, "Node, Bun, and Deno APIs are not supported"],
+  // Porffor alpha-4 compiles `new Proxy(...)` and then ignores the handler: a
+  // trapped property reads back as `undefined`, with no throw. Rejecting it
+  // here is the difference between a build error and a 502 nobody can explain.
+  // It is why itty-router and other Proxy-based routers do not work yet.
+  [/\bnew\s+Proxy\s*\(|\bProxy\s*\.\s*revocable\s*\(/, "Proxy is not supported by the compiler: its traps are silently ignored and the property reads back as undefined"],
 ];
 
 const fetchWithoutAllowlist: [RegExp, string] = [
