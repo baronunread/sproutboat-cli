@@ -6,8 +6,8 @@ import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
 import { validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
-import { activeApiUrl, savedToken, saveToken } from "./credentials";
-import { helpText } from "./surface";
+import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
+import { helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
 import { notifyIfOutdated } from "./update-check";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
 
@@ -211,6 +211,38 @@ async function provisionBindings(directory = process.cwd()): Promise<void> {
   await writeFile(configPath, source);
 }
 
+/** #79 — wrangler parity: drop the stored credential for an endpoint. */
+async function logout(args: string[]) {
+  const { apiUrl } = parseLoginArgs(args);
+  console.log(await forgetToken(apiUrl)
+    ? ok(`forgot the credential for ${apiUrl}`)
+    : `no stored credential for ${apiUrl}`);
+}
+
+/**
+ * #79 — wrangler parity: which endpoint, and who the stored token belongs to.
+ * The account comes from the control plane, so this also proves the token still
+ * works rather than only reporting what is on disk.
+ */
+async function whoami() {
+  const apiUrl = process.env.SPROUTBOAT_API_URL || await activeApiUrl();
+  if (!apiUrl) { console.log("not logged in — run `sproutboat login`"); return; }
+  const token = process.env.SPROUTBOAT_TOKEN || await savedToken(apiUrl);
+  console.log(`endpoint  ${apiUrl}`);
+  if (!token) { console.log(`account   ${dim("no stored token — run `sproutboat login`")}`); return; }
+
+  const response = await fetch(`${apiUrl}/api/account`, { headers: { "x-api-key": token } });
+  if (!response.ok) {
+    console.log(`account   ${rose(response.status === 401 ? "token rejected — run `sproutboat login`" : `control plane said ${response.status}`)}`);
+    return;
+  }
+  const account = jsonObject(parseJsonValue(await response.text()));
+  const profile = jsonObject(account?.profile ?? null);
+  const user = jsonObject(account?.user ?? null);
+  console.log(`account   ${isString(profile?.username) ? profile.username : "(no namespace reserved)"}`);
+  if (user && isString(user.email)) console.log(`email     ${user.email}`);
+}
+
 async function deploy(args: string[]) {
   const artifactIndex = args.indexOf("--artifact");
   const dryRun = args.includes("--dry-run");
@@ -381,8 +413,40 @@ async function apiCredentials() {
 }
 
 async function versions(args: string[]) {
-  if (args[0] !== "list") usageError(args[0] ? `versions: unknown subcommand "${args[0]}"` : "versions: missing subcommand", "versions list [project-dir]");
-  const [project, { apiUrl, token }] = await Promise.all([readProject(args[1]), apiCredentials()]);
+  const sub = args[0];
+  if (sub !== "list" && sub !== "view") {
+    usageError(sub ? `versions: unknown subcommand "${sub}"` : "versions: missing subcommand", "versions <list | view <version-id>> [project-dir]");
+  }
+  args.shift();
+
+  if (sub === "view") {
+    const id = args.shift();
+    if (!id) usageError("versions view: missing <version-id>", "versions view <version-id> [project-dir]");
+    const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
+    const body = await responseText(
+      await fetch(`${apiUrl}/api/projects/${project.config.name}/deployments/${encodeURIComponent(id)}`, { headers: { "x-api-key": token } }),
+      "could not read that version",
+    );
+    const detail = jsonObject(parseJsonValue(body));
+    if (!detail) fail("could not parse version response");
+    const manifest = jsonObject(detail.manifest ?? null);
+    console.log(`${bold(String(detail.id))} ${detail.active ? ok("active") : dim("superseded")}`);
+    console.log(`  route     ${String(detail.hostname)}`);
+    console.log(`  artifact  ${String(detail.artifact)}`);
+    console.log(`  deployed  ${String(detail.deployedAt)}${isString(detail.deployedBy) ? ` by ${detail.deployedBy}` : ""}`);
+    if (manifest) {
+      console.log(`  built     ${String(manifest.builtAt)} · porffor ${String(manifest.porfforVersion)} · ${String(manifest.binarySize)} bytes`);
+    } else if (isString(detail.manifestError)) {
+      console.log(`  ! manifest unavailable: ${detail.manifestError}`);
+    }
+    const resources = Array.isArray(detail.resources) ? detail.resources.map((entry) => jsonObject(entry)) : [];
+    for (const resource of resources) {
+      if (resource) console.log(`  bound     ${String(resource.kind)} ${String(resource.name)} ${dim(String(resource.id))}`);
+    }
+    return;
+  }
+
+  const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
   const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/deployments`, { headers: { "x-api-key": token } });
   const deployments = parseVersionList(await responseText(response, "could not list versions"));
   if (!deployments) fail("could not parse versions response");
@@ -438,7 +502,7 @@ function printDomain(domain: DomainView) {
 }
 
 async function domains(args: string[]) {
-  const sub = args[0] && !args[0].startsWith("-") && ["list", "add", "verify", "rm"].includes(args[0]) ? args.shift()! : "list";
+  const sub = args[0] && !args[0].startsWith("-") && ["list", "add", "verify", "delete"].includes(args[0]) ? args.shift()! : "list";
   const host = sub === "list" ? undefined : args.shift();
   if (sub !== "list" && !host) usageError(`domains ${sub}: missing <hostname>`, `domains ${sub} <hostname> [project-dir]`);
   const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
@@ -454,7 +518,7 @@ async function domains(args: string[]) {
     for (const entry of list) { const d = parseDomain(JSON.stringify(entry)); if (d) printDomain(d); }
     return;
   }
-  if (sub === "rm") {
+  if (sub === "delete") {
     const response = await fetch(`${base}/${host}`, { method: "DELETE", headers: auth });
     await responseText(response, "delete rejected");
     console.log(ok(`removed ${host}`));
@@ -471,11 +535,23 @@ async function domains(args: string[]) {
 }
 
 async function secrets(args: string[]) {
-  const sub = args[0] && ["list", "set", "rm"].includes(args[0]) ? args.shift()! : "list";
-  const name = sub === "list" ? undefined : args.shift();
+  const sub = args[0] && ["list", "put", "delete"].includes(args[0]) ? args.shift()! : "list";
+
+  // `--value` is opt-in; without it the value comes from stdin, so a secret does
+  // not land in shell history. It is also what disambiguates the positionals:
+  // `secrets put NAME <value> [project-dir]` could not tell a value from a path,
+  // and read the value as the project directory.
+  let inlineValue: string | undefined;
+  const positional: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--value") inlineValue = args[(index += 1)];
+    else positional.push(args[index]);
+  }
+
+  const name = sub === "list" ? undefined : positional.shift();
   if (sub !== "list" && !name) usageError(`secrets ${sub}: missing <NAME>`, `secrets ${sub} <NAME> [project-dir]`);
   if (name && !/^[A-Z][A-Z0-9_]*$/.test(name)) fail("secret name must be UPPER_SNAKE_CASE");
-  const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
+  const [project, { apiUrl, token }] = await Promise.all([readProject(positional[0]), apiCredentials()]);
   const base = `${apiUrl}/api/projects/${project.config.name}/secrets`;
   const auth = { "x-api-key": token };
 
@@ -486,78 +562,104 @@ async function secrets(args: string[]) {
     console.log(names.length ? names.join("\n") : "no secrets");
     return;
   }
-  if (sub === "rm") {
+  if (sub === "delete") {
     await responseText(await fetch(`${base}/${name}`, { method: "DELETE", headers: auth }), "delete rejected");
     console.log(ok(`removed ${name}`));
     return;
   }
-  // set: value from the next arg, else stdin (keeps it out of shell history).
-  const value = args[1] && !args[1].startsWith("-") && args[1] !== project.directory
-    ? args[1]
-    : (await Bun.stdin.text()).replace(/\r?\n$/, "");
-  if (!value) fail("no value — pass it as an argument or pipe it on stdin");
+
+  const value = inlineValue ?? (await Bun.stdin.text()).replace(/\r?\n$/, "");
+  if (!value) fail("no value — pipe it on stdin, or pass --value <value>");
   await responseText(
     await fetch(`${base}/${name}`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ value }) }),
-    "set rejected",
+    "put rejected",
   );
-  console.log(`Set ${name} — applies on the next deploy or sprout restart`);
+  console.log(ok(`set ${name} — applies on the next deploy or sprout restart`));
 }
 
-const RESOURCE_KINDS = ["kv", "d1", "r2", "queue"];
-
 /**
- * #74 — account-level storage resources. Unlike `secrets`/`domains` these are
- * not project-scoped, so there's no `readProject` here. `create` prints the
- * `<kind>_<id>` handle to paste into `sproutboat.jsonc` bindings.
+ * #79 — one command per storage product (`kv`, `d1`, `r2`, `queues`), each with
+ * the same five verbs, over that product's own `/api/<product>` collection.
+ *
+ * Wrangler nests two of its four (`kv namespace create`, `r2 bucket create`)
+ * and leaves `d1 create` and `queues create` flat. The nesting is there to
+ * separate the container from its contents, which the verb already does — so
+ * ours are uniform, and contents take their own noun when they exist
+ * (`kv key get`, `r2 object put`).
  */
-async function resource(args: string[]) {
-  const sub = args[0] && ["list", "create", "rename", "delete"].includes(args[0]) ? args.shift()! : "list";
+/** The account's resources of one kind, by name. */
+async function storageRows(base: string, auth: Record<string, string>, product: StorageProduct): Promise<JsonObject[]> {
+  const body = await responseText(await fetch(base, { headers: auth }), `could not list ${product.plural}`);
+  const parsed = jsonObject(parseJsonValue(body));
+  return (parsed && Array.isArray(parsed.resources) ? parsed.resources : [])
+    .map((entry) => jsonObject(entry))
+    .filter((entry): entry is JsonObject => Boolean(entry));
+}
+
+/** Resolve a name to its `<kind>_<id>` handle — the API addresses rows by id. */
+function idForName(rows: JsonObject[], name: string, product: StorageProduct): string {
+  const match = rows.find((row) => row.name === name);
+  if (!match || !isString(match.id)) fail(`no ${product.noun} named "${name}"`);
+  return String(match.id);
+}
+
+async function storage(key: string, args: string[]) {
+  const product = STORAGE_PRODUCTS.find((entry) => entry.name === key)!;
+  const sub = args[0] && (STORAGE_VERBS as readonly string[]).includes(args[0]) ? args.shift()! : "list";
   const { apiUrl, token } = await apiCredentials();
-  const base = `${apiUrl}/api/resources`;
+  const base = `${apiUrl}/api/${product.name}`;
   const auth = { "x-api-key": token };
 
   if (sub === "list") {
-    const kindFilter = args[0];
-    const body = await responseText(await fetch(base, { headers: auth }), "could not list resources");
-    const parsed = jsonObject(parseJsonValue(body));
-    const rows = (parsed && Array.isArray(parsed.resources) ? parsed.resources : [])
-      .map((entry) => jsonObject(entry))
-      .filter((entry): entry is JsonObject => Boolean(entry) && (!kindFilter || entry!.kind === kindFilter));
-    if (rows.length === 0) { console.log(kindFilter ? `no ${kindFilter} resources` : "no resources"); return; }
-    for (const row of rows) console.log(`${String(row.kind).padEnd(9)} ${String(row.id).padEnd(30)} ${String(row.name)}`);
+    const rows = await storageRows(base, auth, product);
+    if (rows.length === 0) { console.log(`no ${product.plural}`); return; }
+    for (const row of rows) {
+      const bound = Array.isArray(row.projects) ? row.projects.filter(isString) : [];
+      console.log(`${String(row.id).padEnd(30)} ${String(row.name).padEnd(24)} ${bound.length ? bound.join(", ") : dim("unbound")}`);
+    }
     return;
   }
 
+  const name = args.shift();
+  if (!name) usageError(`${key} ${sub}: missing <name>`, `${key} ${sub} <name>`);
+
   if (sub === "create") {
-    const [kind, name] = args;
-    if (!kind || !RESOURCE_KINDS.includes(kind)) usageError(`resource create: kind must be one of ${RESOURCE_KINDS.join(", ")}`, "resource create <kind> <name>");
-    if (!name) usageError("resource create: missing <name>", "resource create <kind> <name>");
     const body = await responseText(
-      await fetch(base, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ kind, name }) }),
+      await fetch(base, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ name }) }),
       "create rejected",
     );
     const record = jsonObject(jsonObject(parseJsonValue(body))?.resource ?? null);
     if (!record || !isString(record.id)) fail("create response was not a resource");
-    console.log(ok(`created ${kind} ${bold(String(record.name))}`));
+    console.log(ok(`created ${product.noun} ${bold(String(record.name))}`));
     console.log(record.id);
     return;
   }
 
-  if (sub === "rename") {
-    const [id, name] = args;
-    if (!id || !name) usageError("resource rename: need <id> <name>", "resource rename <id> <name>");
-    await responseText(
-      await fetch(`${base}/${id}`, { method: "PATCH", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ name }) }),
-      "rename rejected",
-    );
-    console.log(ok(`renamed ${id} → ${name}`));
+  const rows = await storageRows(base, auth, product);
+  const id = idForName(rows, name, product);
+
+  if (sub === "info") {
+    const row = rows.find((entry) => entry.id === id)!;
+    const bound = Array.isArray(row.projects) ? row.projects.filter(isString) : [];
+    console.log(`${bold(String(row.name))}  ${dim(String(row.id))}`);
+    console.log(`  created  ${String(row.createdAt)}`);
+    console.log(`  bound to ${bound.length ? bound.join(", ") : "nothing"}`);
     return;
   }
 
-  const id = args[0];
-  if (!id) usageError("resource delete: missing <id>", "resource delete <id>");
+  if (sub === "rename") {
+    const next = args.shift();
+    if (!next) usageError(`${key} rename: missing <new-name>`, `${key} rename <name> <new-name>`);
+    await responseText(
+      await fetch(`${base}/${id}`, { method: "PATCH", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ name: next }) }),
+      "rename rejected",
+    );
+    console.log(ok(`renamed ${name} → ${next}`));
+    return;
+  }
+
   await responseText(await fetch(`${base}/${id}`, { method: "DELETE", headers: auth }), "delete rejected");
-  console.log(ok(`deleted ${id}`));
+  console.log(ok(`deleted ${product.noun} ${name}`));
 }
 
 async function deleteProject(args: string[]) {
@@ -614,12 +716,14 @@ switch (command) {
   case "check": await check(args[0]); break;
   case "build": await build(args[0]); break;
   case "login": await login(args); break;
+  case "logout": await logout(args); break;
+  case "whoami": await whoami(); break;
   case "deploy": await deploy(args); break;
   case "versions": await versions(args); break;
   case "rollback": await rollback(args); break;
   case "domains": await domains(args); break;
   case "secrets": await secrets(args); break;
-  case "resource": await resource(args); break;
+  case "kv": case "d1": case "r2": case "queues": await storage(command, args); break;
   case "tail": await tail(args); break;
   case "delete": await deleteProject(args); break;
   default: usage();

@@ -4,7 +4,7 @@ const slugPattern = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/;
  * A storage binding entry (#74). Either a bare `"BINDING"` — resolved to an
  * ephemeral local resource for `sproutboat dev`, rejected by a real deploy — or
  * `{ binding, id }` pointing at an account-level resource created with
- * `sproutboat resource create`. The id carries its own `<kind>_` prefix.
+ * `sproutboat <kv|d1|r2|queues> create`. The id carries its own `<kind>_` prefix.
  */
 export type ResourceBinding = { binding: string; id: string };
 export type ResourceRef = string | ResourceBinding;
