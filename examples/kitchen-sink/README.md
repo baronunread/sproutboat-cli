@@ -6,7 +6,7 @@ and an end-to-end harness.
 ```
 src/index.js     the Sproutboat worker (routes + DO class + scheduled/queue)
 web/             the Astro UI  ->  built to web/dist, published as env.ASSETS
-harness.ts       headless end-to-end check (18 assertions)
+harness.ts       headless end-to-end check (19 assertions)
 serve.ts         same, but stays up for the browser
 ```
 

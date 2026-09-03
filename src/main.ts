@@ -82,6 +82,14 @@ const starterHandler = `export default {
   }
 };
 `;
+// .sproutboat/ holds build output (dist/) and `dev`'s local broker state
+// (dev/, including its SQLite files) — neither belongs in version control.
+// .dev.vars carries secret values for `sproutboat dev`, same convention as
+// Wrangler's file of the same name.
+const starterGitignore = `.sproutboat/
+.dev.vars
+node_modules/
+`;
 
 /** An operational failure — the command was invoked correctly but could not complete. Exit 1. */
 function fail(message: string): never {
@@ -135,12 +143,27 @@ async function init(name = "hello") {
   if (!/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/.test(name)) fail("project name must be a 3–32 character lowercase slug");
   const directory = resolve(process.cwd(), name);
   const configPath = resolve(directory, "sproutboat.jsonc");
-  if (await Bun.file(configPath).exists()) fail(`${basename(directory)} already contains sproutboat.jsonc`);
+  const handlerPath = resolve(directory, "src/index.js");
+  // Check both targets before writing either — `name` can collide with an
+  // unrelated existing directory, and a second `wx` write failing partway
+  // through used to crash with a raw EEXIST stack trace after already having
+  // created sproutboat.jsonc, leaving a half-scaffolded project behind.
+  for (const [path, label] of [[configPath, "sproutboat.jsonc"], [handlerPath, "src/index.js"]] as const) {
+    if (await Bun.file(path).exists()) fail(`${basename(directory)} already contains ${label}`);
+  }
   await mkdir(resolve(directory, "src"), { recursive: true });
   await writeFile(configPath, starterConfig(name), { flag: "wx" });
-  await writeFile(resolve(directory, "src/index.js"), starterHandler, { flag: "wx" });
+  await writeFile(handlerPath, starterHandler, { flag: "wx" });
   console.log(`Created ${basename(directory)}/sproutboat.jsonc`);
   console.log(`Created ${basename(directory)}/src/index.js`);
+  // Unlike the two files above, an existing .gitignore here is not a sign this
+  // isn't a fresh project (`name` can collide with an unrelated directory) —
+  // leave it alone rather than failing init or clobbering it.
+  const gitignorePath = resolve(directory, ".gitignore");
+  if (!(await Bun.file(gitignorePath).exists())) {
+    await writeFile(gitignorePath, starterGitignore, { flag: "wx" });
+    console.log(`Created ${basename(directory)}/.gitignore`);
+  }
 }
 
 async function check(directory?: string) {

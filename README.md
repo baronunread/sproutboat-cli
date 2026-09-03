@@ -8,9 +8,15 @@ Full reference: [sproutboat.com/docs](https://sproutboat.com/docs)
 (plain text for agents: [sproutboat.com/llms.txt](https://sproutboat.com/llms.txt)).
 
 ```sh
-bunx sproutboat login --api-url https://control.example.com   # one browser approval
 bunx sproutboat init hello
 cd hello
+bunx sproutboat dev        # runs it right here, no control plane needed
+```
+
+Happy with it? Ship it:
+
+```sh
+bunx sproutboat login --api-url https://control.example.com   # one browser approval
 bunx sproutboat deploy
 ```
 
@@ -34,7 +40,8 @@ of that file).
 | --- | --- |
 | `init [name]` | Scaffold `sproutboat.jsonc` + `src/index.js` |
 | `check` | Validate the config and entry point |
-| `build` | Cross-compile the sprout binary (Porffor + Zig) |
+| `dev [--port <n>] [--no-watch]` | Run the project on this machine against a real broker, rebuilding on save |
+| `build [--target host]` | Cross-compile the sprout binary (Porffor + Zig); `--target host` builds for this machine instead, for `dev` — not deployable |
 | `deploy [--dry-run] [--no-wait] [--no-provision] [--artifact <dir>]` | Build, auto-provision id-less storage bindings, upload, wait until the URL serves |
 | `login [--api-url <url>] [--token <token>]` | Browser device flow, or store a token directly |
 | `tail [name] [--sprout]` | Recent request logs; `--sprout` streams the running sprout + broker output |
@@ -89,11 +96,18 @@ store then survives redeploys. Pass `--no-provision` to keep it a throwaway
 per-deploy store instead, or `sproutboat kv create <name>` (or `d1`/`r2`/`queues`) to make one up front
 and share its id across projects.
 
-The handler is one `export default { fetch(request) }`, optionally with
-`scheduled(event)` / `queue(batch)` handlers and Durable Object classes above
-it. `env` is a global (not a parameter), and every binding call is synchronous.
+The handler is `export default { fetch(request) }`; it may import from other
+files in the project and from its own `node_modules`, and optionally export
+`scheduled(event)` / `queue(batch)` handlers and Durable Object classes.
+`env` is a global (not a parameter), and every binding call is synchronous.
 See [`examples/kitchen-sink/`](examples/kitchen-sink) for one app that uses
 every binding.
+
+`sproutboat dev` runs against a real local broker, so bindings behave like
+production without a deploy — except `secrets`, which live only in the
+control plane. Give it a value with a `.dev.vars` file next to
+`sproutboat.jsonc` (`API_KEY=whatever`, one per line, gitignore it):
+`env.API_KEY` then resolves to that value under `dev` only.
 
 ## Requirements
 
@@ -115,10 +129,15 @@ Capability profile `http-sync-v0`: one synchronous `fetch` handler, optional
 `scheduled` / `queue` handlers, no streaming, no WebSockets. Binding values are
 text/JSON and travel one at a time over the loopback frame (32 MiB cap);
 large-object R2 is [#56](https://github.com/baronunread/sproutboat/issues/56).
-The sprout upload caps at 16 MiB, assets at 64 MiB / 4096 files. Node
-compatibility is Porffor alpha, so `import`/`require`, `process`, `node:*`, and
-parsing date strings do not work; `sproutboat check` catches most of it. Full
-list at [sproutboat.com/docs](https://sproutboat.com/docs).
+The sprout upload caps at 16 MiB, assets at 64 MiB / 4096 files. The entry
+point is bundled before it compiles, so relative imports and npm dependencies
+from the project's own `node_modules` work; CommonJS `require`, dynamic
+`import()`, and any `process`/`Bun`/`Deno`/`node:*` reached even through a
+dependency do not. `new Proxy(...)` compiles but its traps are silently
+ignored by Porffor alpha, so it's rejected too. A parsed `Date` with a numeric
+timezone offset (`+02:00`) currently comes out wrong; plain ISO-8601 UTC
+strings are fine. `sproutboat check` catches most of this before a build.
+Full list at [sproutboat.com/docs](https://sproutboat.com/docs).
 
 ---
 
