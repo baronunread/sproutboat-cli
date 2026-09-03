@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { wrapNativeFetchHandler } from "./compile";
+import { DEPLOY_TARGET, hostTarget, validateManifest } from "./manifest";
 
 test("wrap: injects prelude + env, keeps the handler body verbatim", () => {
   const out = wrapNativeFetchHandler(
@@ -72,4 +73,30 @@ test("prelude: crypto is CSPRNG-backed, no Math.random downgrade", async () => {
   expect(prelude).toContain("__sbRandomBytes(String(n))");
   // and the insecure fallback is gone (issue #54)
   expect(prelude).not.toContain("Math.random");
+});
+
+/**
+ * #62 — a `--target host` artifact runs on the machine that built it and
+ * nowhere else. Nothing stops it reaching `deploy` except the manifest target,
+ * so that rejection is the whole safety property.
+ */
+test("manifest: a host-target artifact is rejected as undeployable", () => {
+  const digest = `sha256:${"a".repeat(64)}` as const;
+  const base = {
+    schemaVersion: 2, project: "hello", runtime: "native-fetch", capabilityProfile: "http-sync-v0",
+    porfforVersion: "alpha-4", esbuildVersion: "0.28.2", buildImage: "stamp",
+    sourceHash: digest, binaryHash: digest, binarySize: 42, builtAt: "2026-08-26T00:00:00.000Z",
+  };
+  expect(validateManifest({ ...base, target: DEPLOY_TARGET }).ok).toBe(true);
+
+  const host = validateManifest({ ...base, target: "arm64-darwin" });
+  expect(host.ok).toBe(false);
+  if (host.ok) throw new Error("unreachable");
+  expect(host.errors.join(" ")).toContain("arm64-darwin");
+  expect(host.errors.join(" ")).toContain("--target host");
+});
+
+test("hostTarget names this machine, and is never the deploy target", () => {
+  expect(hostTarget()).toBe(`${process.arch}-${process.platform}`);
+  expect(hostTarget()).not.toBe(DEPLOY_TARGET);
 });

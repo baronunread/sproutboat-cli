@@ -2,10 +2,22 @@ export const ARTIFACT_SCHEMA_VERSION = 2;
 export const RUNTIME = "native-fetch";
 export const CAPABILITY_PROFILE = "http-sync-v0";
 
+/** The only target a deployed artifact may carry. Every box runs linux-x86_64. */
+export const DEPLOY_TARGET = "linux-x86_64";
+
+/**
+ * `<arch>-<platform>` of the machine doing the build, e.g. `arm64-darwin`.
+ * Only `sproutboat build --target host` produces one (#62): it runs on this
+ * machine for local dev and is deliberately not portable, so `validateManifest`
+ * rejects it and neither `deploy` nor the control plane will accept it.
+ */
+export type HostTarget = `${string}-${string}`;
+export const hostTarget = (): HostTarget => `${process.arch}-${process.platform}`;
+
 export type ArtifactManifest = {
   schemaVersion: 2;
   project: string;
-  target: "linux-x86_64";
+  target: typeof DEPLOY_TARGET | HostTarget;
   runtime: "native-fetch";
   capabilityProfile: "http-sync-v0";
   porfforVersion: string;
@@ -56,8 +68,14 @@ export function validateManifest(value: ManifestInput): ManifestValidation {
   if (schemaVersion === null) errors.push("schemaVersion must be 2");
   const project = isString(value.project) && /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/.test(value.project) ? value.project : null;
   if (project === null) errors.push("project must be a valid slug");
-  const target = value.target === "linux-x86_64" ? value.target : null;
-  if (target === null) errors.push("target must be linux-x86_64");
+  const target = value.target === DEPLOY_TARGET ? value.target : null;
+  if (target === null) {
+    // A `--target host` artifact lands here: runnable where it was built, not
+    // on a box. Name that, so the failure reads as "wrong build" not "corrupt".
+    errors.push(isString(value.target) && value.target !== DEPLOY_TARGET
+      ? `target must be ${DEPLOY_TARGET}, got ${value.target} — \`--target host\` builds are for local dev and cannot be deployed`
+      : `target must be ${DEPLOY_TARGET}`);
+  }
   const runtime = value.runtime === RUNTIME ? value.runtime : null;
   if (runtime === null) errors.push("runtime must be native-fetch");
   const capabilityProfile = value.capabilityProfile === CAPABILITY_PROFILE ? value.capabilityProfile : null;

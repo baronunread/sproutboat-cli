@@ -4,13 +4,19 @@ import { resolve } from "node:path";
 import { walkAssets, type AssetManifest } from "./assets";
 import { resourceRefs, type SproutboatConfig } from "./config";
 import { compileSprout } from "./compile";
-import { ARTIFACT_SCHEMA_VERSION, CAPABILITY_PROFILE, RUNTIME, type ArtifactManifest } from "./manifest";
+import { ARTIFACT_SCHEMA_VERSION, CAPABILITY_PROFILE, DEPLOY_TARGET, hostTarget, RUNTIME, type ArtifactManifest } from "./manifest";
 import { ensureZig, esbuildVersion, porfforVersion, toolchainStamp } from "./toolchain";
 
 export type BuildInput = {
   projectDir: string;
   config: SproutboatConfig;
   sourcePath: string;
+  /**
+   * `host` (#62) compiles for this machine instead of cross-compiling for a
+   * box, so `sproutboat dev` can run the sprout locally. The manifest records
+   * the real target, which is what stops the result being deployed.
+   */
+  target?: "linux-x86_64" | "host";
 };
 
 export type BuildOutput = {
@@ -63,20 +69,24 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     resources,
   };
 
-  const zigBin = await ensureZig();
+  // A host build never shells out to `zig`, so do not fetch a 50 MB toolchain
+  // for it — that download is the slowest part of a first local build.
+  const host = input.target === "host";
+  const zigBin = host ? undefined : await ensureZig();
   await compileSprout({
     sourcePath: input.sourcePath,
     outPath: sproutPath,
     vars: input.config.vars ?? {},
     bindings,
     zigBin,
+    target: input.target,
   });
 
   const sprout = await readFile(sproutPath);
   const manifest: ArtifactManifest = {
     schemaVersion: ARTIFACT_SCHEMA_VERSION,
     project: input.config.name,
-    target: "linux-x86_64",
+    target: host ? hostTarget() : DEPLOY_TARGET,
     runtime: RUNTIME,
     capabilityProfile: CAPABILITY_PROFILE,
     porfforVersion: porfforVersion(),
