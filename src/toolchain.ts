@@ -13,14 +13,17 @@ import { dirname, resolve } from "node:path";
 
 export const ZIG_VERSION = "0.16.0";
 
+/** The `<arch>-<os>` platforms ziglang.org publishes a tarball for that we pin. */
+type ZigPlatform = "x86_64-linux" | "aarch64-linux" | "x86_64-macos" | "aarch64-macos";
+
 // sha256 of the official ziglang.org tarballs for ZIG_VERSION, keyed by
 // `<arch>-<os>` (the download naming). Bump alongside ZIG_VERSION.
-const ZIG_SHA256: Record<string, string> = {
+const ZIG_SHA256 = {
   "x86_64-linux": "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00",
   "aarch64-linux": "ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17",
   "x86_64-macos": "0387557ed1877bc6a2e1802c8391953baddba76081876301c522f52977b52ba7",
   "aarch64-macos": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
-};
+} satisfies Record<ZigPlatform, string>;
 
 // Pinned Porffor identity — must match the `porffor` entry in package.json
 // (`github:CanadaHonk/porffor#alpha-4`, commit a415d19). PORFFOR_VERSION overrides.
@@ -43,7 +46,7 @@ const UWS_COMMIT_FULL = "360c276d609d59af56ae6932adb95154ace9f15f";
 // or the `uws-prebuild` workflow.
 const UWS_TARBALL_SHA256 = "e83736f3f8cf9d56a1ebe6ea61625a7af12386763374d47c14cff472ada7484a";
 
-function platformKey(): string {
+function platformKey(): ZigPlatform {
   const arch = process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : null;
   const os = process.platform === "linux" ? "linux" : process.platform === "darwin" ? "macos" : null;
   if (!arch || !os) throw new Error(`no pinned Zig for ${process.platform}/${process.arch} — set SPROUTBOAT_ZIG to a zig ${ZIG_VERSION} binary`);

@@ -7,12 +7,21 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { configDirectory } from "./credentials";
+import { isSafeInteger, isString, jsonObject, parseJsonValue } from "./json";
 import { dim } from "./style";
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const REGISTRY = "https://registry.npmjs.org/sproutboat/latest";
 
 type Cache = { checkedAt: number; latest: string };
+
+/** Decode our own cache file, which a stale version or a partial write can corrupt. */
+function parseCache(source: string): Cache | undefined {
+  const record = jsonObject(parseJsonValue(source));
+  return record && isSafeInteger(record.checkedAt) && isString(record.latest)
+    ? { checkedAt: record.checkedAt, latest: record.latest }
+    : undefined;
+}
 
 function cachePath(): string {
   return resolve(configDirectory(), "update-check.json");
@@ -30,15 +39,15 @@ function isNewer(latest: string, current: string): boolean {
 
 async function latestVersion(): Promise<string | undefined> {
   try {
-    const cached = JSON.parse(await readFile(cachePath(), "utf8")) as Cache;
-    if (Date.now() - cached.checkedAt < CACHE_TTL_MS && typeof cached.latest === "string") return cached.latest;
+    const cached = parseCache(await readFile(cachePath(), "utf8"));
+    if (cached && Date.now() - cached.checkedAt < CACHE_TTL_MS) return cached.latest;
   } catch { /* no cache yet, or unreadable — fetch below */ }
 
   try {
     const response = await fetch(REGISTRY, { signal: AbortSignal.timeout(1000), headers: { accept: "application/json" } });
     if (!response.ok) return undefined;
-    const latest = ((await response.json()) as { version?: string }).version;
-    if (typeof latest !== "string") return undefined;
+    const latest = jsonObject(parseJsonValue(await response.text()))?.version;
+    if (!isString(latest)) return undefined;
     await writeFile(cachePath(), JSON.stringify({ checkedAt: Date.now(), latest } satisfies Cache)).catch(() => {});
     return latest;
   } catch { /* offline / slow / DNS — skip silently */ }

@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveAssetKey, type AssetManifest } from "./assets";
+import { isBoolean, isString, jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "./json";
 
 export type Bindings = {
   kv: string[];
@@ -44,7 +45,12 @@ export type Bindings = {
    */
   resources: Record<string, { kind: "kv" | "d1" | "r2" | "queue"; id: string }>;
 };
-export type Frame = Record<string, unknown>;
+/** One decoded wire frame. `undefined` fields are dropped by `JSON.stringify`, so
+ *  an optional reply field can be left off without a second object shape. */
+export type Frame = { [key: string]: JsonValue | undefined };
+
+/** The only shape of `fetch` the broker calls — the global `fetch` satisfies it. */
+export type FetchLike = (input: URL | string, init?: RequestInit) => Promise<Response>;
 
 export type BrokerOptions = {
   db?: string;
@@ -69,21 +75,24 @@ export type BrokerOptions = {
   /** Directory of published static assets (its sibling `assets.json` is the manifest). Backs `assets.get`. */
   assetsDir?: string;
   /** Injected in tests; defaults to the global `fetch`. */
-  fetchImpl?: typeof fetch;
+  fetchImpl?: FetchLike;
 };
 
 type SqlParam = string | number | null;
+/** The `{ results, meta }` shape Cloudflare's D1 client expects back per statement. */
+type D1Result = { results: JsonValue[]; meta: { duration: number; changes: number; last_row_id: number; rows_read: number } };
 type R2Row = { key: string; body: string; size: number; etag: string; uploaded: string; http_json: string; custom_json: string };
-const sqlParams = (v: unknown): SqlParam[] => {
+const isNumber = (v: JsonValue | undefined): v is number => Number.isFinite(v);
+const sqlParams = (v: JsonValue | undefined): SqlParam[] => {
   if (!Array.isArray(v)) return [];
-  return v.map((p) => (p === null || typeof p === "number" || typeof p === "string" ? p : typeof p === "boolean" ? (p ? 1 : 0) : String(p)));
+  return v.map((p) => (p === null || isNumber(p) || isString(p) ? p : isBoolean(p) ? (p ? 1 : 0) : String(p)));
 };
 
 // One binding call = one frame, and an R2/KV value travels inside it as a JSON
 // string (escaping can inflate binary content several ×). 32 MiB keeps a ~25 MB
 // upload working; true large-object streaming is v2.
 const MAX_FRAME = 32 * 1024 * 1024;
-const str = (v: unknown): string => (typeof v === "string" ? v : String(v ?? ""));
+const str = (v: JsonValue | undefined): string => (isString(v) ? v : String(v ?? ""));
 
 export type Broker = {
   /** Run one parsed request object through the op dispatch. */
@@ -103,7 +112,11 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   let assetManifest: AssetManifest | null = null;
   if (assetsDir) {
     const manifestPath = join(dirname(assetsDir), "assets.json");
-    if (existsSync(manifestPath)) assetManifest = JSON.parse(readFileSync(manifestPath, "utf8")) as AssetManifest;
+    if (existsSync(manifestPath)) {
+      // SAFETY: assets.json sits beside the published assets dir and is written
+      // only by `sproutboat build` from the AssetManifest contract.
+      assetManifest = JSON.parse(readFileSync(manifestPath, "utf8")) as AssetManifest;
+    }
   }
   const readAsset = (path: string): { type: string; hash: string; body: string } | null => {
     if (!assetsDir || !assetManifest) return null;
@@ -200,7 +213,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     return stmts;
   };
 
-  const bound = (list: string[], kind: string) => (name: unknown): string => {
+  const bound = (list: string[], kind: string) => (name: JsonValue | undefined): string => {
     const n = str(name);
     if (!list.includes(n)) throw new Error(`${kind} not bound: ${n}`);
     return n;
@@ -211,7 +224,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   const requireQueue = bound(bindings.queues, "queue");
   const requireAe = bound(bindings.analytics, "analytics dataset");
   const doClasses = new Set(bindings.do.map((d) => d.className));
-  const requireDoClass = (cls: unknown): string => {
+  const requireDoClass = (cls: JsonValue | undefined): string => {
     const n = str(cls);
     if (!doClasses.has(n)) throw new Error(`Durable Object class not bound: ${n}`);
     return n;
@@ -239,9 +252,10 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   };
 
   // Run one statement, return CF-D1-shaped { results, meta }.
-  const d1Run = (conn: Database, sql: string, params: SqlParam[]): { results: unknown[]; meta: Record<string, unknown> } => {
+  const d1Run = (conn: Database, sql: string, params: SqlParam[]): D1Result => {
     const started = performance.now();
-    const results = conn.query(sql).all(...params);
+    // SQLite hands back column->(string|number|null|blob) rows, i.e. a JSON object.
+    const results = conn.query<JsonObject, SqlParam[]>(sql).all(...params);
     const m = conn.query<{ changes: number; last_row_id: number }, []>(
       "SELECT changes() AS changes, last_insert_rowid() AS last_row_id",
     ).get();
@@ -256,8 +270,8 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     size: r.size,
     etag: r.etag,
     uploaded: r.uploaded,
-    httpMetadata: JSON.parse(r.http_json) as unknown,
-    customMetadata: JSON.parse(r.custom_json) as unknown,
+    httpMetadata: parseJsonValue(r.http_json),
+    customMetadata: parseJsonValue(r.custom_json),
   });
 
   async function proxyFetch(msg: Frame): Promise<Frame> {
@@ -272,7 +286,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
 
     const headers = new Headers();
     if (Array.isArray(msg.headers)) {
-      for (const pair of msg.headers as unknown[]) {
+      for (const pair of msg.headers) {
         if (Array.isArray(pair) && pair.length === 2) headers.set(str(pair[0]), str(pair[1]));
       }
     }
@@ -326,7 +340,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       }
       case "d1.batch": {
         const conn = d1(requireD1(msg.db));
-        const stmts = Array.isArray(msg.statements) ? (msg.statements as Frame[]) : [];
+        const stmts = Array.isArray(msg.statements) ? msg.statements.map((s) => jsonObject(s) ?? {}) : [];
         const runAll = conn.transaction(() => stmts.map((s) => d1Run(conn, str(s.sql), sqlParams(s.params))));
         return { ok: true, results: runAll() };
       }
@@ -393,7 +407,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       }
       case "queue.send_batch": {
         const { store, part: q } = storeFor("queue", requireQueue(msg.queue));
-        const msgs = Array.isArray(msg.messages) ? (msg.messages as Frame[]) : [];
+        const msgs = Array.isArray(msg.messages) ? msg.messages.map((m) => jsonObject(m) ?? {}) : [];
         const ins = store.query("INSERT INTO mq (queue, id, body, visible_at) VALUES (?, ?, ?, ?)");
         store.transaction(() => {
           for (const m of msgs) ins.run(q, newId(), str(m.body), Date.now() + Math.max(0, Number(m.delaySeconds) || 0) * 1000);
@@ -426,9 +440,9 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
           count: total?.n ?? 0,
           rows: rows.map((r) => ({
             timestamp: r.ts,
-            indexes: JSON.parse(r.indexes_json) as unknown,
-            blobs: JSON.parse(r.blobs_json) as unknown,
-            doubles: JSON.parse(r.doubles_json) as unknown,
+            indexes: parseJsonValue(r.indexes_json),
+            blobs: parseJsonValue(r.blobs_json),
+            doubles: parseJsonValue(r.doubles_json),
           })),
         };
       }
@@ -493,7 +507,9 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     const json = nl === -1 ? payload : payload.slice(nl + 1);
     if (token && gotToken !== token) return { ok: false, error: "unauthorized" };
     try {
-      return await dispatch(JSON.parse(json) as Frame);
+      const msg = jsonObject(parseJsonValue(json));
+      if (!msg) throw new Error("request frame was not a JSON object");
+      return await dispatch(msg);
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
@@ -504,7 +520,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   const QUEUE_BATCH = 10;
   const QUEUE_MAX_ATTEMPTS = 5;
 
-  async function deliverTrigger(kind: "scheduled" | "queue", body: unknown): Promise<Response | null> {
+  async function deliverTrigger(kind: "scheduled" | "queue", body: JsonObject): Promise<Response | null> {
     if (!opts.sproutUrl) return null;
     try {
       return await doFetch(opts.sproutUrl, {
@@ -541,9 +557,10 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         let retry: string[] = [];
         if (res && res.ok) {
           try {
-            const parsed = (await res.json()) as { ack?: string[]; retry?: string[] };
-            ack = Array.isArray(parsed.ack) ? parsed.ack : ack;
-            retry = Array.isArray(parsed.retry) ? parsed.retry : [];
+            const parsed = jsonObject(parseJsonValue(await res.text()));
+            const ids = (value: JsonValue | undefined) => (Array.isArray(value) ? value.filter(isString) : null);
+            ack = (parsed && ids(parsed.ack)) ?? ack;
+            retry = (parsed && ids(parsed.retry)) ?? [];
           } catch { /* keep defaults */ }
         } else {
           ack = []; retry = rows.map((r) => r.id); // delivery failed → retry all
@@ -614,8 +631,11 @@ export function encodeFrame(obj: Frame): Buffer {
   return frame;
 }
 
+/** The bound TCP listener: the port actually assigned, and its shutdown handle. */
+export type BrokerServer = { port: number; stop(): void };
+
 /** Start the TCP listener. Returns the bound port. */
-export function listen(broker: Broker, hostname: string, port: number): { port: number; stop(): void } {
+export function listen(broker: Broker, hostname: string, port: number): BrokerServer {
   const server = Bun.listen<{ buf: Buffer }>({
     hostname,
     port,
@@ -659,9 +679,12 @@ if (import.meta.main) {
       "assets-dir": { type: "string" },
     },
   });
+  // SAFETY: --bindings and --secrets are the artifact's own bindings.json /
+  // secrets.json, written by `sproutboat build` and handed to us by the supervisor.
   const bindings: Partial<Bindings> | undefined = values.bindings
     ? (JSON.parse(readFileSync(values.bindings, "utf8")) as Partial<Bindings>)
     : undefined;
+  // SAFETY: as above — secrets.json is a flat name->value map written by the build.
   const secrets: Record<string, string> | undefined = values.secrets
     ? (JSON.parse(readFileSync(values.secrets, "utf8")) as Record<string, string>)
     : undefined;

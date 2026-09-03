@@ -14,10 +14,10 @@ import { resolve } from "node:path";
 import { CLI_NAME, COMMANDS, ENV_VARS, STORAGE_PRODUCTS, STORAGE_VERBS, usageLine } from "./surface";
 import { ARTIFACT_SCHEMA_VERSION, CAPABILITY_PROFILE, RUNTIME } from "./manifest";
 import { ZIG_VERSION, toolchainStamp } from "./toolchain";
+import { CLI_VERSION as version } from "./report";
 
 const srcDir = import.meta.dir;
 const root = resolve(srcDir, "..");
-const version = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version as string;
 
 function render(): string {
   const rows = (cells: string[][]) => cells.map((r) => `| ${r.join(" | ")} |`).join("\n");
@@ -114,7 +114,7 @@ test("no COMMANDS entry documents an env var that src/ never reads", () => {
  */
 test("every storage product is a command with the same verbs", () => {
   const documented = new Set(COMMANDS.filter((c) => c.group === "Storage").map((c) => c.name));
-  expect([...documented].sort()).toEqual([...STORAGE_PRODUCTS.map((p) => p.name)].sort());
+  expect([...documented].sort()).toEqual(STORAGE_PRODUCTS.map((p) => p.name).sort());
 
   const briefs = new Set(COMMANDS.filter((c) => c.group === "Storage").map((c) => c.brief));
   expect(briefs.size, "storage products must offer an identical verb set").toBe(1);
