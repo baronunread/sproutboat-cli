@@ -6,7 +6,7 @@ import type { AssetFiles } from "./assets";
 import { parseConfig, pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
 import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
-import { validateManifest, type ArtifactManifest } from "./manifest";
+import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
 import { helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
@@ -137,11 +137,14 @@ async function check(directory?: string) {
   console.log(ok(`check passed — ${project.config.name} (${project.config.main}, native-fetch)`));
 }
 
-async function build(directory?: string) {
+async function build(directory?: string, target: "linux-x86_64" | "host" = "linux-x86_64") {
   const project = await readProject(directory);
-  console.log(dim("Compiling the native-fetch server with Porffor + Zig (linux-x86_64, static)…"));
-  const artifact = await buildArtifact({ projectDir: project.directory, config: project.config, sourcePath: project.sourcePath });
+  console.log(target === "host"
+    ? dim(`Compiling the native-fetch server with Porffor for this machine (${hostTarget()}, local only)…`)
+    : dim("Compiling the native-fetch server with Porffor + Zig (linux-x86_64, static)…"));
+  const artifact = await buildArtifact({ projectDir: project.directory, config: project.config, sourcePath: project.sourcePath, target });
   console.log(ok(`built ${project.config.name}`));
+  if (target === "host") console.log(dim("  host build — runs here, not deployable; drop --target host to build for a box"));
   console.log(artifact.artifactDir);
   return { project, artifact };
 }
@@ -696,7 +699,11 @@ await notifyIfOutdated(CLI_VERSION);
 switch (command) {
   case "init": await init(args[0]); break;
   case "check": await check(args[0]); break;
-  case "build": await build(args[0]); break;
+  case "build": {
+    const hostBuild = args.includes("--target") && args[args.indexOf("--target") + 1] === "host";
+    await build(args.find((arg) => !arg.startsWith("--") && arg !== "host"), hostBuild ? "host" : "linux-x86_64");
+    break;
+  }
   case "login": await login(args); break;
   case "logout": await logout(args); break;
   case "whoami": await whoami(); break;

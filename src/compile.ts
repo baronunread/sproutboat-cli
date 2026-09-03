@@ -24,7 +24,15 @@ export type CompileInput = {
   outPath: string;
   vars: Record<string, string>;
   bindings?: Bindings;
-  zigBin: string;
+  /** Cross-compiler for `linux-x86_64`. Not needed, and not used, for `host`. */
+  zigBin?: string;
+  /**
+   * `linux-x86_64` (default) cross-compiles the static musl binary every box
+   * runs. `host` compiles for the machine doing the build (#62) so `sproutboat
+   * dev` can actually serve a sprout on a developer's laptop — an arm64 Mac
+   * cannot execute the deploy artifact.
+   */
+  target?: "linux-x86_64" | "host";
 };
 
 /** Compile `sourcePath` to a native binary at `outPath` (mode 0555). */
@@ -61,14 +69,19 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   const porffor = porfforRoot();
   const launcher = resolve(porffor, "runtime/index.js");
   // Porffor shells bare `zig` and `esbuild`; put both on PATH for the child.
+  // A host build never shells `zig`, so it has no zigBin to contribute.
   const binDir = resolve(porffor, "../.bin");
-  const path = `${dirname(input.zigBin)}:${binDir}:${process.env.PATH ?? ""}`;
+  const zigDir = input.zigBin ? `${dirname(input.zigBin)}:` : "";
+  const path = `${zigDir}${binDir}:${process.env.PATH ?? ""}`;
 
   // `-s`: strip at link. The unstripped static-musl binary is ~90% DWARF that
   // nothing needs at runtime (12 MB -> ~1.3 MB for the kitchen-sink). Porffor
   // forwards `-s` straight to the `zig cc` link step.
+  // `--musl` is what makes it a cross-compile; a host build simply omits it and
+  // Porffor targets the machine it is running on.
+  const crossFlags = input.target === "host" ? [] : ["--musl"];
   const child = Bun.spawn(
-    [process.execPath, launcher, "native", generatedPath, "-o", input.outPath, "--musl", "-s"],
+    [process.execPath, launcher, "native", generatedPath, "-o", input.outPath, ...crossFlags, "-s"],
     { cwd: outDir, stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: path } },
   );
   let timedOut = false;

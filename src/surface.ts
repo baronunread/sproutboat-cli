@@ -67,8 +67,8 @@ export const COMMANDS: readonly Command[] = [
     summary: "Scaffold sproutboat.jsonc + src/index.js in ./<name>." },
   { name: "check", group: "Develop", emoji: "🔍", args: "[project-dir]",
     summary: "Validate the config and entry point without building." },
-  { name: "build", group: "Develop", emoji: "🔨", args: "[project-dir]",
-    summary: "Cross-compile the native-fetch sprout (Porffor + Zig)." },
+  { name: "build", group: "Develop", emoji: "🔨", args: "[project-dir] [--target host]", brief: "[project-dir]",
+    summary: "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable." },
 
   { name: "deploy", group: "Ship", emoji: "🚀",
     args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision]", brief: "[project-dir] [--dry-run]",
