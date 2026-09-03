@@ -12,6 +12,12 @@ export type BuildInput = {
   config: SproutboatConfig;
   sourcePath: string;
   /**
+   * The bundled module (#89). When present this is what gets hashed and
+   * compiled, so the artifact tracks every imported file rather than just the
+   * entry point — change a dependency, get a different version.
+   */
+  source?: string;
+  /**
    * `host` (#62) compiles for this machine instead of cross-compiling for a
    * box, so `sproutboat dev` can run the sprout locally. The manifest records
    * the real target, which is what stops the result being deployed.
@@ -35,7 +41,7 @@ function digest(value: Uint8Array | string): `sha256:${string}` {
  * does not come up.
  */
 export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
-  const source = await readFile(input.sourcePath);
+  const source = input.source ?? await readFile(input.sourcePath);
   const sourceHash = digest(source);
   const artifactId = sourceHash.slice("sha256:".length, 24);
   const artifactDir = resolve(input.projectDir, ".sproutboat/dist", artifactId);
@@ -75,6 +81,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   const zigBin = host ? undefined : await ensureZig();
   await compileSprout({
     sourcePath: input.sourcePath,
+    source: input.source,
     outPath: sproutPath,
     vars: input.config.vars ?? {},
     bindings,

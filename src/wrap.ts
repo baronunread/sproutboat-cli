@@ -45,6 +45,43 @@ function hasBindings(b: Bindings): boolean {
 }
 
 /**
+ * Turn the module's exports into plain top-level declarations, so the handler
+ * object is reachable as `__sbHandlers` and Durable Object classes stay
+ * addressable by name.
+ *
+ * Two shapes reach us. A hand-written file exports inline
+ * (`export default { fetch }`), while a bundled one declares everything first
+ * and re-exports at the end (`export { src_default as default, Counter }`) —
+ * #89 made the second shape the normal case. Returns null when neither matches.
+ */
+export function neutraliseExports(source: string): string | null {
+  if (/\bexport\s+default\s*\{/.test(source)) {
+    return source
+      .replace(/^(\s*)export\s+default\s*/m, "$1const __sbHandlers = ")
+      .replace(/^export\s+(async\s+function|function|class|const|let|var)\b/gm, "$1");
+  }
+  // Not anchored to a line: a minified bundle puts the whole module on one
+  // line. Bundlers emit exactly one such block, at the end.
+  const blocks = [...source.matchAll(/export\s*\{([^}]*)\}\s*;?/g)];
+  const block = blocks[blocks.length - 1];
+  if (block === undefined) return null;
+  let handler: string | null = null;
+  const aliases: string[] = [];
+  for (const entry of block[1].split(",").map((part) => part.trim()).filter(Boolean)) {
+    const parts = entry.match(/^(\S+)(?:\s+as\s+(\S+))?$/);
+    if (parts === null) continue;
+    const local = parts[1];
+    const exported = parts[2] ?? local;
+    if (exported === "default") handler = local;
+    // `export { Counter as Counter }` needs no alias; a renamed one does, so
+    // `durable_objects` in the config can still name the class it expects.
+    else if (exported !== local) aliases.push(`const ${exported} = ${local};`);
+  }
+  if (handler === null) return null;
+  return source.replace(block[0], [`const __sbHandlers = ${handler};`, ...aliases].join("\n"));
+}
+
+/**
  * Build the final native-fetch module: the prelude (Web API shims + the broker
  * binding shim + the trigger dispatcher), then `const env = {…}` with the baked
  * `vars`, then — if any binding is declared — one `__sbInstallBindings(env, …)`
@@ -70,15 +107,10 @@ export function wrapNativeFetchHandler(
   bindings: Bindings = EMPTY_BINDINGS,
   port: number = DEFAULT_PORT,
 ): string {
-  if (!/\bexport\s+default\s*\{/.test(source) || !/\bfetch\s*\(/.test(source)) {
+  const neutralised = neutraliseExports(source);
+  if (neutralised === null || !/\bfetch\s*\(/.test(source)) {
     throw new Error("handler must default-export an object with a fetch(request) method");
   }
-  // Neutralise the module's exports: its default object becomes `__sbHandlers`,
-  // and any `export class`/`function`/`const` (Durable Object classes, helpers)
-  // becomes a plain top-level declaration. Imports are already rejected upstream.
-  const neutralised = source
-    .replace(/^(\s*)export\s+default\s*/m, "$1const __sbHandlers = ")
-    .replace(/^export\s+(async\s+function|function|class|const|let|var)\b/gm, "$1");
 
   const env = `const env = ${JSON.stringify(vars)};\nglobalThis.env = env;\n`;
   const wire = hasBindings(bindings) ? `__sbInstallBindings(env, ${JSON.stringify(bindings)});\n` : "";

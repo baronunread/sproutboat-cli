@@ -6,6 +6,7 @@ import type { AssetFiles } from "./assets";
 import { parseConfig, pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
 import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
+import { bundleHandler, BundleError, type BundleResult } from "./bundle";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
@@ -115,9 +116,18 @@ async function readProject(directory = process.cwd()) {
   } catch {
     fail(`entry point not found: ${parsed.value.main}`);
   }
-  const supported = validateHttpSyncSource(source, (parsed.value.outbound ?? []).length > 0);
+  // #89 — resolve imports first, then hold the *bundled* module to the
+  // capability rules. Validating the entry file instead would let a dependency
+  // smuggle in a Node API the handler is not allowed to touch.
+  let bundle: BundleResult;
+  try {
+    bundle = await bundleHandler(sourcePath, projectDirectory);
+  } catch (cause) {
+    fail(cause instanceof BundleError ? cause.message : String(cause));
+  }
+  const supported = validateHttpSyncSource(bundle.code, (parsed.value.outbound ?? []).length > 0);
   if (!supported.ok) fail(supported.errors.join("\n"));
-  return { directory: projectDirectory, config: parsed.value, sourcePath, source };
+  return { directory: projectDirectory, config: parsed.value, sourcePath, source, bundle };
 }
 
 async function init(name = "hello") {
@@ -142,7 +152,7 @@ async function build(directory?: string, target: "linux-x86_64" | "host" = "linu
   console.log(target === "host"
     ? dim(`Compiling the native-fetch server with Porffor for this machine (${hostTarget()}, local only)…`)
     : dim("Compiling the native-fetch server with Porffor + Zig (linux-x86_64, static)…"));
-  const artifact = await buildArtifact({ projectDir: project.directory, config: project.config, sourcePath: project.sourcePath, target });
+  const artifact = await buildArtifact({ projectDir: project.directory, config: project.config, sourcePath: project.sourcePath, source: project.bundle.code, target });
   console.log(ok(`built ${project.config.name}`));
   if (target === "host") console.log(dim("  host build — runs here, not deployable; drop --target host to build for a box"));
   console.log(artifact.artifactDir);
