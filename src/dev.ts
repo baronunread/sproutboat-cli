@@ -15,7 +15,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { buildArtifact } from "./build";
 import { createBroker, listen, type Bindings, type Broker } from "./broker";
-import { isString, jsonObject, parseJsonValue } from "./json";
+import { jsonObject, parseJsonValue } from "./json";
 import { amber, dim, leaf, ok } from "./style";
 import type { SproutboatConfig } from "./config";
 

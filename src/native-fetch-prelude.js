@@ -23,6 +23,7 @@ function __sbIsObj(v) { return v !== null && Object(v) === v; }
 // cold-start into "spawn -> JS starts" (process + runtime bootstrap) and
 // "JS starts -> listening" (module eval + server bind). No-op when unset.
 function __sbStartupMark() {
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
     const char* __f = getenv("SB_STARTUP_FILE");
     if (__f) {
@@ -44,6 +45,7 @@ __sbStartupMark();
 // relied on. `__sbEntry` samples it around the handler for per-invocation CPU.
 function __sbCpuMs() {
   let res = '';
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
     struct timespec __ts;
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &__ts);
@@ -239,6 +241,7 @@ if (globalThis.crypto.randomUUID == null) {
 // the old fresh-connection-per-call path just failed the call there instead.
 // Binary values + AF_UNIX = v2.
 
+// oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
 Porffor.c`
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -366,8 +369,10 @@ static int sb_broker_roundtrip(const char* req, size_t req_len, char** resp_out,
 
 // One request string in, one reply string out. `reqJson` is a parameter, so the
 // generated C names it directly in the RawC block below.
+// oxlint-disable-next-line no-unused-vars -- `reqJson` is read inside the RawC block below, not by JS.
 function __sbCall(reqJson) {
   let res = '';
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
     const char* __req; size_t __reqlen; char* __reqowned = 0;
     porf_native_fetch_read_value(reqJson, &__req, &__reqlen, &__reqowned);
@@ -388,8 +393,10 @@ function __sbCall(reqJson) {
 
 // `nStr` is the decimal byte count as a string (same string-param pattern as
 // __sbEnv). Returns a bytestring of that many CSPRNG bytes, or '' on failure.
+// oxlint-disable-next-line no-unused-vars -- `nStr` is read inside the RawC block below, not by JS.
 function __sbRandomBytes(nStr) {
   let out = '';
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
     const char* __ns; size_t __nsl; char* __nso = 0;
     porf_native_fetch_read_value(nStr, &__ns, &__nsl, &__nso);
@@ -769,8 +776,10 @@ function __sbDOStorage(cls, id) {
 // with SB_BROKER_TOKEN) to the right user handler, and everything else to
 // `handlers.fetch`.
 
+// oxlint-disable-next-line no-unused-vars -- `name` is read inside the RawC block below, not by JS.
 function __sbEnv(name) {
   let res = '';
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
     const char* __n; size_t __nl; char* __no = 0;
     porf_native_fetch_read_value(name, &__n, &__nl, &__no);
