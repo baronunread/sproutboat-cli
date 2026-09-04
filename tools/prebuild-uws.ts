@@ -38,16 +38,21 @@ if (seeded) {
   delete process.env.SPROUTBOAT_UWS_TARBALL;
   const work = await mkdtemp(resolve(tmpdir(), "uws-prebuild-"));
   await Bun.write(resolve(work, "h.js"), 'export default { fetch() { return new Response("ok"); } };');
-  await compileWorker({ sourcePath: resolve(work, "h.js"), outPath: resolve(work, "worker"), vars: {}, zigBin: await ensureZig() });
+  await compileWorker({
+    sourcePath: resolve(work, "h.js"),
+    outPath: resolve(work, "worker"),
+    vars: {},
+    zigBin: await ensureZig(),
+  });
 }
 
 const vendorDir = resolve(import.meta.dir, "../vendor");
 Bun.spawnSync(["mkdir", "-p", vendorDir]);
 const archive = resolve(vendorDir, `uwebsockets-${short}-musl.tar.xz`);
-const tar = Bun.spawnSync(
-  ["tar", "--exclude=.git", "-cJf", archive, "-C", depsRoot, `uWebSockets-${commit}-musl`],
-  { stdout: "inherit", stderr: "inherit" },
-);
+const tar = Bun.spawnSync(["tar", "--exclude=.git", "-cJf", archive, "-C", depsRoot, `uWebSockets-${commit}-musl`], {
+  stdout: "inherit",
+  stderr: "inherit",
+});
 if (tar.exitCode !== 0) throw new Error("tar failed");
 
 const sha = createHash("sha256").update(readFileSync(archive)).digest("hex");

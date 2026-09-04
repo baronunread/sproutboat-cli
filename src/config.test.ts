@@ -38,7 +38,9 @@ test("a var and a binding may not share a name (any binding kind)", () => {
 const id24 = "0123456789abcdef01234567";
 
 test("accepts { binding, id } with a kind-matched id", () => {
-  const r = parseConfig(`${base}, "kv_namespaces": [{ "binding": "LINKS", "id": "kv_${id24}" }], "d1_databases": ["DB"] }`);
+  const r = parseConfig(
+    `${base}, "kv_namespaces": [{ "binding": "LINKS", "id": "kv_${id24}" }], "d1_databases": ["DB"] }`,
+  );
   expect(r.ok && r.value.kv_namespaces).toEqual([{ binding: "LINKS", id: `kv_${id24}` }]);
   expect(r.ok && r.value.d1_databases).toEqual(["DB"]);
 });
@@ -54,7 +56,9 @@ test("rejects a malformed id and stray keys in the object", () => {
 });
 
 test("the { binding } name still collides with a var of the same name", () => {
-  const r = parseConfig(`${base}, "vars": { "LINKS": "x" }, "kv_namespaces": [{ "binding": "LINKS", "id": "kv_${id24}" }] }`);
+  const r = parseConfig(
+    `${base}, "vars": { "LINKS": "x" }, "kv_namespaces": [{ "binding": "LINKS", "id": "kv_${id24}" }] }`,
+  );
   expect(r.ok).toBe(false);
 });
 
@@ -76,7 +80,9 @@ test("assets: directory required, binding UPPER_SNAKE, enum + pattern checks, no
   expect(parseConfig(`${base}, "assets": { "directory": "public", "binding": "assets" } }`).ok).toBe(false);
   expect(parseConfig(`${base}, "assets": { "directory": "public", "not_found_handling": "spa" } }`).ok).toBe(false);
   expect(parseConfig(`${base}, "assets": { "directory": "public", "run_sprout_first": ["api/*"] } }`).ok).toBe(false);
-  const collide = parseConfig(`${base}, "kv_namespaces": ["ASSETS"], "assets": { "directory": "public", "binding": "ASSETS" } }`);
+  const collide = parseConfig(
+    `${base}, "kv_namespaces": ["ASSETS"], "assets": { "directory": "public", "binding": "ASSETS" } }`,
+  );
   expect(collide.ok).toBe(false);
   if (!collide.ok) expect(collide.errors.join(" ")).toContain("must not collide");
 });
@@ -105,13 +111,14 @@ test("pinBindingId turns a bare binding into { binding, id } and keeps comments"
 `;
   const out = pinBindingId(src, "kv_namespaces", "WAITLIST", "kv_0123456789abcdef01234567");
   expect(out).toContain(`{ "binding": "WAITLIST", "id": "kv_0123456789abcdef01234567" }`);
-  expect(out).toContain(`"SESSIONS"`);        // sibling untouched
-  expect(out).toContain("// storage");         // comment untouched
+  expect(out).toContain(`"SESSIONS"`); // sibling untouched
+  expect(out).toContain("// storage"); // comment untouched
   expect(out).toContain(`"d1_databases": ["DB"], // one db`); // other field untouched
   // re-parses and normalizes to the pinned ref
   const parsed = parseConfig(out);
   expect(parsed.ok && parsed.value.kv_namespaces).toEqual([
-    { binding: "WAITLIST", id: "kv_0123456789abcdef01234567" }, "SESSIONS",
+    { binding: "WAITLIST", id: "kv_0123456789abcdef01234567" },
+    "SESSIONS",
   ]);
 });
 

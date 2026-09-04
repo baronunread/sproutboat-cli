@@ -14,9 +14,15 @@
 // Duck-typing helpers, `typeof`-free (the repo's anti-slop lint bans `typeof`;
 // these express the same spec-mandated checks and are verified under Porffor
 // alpha-4 by examples/kitchen-sink/harness.ts).
-function __sbIsStr(v) { return Object(v) !== v && v === String(v); }
-function __sbIsFn(v) { return v instanceof Function; }
-function __sbIsObj(v) { return v !== null && Object(v) === v; }
+function __sbIsStr(v) {
+  return Object(v) !== v && v === String(v);
+}
+function __sbIsFn(v) {
+  return v instanceof Function;
+}
+function __sbIsObj(v) {
+  return v !== null && Object(v) === v;
+}
 
 // #41 — cold-start phase marker. Runs as the first thing in the bundle: writes
 // the current wall-clock ms to $SB_STARTUP_FILE so the supervisor can split
@@ -44,7 +50,7 @@ __sbStartupMark();
 // then parsed — Porffor's number boxing for a bare inline-C assignment is not
 // relied on. `__sbEntry` samples it around the handler for per-invocation CPU.
 function __sbCpuMs() {
-  let res = '';
+  let res = "";
   // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
     struct timespec __ts;
@@ -54,7 +60,7 @@ function __sbCpuMs() {
     int __n = snprintf(__b, sizeof(__b), "%.3f", __ms);
     if (__n > 0) res = porf_box((f64)porf_native_fetch_alloc_bytestring(__b, (size_t)__n), 195);
   `;
-  return res === '' ? 0 : parseFloat(res);
+  return res === "" ? 0 : parseFloat(res);
 }
 
 // #28 — stamp `x-sb-cpu-ms` onto a handler Response. Porffor alpha-4's
@@ -68,13 +74,17 @@ function __sbTagCpu(res, t0) {
   const cpu = __sbCpuMs() - t0;
   try {
     const body = res && res.body;
-    if (__sbIsStr(body) && !res.headers.has('set-cookie')) {
+    if (__sbIsStr(body) && !res.headers.has("set-cookie")) {
       const headers = {};
-      res.headers.forEach(function (value, name) { headers[name] = value; });
-      headers['x-sb-cpu-ms'] = (cpu >= 0 ? cpu : 0).toFixed(3);
+      res.headers.forEach(function (value, name) {
+        headers[name] = value;
+      });
+      headers["x-sb-cpu-ms"] = (cpu >= 0 ? cpu : 0).toFixed(3);
       return new Response(body, { status: res.status, headers: headers });
     }
-  } catch { /* fall through to the original response */ }
+  } catch {
+    /* fall through to the original response */
+  }
   return res;
 }
 
@@ -82,53 +92,87 @@ class __SproutboatURLSearchParams {
   constructor(init) {
     this._keys = [];
     this._vals = [];
-    let raw = init == null ? '' : String(init);
+    let raw = init == null ? "" : String(init);
     if (raw.charCodeAt(0) === 63) raw = raw.slice(1); // strip a leading '?'
     if (raw.length === 0) return;
-    const pairs = raw.split('&');
+    const pairs = raw.split("&");
     for (let i = 0; i < pairs.length; i++) {
       const pair = pairs[i];
       if (pair.length === 0) continue;
-      const eq = pair.indexOf('=');
+      const eq = pair.indexOf("=");
       const k = eq === -1 ? pair : pair.slice(0, eq);
-      const v = eq === -1 ? '' : pair.slice(eq + 1);
-      this._keys.push(decodeURIComponent(k.split('+').join(' ')));
-      this._vals.push(decodeURIComponent(v.split('+').join(' ')));
+      const v = eq === -1 ? "" : pair.slice(eq + 1);
+      this._keys.push(decodeURIComponent(k.split("+").join(" ")));
+      this._vals.push(decodeURIComponent(v.split("+").join(" ")));
     }
   }
-  get(name) { for (let i = 0; i < this._keys.length; i++) if (this._keys[i] === name) return this._vals[i]; return null; }
-  getAll(name) { const out = []; for (let i = 0; i < this._keys.length; i++) if (this._keys[i] === name) out.push(this._vals[i]); return out; }
-  has(name) { for (let i = 0; i < this._keys.length; i++) if (this._keys[i] === name) return true; return false; }
-  forEach(cb) { for (let i = 0; i < this._keys.length; i++) cb(this._vals[i], this._keys[i], this); }
+  get(name) {
+    for (let i = 0; i < this._keys.length; i++) if (this._keys[i] === name) return this._vals[i];
+    return null;
+  }
+  getAll(name) {
+    const out = [];
+    for (let i = 0; i < this._keys.length; i++) if (this._keys[i] === name) out.push(this._vals[i]);
+    return out;
+  }
+  has(name) {
+    for (let i = 0; i < this._keys.length; i++) if (this._keys[i] === name) return true;
+    return false;
+  }
+  forEach(cb) {
+    for (let i = 0; i < this._keys.length; i++) cb(this._vals[i], this._keys[i], this);
+  }
   // Mutators: standalone `new URLSearchParams()` building works. They do NOT
   // write back into a URL's `search` (Porffor's URL has no setter) — build the
   // string with toString() and assign it yourself.
-  append(name, value) { this._keys.push(String(name)); this._vals.push(String(value)); }
+  append(name, value) {
+    this._keys.push(String(name));
+    this._vals.push(String(value));
+  }
   set(name, value) {
     let found = false;
     for (let i = 0; i < this._keys.length; i++) {
       if (this._keys[i] !== name) continue;
-      if (found) { this._keys.splice(i, 1); this._vals.splice(i, 1); i--; }
-      else { this._vals[i] = String(value); found = true; }
+      if (found) {
+        this._keys.splice(i, 1);
+        this._vals.splice(i, 1);
+        i--;
+      } else {
+        this._vals[i] = String(value);
+        found = true;
+      }
     }
     if (!found) this.append(name, value);
   }
   delete(name) {
-    for (let i = 0; i < this._keys.length; i++) if (this._keys[i] === name) { this._keys.splice(i, 1); this._vals.splice(i, 1); i--; }
+    for (let i = 0; i < this._keys.length; i++)
+      if (this._keys[i] === name) {
+        this._keys.splice(i, 1);
+        this._vals.splice(i, 1);
+        i--;
+      }
   }
   sort() {
-    const idx = this._keys.map((_, i) => i).sort((a, b) => (this._keys[a] < this._keys[b] ? -1 : this._keys[a] > this._keys[b] ? 1 : 0));
+    const idx = this._keys
+      .map((_, i) => i)
+      .sort((a, b) => (this._keys[a] < this._keys[b] ? -1 : this._keys[a] > this._keys[b] ? 1 : 0));
     this._keys = idx.map((i) => this._keys[i]);
     this._vals = idx.map((i) => this._vals[i]);
   }
-  keys() { return this._keys.slice(); }
-  values() { return this._vals.slice(); }
-  get size() { return this._keys.length; }
+  keys() {
+    return this._keys.slice();
+  }
+  values() {
+    return this._vals.slice();
+  }
+  get size() {
+    return this._keys.length;
+  }
   toString() {
-    let out = '';
+    let out = "";
     for (let i = 0; i < this._keys.length; i++) {
-      if (i > 0) out += '&';
-      out += encodeURIComponent(this._keys[i]) + '=' + encodeURIComponent(this._vals[i]);
+      if (i > 0) out += "&";
+      out += encodeURIComponent(this._keys[i]) + "=" + encodeURIComponent(this._vals[i]);
     }
     return out;
   }
@@ -137,8 +181,8 @@ class __SproutboatURLSearchParams {
 // URL and Response are always defined by Porffor's fetch-globals.js banner.
 if (globalThis.URLSearchParams == null) globalThis.URLSearchParams = __SproutboatURLSearchParams;
 
-if (!('searchParams' in URL.prototype)) {
-  Object.defineProperty(URL.prototype, 'searchParams', {
+if (!("searchParams" in URL.prototype)) {
+  Object.defineProperty(URL.prototype, "searchParams", {
     configurable: true,
     get() {
       if (this.__sbSearchParams == null) this.__sbSearchParams = new __SproutboatURLSearchParams(this.search);
@@ -150,7 +194,7 @@ if (!('searchParams' in URL.prototype)) {
 if (Response.json == null) {
   Response.json = function (data, init) {
     const response = new Response(JSON.stringify(data), init);
-    if (!response.headers.has('content-type')) response.headers.set('content-type', 'application/json;charset=utf-8');
+    if (!response.headers.has("content-type")) response.headers.set("content-type", "application/json;charset=utf-8");
     return response;
   };
 }
@@ -162,27 +206,33 @@ if (Response.json == null) {
 function __sbDefineURLAccessor(name, get) {
   if (!(name in URL.prototype)) Object.defineProperty(URL.prototype, name, { configurable: true, get });
 }
-__sbDefineURLAccessor('protocol', function () {
-  const i = this.origin.indexOf('://');
-  return i === -1 ? '' : this.origin.slice(0, i + 1);
+__sbDefineURLAccessor("protocol", function () {
+  const i = this.origin.indexOf("://");
+  return i === -1 ? "" : this.origin.slice(0, i + 1);
 });
-__sbDefineURLAccessor('host', function () {
-  const i = this.origin.indexOf('://');
-  return i === -1 ? '' : this.origin.slice(i + 3);
+__sbDefineURLAccessor("host", function () {
+  const i = this.origin.indexOf("://");
+  return i === -1 ? "" : this.origin.slice(i + 3);
 });
-__sbDefineURLAccessor('hostname', function () {
+__sbDefineURLAccessor("hostname", function () {
   const h = this.host;
-  const c = h.indexOf(':');
+  const c = h.indexOf(":");
   return c === -1 ? h : h.slice(0, c);
 });
-__sbDefineURLAccessor('port', function () {
+__sbDefineURLAccessor("port", function () {
   const h = this.host;
-  const c = h.indexOf(':');
-  return c === -1 ? '' : h.slice(c + 1);
+  const c = h.indexOf(":");
+  return c === -1 ? "" : h.slice(c + 1);
 });
-__sbDefineURLAccessor('hash', function () { return ''; });
-__sbDefineURLAccessor('username', function () { return ''; });
-__sbDefineURLAccessor('password', function () { return ''; });
+__sbDefineURLAccessor("hash", function () {
+  return "";
+});
+__sbDefineURLAccessor("username", function () {
+  return "";
+});
+__sbDefineURLAccessor("password", function () {
+  return "";
+});
 
 // crypto.randomUUID / getRandomValues are absent in native-fetch. Provide them
 // backed by the OS CSPRNG (`__sbRandomBytes` -> inline C -> /dev/urandom), so
@@ -209,7 +259,9 @@ if (globalThis.structuredClone == null) {
   // The suggested fix (use structuredClone) is circular — this IS the polyfill,
   // and Porffor exposes no other deep-clone primitive.
   // react-doctor-disable-next-line react-doctor/no-json-parse-stringify-clone
-  globalThis.structuredClone = function (value) { return JSON.parse(JSON.stringify(value)); };
+  globalThis.structuredClone = function (value) {
+    return JSON.parse(JSON.stringify(value));
+  };
 }
 
 if (globalThis.crypto.randomUUID == null) {
@@ -371,7 +423,7 @@ static int sb_broker_roundtrip(const char* req, size_t req_len, char** resp_out,
 // generated C names it directly in the RawC block below.
 // oxlint-disable-next-line no-unused-vars -- `reqJson` is read inside the RawC block below, not by JS.
 function __sbCall(reqJson) {
-  let res = '';
+  let res = "";
   // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
     const char* __req; size_t __reqlen; char* __reqowned = 0;
@@ -395,7 +447,7 @@ function __sbCall(reqJson) {
 // __sbEnv). Returns a bytestring of that many CSPRNG bytes, or '' on failure.
 // oxlint-disable-next-line no-unused-vars -- `nStr` is read inside the RawC block below, not by JS.
 function __sbRandomBytes(nStr) {
-  let out = '';
+  let out = "";
   // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
     const char* __ns; size_t __nsl; char* __nso = 0;
@@ -421,7 +473,7 @@ function __sbRpc(op, extra) {
   const req = { op };
   if (extra) for (const k in extra) req[k] = extra[k];
   const reply = JSON.parse(__sbCall(JSON.stringify(req)));
-  if (reply && reply.ok === false) throw new Error(`sproutboat ${op}: ${reply.error || 'failed'}`);
+  if (reply && reply.ok === false) throw new Error(`sproutboat ${op}: ${reply.error || "failed"}`);
   return reply;
 }
 
@@ -432,12 +484,16 @@ function __sbMakeD1(dbName) {
     const s = {
       __sql: sql,
       __params: params,
-      bind() { return stmt(sql, Array.prototype.slice.call(arguments)); },
+      bind() {
+        return stmt(sql, Array.prototype.slice.call(arguments));
+      },
       all() {
-        const r = __sbRpc('d1.query', { db: dbName, sql, params });
+        const r = __sbRpc("d1.query", { db: dbName, sql, params });
         return { results: r.results || [], success: true, meta: r.meta || {} };
       },
-      run() { return s.all(); },
+      run() {
+        return s.all();
+      },
       raw() {
         const rows = s.all().results;
         const out = [];
@@ -457,17 +513,21 @@ function __sbMakeD1(dbName) {
     return s;
   }
   return {
-    prepare(sql) { return stmt(String(sql), []); },
+    prepare(sql) {
+      return stmt(String(sql), []);
+    },
     batch(statements) {
       const list = [];
-      for (let i = 0; i < (statements || []).length; i++) list.push({ sql: statements[i].__sql, params: statements[i].__params });
-      const r = __sbRpc('d1.batch', { db: dbName, statements: list });
+      for (let i = 0; i < (statements || []).length; i++)
+        list.push({ sql: statements[i].__sql, params: statements[i].__params });
+      const r = __sbRpc("d1.batch", { db: dbName, statements: list });
       const out = [];
-      for (let i = 0; i < (r.results || []).length; i++) out.push({ results: r.results[i].results || [], success: true, meta: r.results[i].meta || {} });
+      for (let i = 0; i < (r.results || []).length; i++)
+        out.push({ results: r.results[i].results || [], success: true, meta: r.results[i].meta || {} });
       return out;
     },
     exec(sql) {
-      __sbRpc('d1.exec', { db: dbName, sql: String(sql) });
+      __sbRpc("d1.exec", { db: dbName, sql: String(sql) });
       return { count: (String(sql).match(/;/g) || []).length, duration: 0 };
     },
   };
@@ -487,8 +547,12 @@ function __sbR2Object(meta, body) {
   };
   if (body != null) {
     obj.body = body;
-    obj.text = function () { return body; };
-    obj.json = function () { return JSON.parse(body); };
+    obj.text = function () {
+      return body;
+    };
+    obj.json = function () {
+      return JSON.parse(body);
+    };
   }
   return obj;
 }
@@ -504,17 +568,17 @@ globalThis.__sbInstallBindings = function (target, bindings) {
     const ns = bindings.kv[i];
     target[ns] = {
       get(key) {
-        const r = __sbRpc('kv.get', { ns, key: String(key) });
+        const r = __sbRpc("kv.get", { ns, key: String(key) });
         return r.found ? r.value : null;
       },
       put(key, value) {
-        __sbRpc('kv.put', { ns, key: String(key), value: String(value) });
+        __sbRpc("kv.put", { ns, key: String(key), value: String(value) });
       },
       delete(key) {
-        __sbRpc('kv.delete', { ns, key: String(key) });
+        __sbRpc("kv.delete", { ns, key: String(key) });
       },
       list(prefix) {
-        return __sbRpc('kv.list', { ns, prefix: prefix == null ? '' : String(prefix) }).keys || [];
+        return __sbRpc("kv.list", { ns, prefix: prefix == null ? "" : String(prefix) }).keys || [];
       },
     };
   }
@@ -528,7 +592,7 @@ globalThis.__sbInstallBindings = function (target, bindings) {
     Object.defineProperty(target, name, {
       configurable: true,
       get() {
-        const value = __sbRpc('secret.get', { name }).value;
+        const value = __sbRpc("secret.get", { name }).value;
         Object.defineProperty(target, name, { value, configurable: true, enumerable: true });
         return value;
       },
@@ -545,31 +609,31 @@ globalThis.__sbInstallBindings = function (target, bindings) {
     target[name] = {
       put(key, value, options) {
         const o = options || {};
-        return __sbRpc('r2.put', {
+        return __sbRpc("r2.put", {
           bucket: name,
           key: String(key),
-          body: value == null ? '' : String(value),
+          body: value == null ? "" : String(value),
           httpMetadata: o.httpMetadata || {},
           customMetadata: o.customMetadata || {},
         }).object;
       },
       get(key) {
-        const r = __sbRpc('r2.get', { bucket: name, key: String(key) });
-        return r.found ? __sbR2Object(r.object, r.body == null ? '' : r.body) : null;
+        const r = __sbRpc("r2.get", { bucket: name, key: String(key) });
+        return r.found ? __sbR2Object(r.object, r.body == null ? "" : r.body) : null;
       },
       head(key) {
-        const r = __sbRpc('r2.head', { bucket: name, key: String(key) });
+        const r = __sbRpc("r2.head", { bucket: name, key: String(key) });
         return r.found ? __sbR2Object(r.object, null) : null;
       },
       delete(key) {
-        __sbRpc('r2.delete', { bucket: name, key: String(key) });
+        __sbRpc("r2.delete", { bucket: name, key: String(key) });
       },
       list(options) {
         const o = options || {};
-        const r = __sbRpc('r2.list', {
+        const r = __sbRpc("r2.list", {
           bucket: name,
-          prefix: o.prefix == null ? '' : String(o.prefix),
-          cursor: o.cursor == null ? '' : String(o.cursor),
+          prefix: o.prefix == null ? "" : String(o.prefix),
+          cursor: o.cursor == null ? "" : String(o.cursor),
           limit: o.limit == null ? 1000 : o.limit,
         });
         const objects = [];
@@ -584,15 +648,19 @@ globalThis.__sbInstallBindings = function (target, bindings) {
     target[name] = {
       send(body, options) {
         const o = options || {};
-        __sbRpc('queue.send', { queue: name, body: __sbIsStr(body) ? body : JSON.stringify(body), delaySeconds: o.delaySeconds || 0 });
+        __sbRpc("queue.send", {
+          queue: name,
+          body: __sbIsStr(body) ? body : JSON.stringify(body),
+          delaySeconds: o.delaySeconds || 0,
+        });
       },
       sendBatch(messages) {
         const list = [];
         for (let j = 0; j < (messages || []).length; j++) {
           const m = messages[j];
-          list.push({ body: __sbIsStr(m.body) ? m.body : JSON.stringify(m.body), delaySeconds: (m.delaySeconds || 0) });
+          list.push({ body: __sbIsStr(m.body) ? m.body : JSON.stringify(m.body), delaySeconds: m.delaySeconds || 0 });
         }
-        __sbRpc('queue.send_batch', { queue: name, messages: list });
+        __sbRpc("queue.send_batch", { queue: name, messages: list });
       },
     };
   }
@@ -602,7 +670,7 @@ globalThis.__sbInstallBindings = function (target, bindings) {
     target[name] = {
       writeDataPoint(event) {
         const e = event || {};
-        __sbRpc('ae.write', {
+        __sbRpc("ae.write", {
           dataset: name,
           indexes: e.indexes || [],
           blobs: e.blobs || [],
@@ -613,7 +681,7 @@ globalThis.__sbInstallBindings = function (target, bindings) {
       // query it via the SQL API). Returns { count, rows }.
       query(options) {
         const o = options || {};
-        return __sbRpc('ae.query', { dataset: name, limit: o.limit || 20 });
+        return __sbRpc("ae.query", { dataset: name, limit: o.limit || 20 });
       },
     };
   }
@@ -630,13 +698,17 @@ globalThis.__sbInstallBindings = function (target, bindings) {
   if (bindings.assets) {
     target[bindings.assets] = {
       fetch(input) {
-        let path = __sbIsStr(input) ? input : String(input && input.url || '/');
-        try { path = new URL(path, 'http://a').pathname; } catch { /* use as-is */ }
-        const r = __sbRpc('assets.get', { path });
+        let path = __sbIsStr(input) ? input : String((input && input.url) || "/");
+        try {
+          path = new URL(path, "http://a").pathname;
+        } catch {
+          /* use as-is */
+        }
+        const r = __sbRpc("assets.get", { path });
         const headers = {};
-        if (r.type) headers['content-type'] = r.type;
-        if (r.found) headers['etag'] = '"' + r.hash + '"';
-        return new Response(r.body == null ? '' : r.body, { status: r.status || (r.found ? 200 : 404), headers });
+        if (r.type) headers["content-type"] = r.type;
+        if (r.found) headers["etag"] = '"' + r.hash + '"';
+        return new Response(r.body == null ? "" : r.body, { status: r.status || (r.found ? 200 : 404), headers });
       },
     };
   }
@@ -650,15 +722,15 @@ globalThis.__sbInstallBindings = function (target, bindings) {
         if (__sbIsFn(opts.headers.forEach)) opts.headers.forEach((v, k) => headers.push([k, v]));
         else for (const k in opts.headers) headers.push([k, opts.headers[k]]);
       }
-      const r = __sbRpc('fetch', {
+      const r = __sbRpc("fetch", {
         url,
-        method: opts.method || 'GET',
+        method: opts.method || "GET",
         headers,
         body: opts.body == null ? null : String(opts.body),
       });
       const respHeaders = new Headers();
       for (let j = 0; j < (r.headers || []).length; j++) respHeaders.set(r.headers[j][0], r.headers[j][1]);
-      return new Response(r.body == null ? '' : r.body, { status: r.status || 502, headers: respHeaders });
+      return new Response(r.body == null ? "" : r.body, { status: r.status || 502, headers: respHeaders });
     };
   }
 };
@@ -676,10 +748,27 @@ globalThis.__sbInstallBindings = function (target, bindings) {
 
 function __sbMakeDONamespace(binding, className) {
   return {
-    idFromName(name) { return { toString() { return 'name:' + String(name); }, name: String(name) }; },
-    idFromString(hex) { return { toString() { return String(hex); } }; },
+    idFromName(name) {
+      return {
+        toString() {
+          return "name:" + String(name);
+        },
+        name: String(name),
+      };
+    },
+    idFromString(hex) {
+      return {
+        toString() {
+          return String(hex);
+        },
+      };
+    },
     newUniqueId() {
-      return { toString() { return 'uid:' + crypto.randomUUID(); } };
+      return {
+        toString() {
+          return "uid:" + crypto.randomUUID();
+        },
+      };
     },
     get(id) {
       const idStr = __sbIsStr(id) ? id : id.toString();
@@ -689,14 +778,14 @@ function __sbMakeDONamespace(binding, className) {
           if (__sbIsObj(input) && __sbIsStr(input.url) && !init) {
             req = input;
           } else {
-            const url = __sbIsStr(input) ? input : String((input && input.url) || 'https://do/');
+            const url = __sbIsStr(input) ? input : String((input && input.url) || "https://do/");
             const opts = init || {};
             const headers = new Headers();
             if (opts.headers) {
               if (__sbIsFn(opts.headers.forEach)) opts.headers.forEach((v, k) => headers.set(k, v));
               else for (const k in opts.headers) headers.set(k, opts.headers[k]);
             }
-            req = new Request(url, { method: opts.method || 'GET', headers });
+            req = new Request(url, { method: opts.method || "GET", headers });
             if (opts.body != null) req.body = String(opts.body);
           }
           return __sbGetDOInstance(className, idStr).fetch(req);
@@ -714,14 +803,20 @@ globalThis.__sbRegisterDO = function (map) {
 
 function __sbGetDOInstance(cls, id) {
   const Ctor = __sbDOClasses[cls];
-  if (!Ctor) throw new Error('no such Durable Object class: ' + cls);
-  const cacheKey = cls + ' ' + id;
+  if (!Ctor) throw new Error("no such Durable Object class: " + cls);
+  const cacheKey = cls + " " + id;
   let inst = __sbDOInstances[cacheKey];
   if (!inst) {
     const state = {
-      id: { toString() { return id; } },
+      id: {
+        toString() {
+          return id;
+        },
+      },
       storage: __sbDOStorage(cls, id),
-      blockConcurrencyWhile(fn) { return fn(); },
+      blockConcurrencyWhile(fn) {
+        return fn();
+      },
       waitUntil() {},
     };
     inst = new Ctor(state, globalThis.env);
@@ -736,33 +831,41 @@ function __sbDOStorage(cls, id) {
       if (Array.isArray(key)) {
         const out = new Map();
         for (let i = 0; i < key.length; i++) {
-          const r = __sbRpc('do.storage.get', { cls, id, key: String(key[i]) });
+          const r = __sbRpc("do.storage.get", { cls, id, key: String(key[i]) });
           if (r.found) out.set(key[i], JSON.parse(r.value));
         }
         return out;
       }
-      const r = __sbRpc('do.storage.get', { cls, id, key: String(key) });
+      const r = __sbRpc("do.storage.get", { cls, id, key: String(key) });
       return r.found ? JSON.parse(r.value) : undefined;
     },
     put(key, value) {
       if (key != null && __sbIsObj(key)) {
-        for (const k in key) __sbRpc('do.storage.put', { cls, id, key: String(k), value: JSON.stringify(key[k]) });
+        for (const k in key) __sbRpc("do.storage.put", { cls, id, key: String(k), value: JSON.stringify(key[k]) });
         return;
       }
-      __sbRpc('do.storage.put', { cls, id, key: String(key), value: JSON.stringify(value) });
+      __sbRpc("do.storage.put", { cls, id, key: String(key), value: JSON.stringify(value) });
     },
     delete(key) {
       if (Array.isArray(key)) {
         let n = 0;
-        for (let i = 0; i < key.length; i++) n += __sbRpc('do.storage.delete', { cls, id, key: String(key[i]) }).deleted ? 1 : 0;
+        for (let i = 0; i < key.length; i++)
+          n += __sbRpc("do.storage.delete", { cls, id, key: String(key[i]) }).deleted ? 1 : 0;
         return n;
       }
-      return !!__sbRpc('do.storage.delete', { cls, id, key: String(key) }).deleted;
+      return !!__sbRpc("do.storage.delete", { cls, id, key: String(key) }).deleted;
     },
-    deleteAll() { __sbRpc('do.storage.delete_all', { cls, id }); },
+    deleteAll() {
+      __sbRpc("do.storage.delete_all", { cls, id });
+    },
     list(options) {
       const o = options || {};
-      const r = __sbRpc('do.storage.list', { cls, id, prefix: o.prefix == null ? '' : String(o.prefix), limit: o.limit == null ? 1000 : o.limit });
+      const r = __sbRpc("do.storage.list", {
+        cls,
+        id,
+        prefix: o.prefix == null ? "" : String(o.prefix),
+        limit: o.limit == null ? 1000 : o.limit,
+      });
       const out = new Map();
       for (let i = 0; i < (r.entries || []).length; i++) out.set(r.entries[i][0], JSON.parse(r.entries[i][1]));
       return out;
@@ -778,7 +881,7 @@ function __sbDOStorage(cls, id) {
 
 // oxlint-disable-next-line no-unused-vars -- `name` is read inside the RawC block below, not by JS.
 function __sbEnv(name) {
-  let res = '';
+  let res = "";
   // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
     const char* __n; size_t __nl; char* __no = 0;
@@ -794,13 +897,13 @@ function __sbEnv(name) {
 }
 
 function __sbTriggerAuthed(request) {
-  const want = __sbEnv('SB_BROKER_TOKEN');
+  const want = __sbEnv("SB_BROKER_TOKEN");
   if (!want) return true; // no token configured (local/dev)
-  return request.headers.get('x-sb-token') === want;
+  return request.headers.get("x-sb-token") === want;
 }
 
 globalThis.__sbEntry = function (handlers, request) {
-  const trigger = request.headers.get('x-sb-trigger');
+  const trigger = request.headers.get("x-sb-trigger");
   if (!trigger) {
     // #28 — per-invocation CPU time. One fetch turn per process (serial), so the
     // process CPU delta across the handler is this invocation's CPU.
@@ -817,17 +920,17 @@ globalThis.__sbEntry = function (handlers, request) {
     if (__res && __sbIsFn(__res.then)) return __res;
     return __sbTagCpu(__res, __t0);
   }
-  if (!__sbTriggerAuthed(request)) return new Response('forbidden', { status: 403 });
+  if (!__sbTriggerAuthed(request)) return new Response("forbidden", { status: 403 });
 
-  if (trigger === 'scheduled') {
-    if (!__sbIsFn(handlers.scheduled)) return new Response('no scheduled handler', { status: 404 });
+  if (trigger === "scheduled") {
+    if (!__sbIsFn(handlers.scheduled)) return new Response("no scheduled handler", { status: 404 });
     const body = __sbReadJson(request);
-    handlers.scheduled({ cron: body.cron || '', scheduledTime: body.scheduledTime || Date.now(), noRetry() {} });
-    return new Response('', { status: 204 });
+    handlers.scheduled({ cron: body.cron || "", scheduledTime: body.scheduledTime || Date.now(), noRetry() {} });
+    return new Response("", { status: 204 });
   }
 
-  if (trigger === 'queue') {
-    if (!__sbIsFn(handlers.queue)) return new Response('no queue handler', { status: 404 });
+  if (trigger === "queue") {
+    if (!__sbIsFn(handlers.queue)) return new Response("no queue handler", { status: 404 });
     const body = __sbReadJson(request);
     const acked = [];
     const retried = [];
@@ -840,32 +943,49 @@ globalThis.__sbEntry = function (handlers, request) {
         timestamp: m.timestamp,
         attempts: m.attempts || 1,
         body: __sbTryParse(m.body),
-        ack() { if (acked.indexOf(m.id) === -1) acked.push(m.id); },
-        retry() { if (retried.indexOf(m.id) === -1) retried.push(m.id); },
+        ack() {
+          if (acked.indexOf(m.id) === -1) acked.push(m.id);
+        },
+        retry() {
+          if (retried.indexOf(m.id) === -1) retried.push(m.id);
+        },
       };
       messages.push(msg);
     }
     const batch = {
-      queue: body.queue || '',
+      queue: body.queue || "",
       messages,
-      ackAll() { for (let i = 0; i < messages.length; i++) messages[i].ack(); },
-      retryAll() { for (let i = 0; i < messages.length; i++) messages[i].retry(); },
+      ackAll() {
+        for (let i = 0; i < messages.length; i++) messages[i].ack();
+      },
+      retryAll() {
+        for (let i = 0; i < messages.length; i++) messages[i].retry();
+      },
     };
     handlers.queue(batch);
     // default: any message neither acked nor retried is treated as acked
     for (let i = 0; i < messages.length; i++) {
       if (acked.indexOf(messages[i].id) === -1 && retried.indexOf(messages[i].id) === -1) acked.push(messages[i].id);
     }
-    return new Response(JSON.stringify({ ack: acked, retry: retried }), { headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ ack: acked, retry: retried }), {
+      headers: { "content-type": "application/json" },
+    });
   }
 
-  
-  return new Response('unknown trigger', { status: 400 });
+  return new Response("unknown trigger", { status: 400 });
 };
 
 function __sbReadJson(request) {
-  try { return JSON.parse(request.body == null ? '{}' : String(request.body)); } catch { return {}; }
+  try {
+    return JSON.parse(request.body == null ? "{}" : String(request.body));
+  } catch {
+    return {};
+  }
 }
 function __sbTryParse(s) {
-  try { return JSON.parse(s); } catch { return s; }
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
 }

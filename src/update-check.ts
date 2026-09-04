@@ -29,7 +29,11 @@ function cachePath(): string {
 
 /** Numeric x.y.z compare; a trailing `-tag` (prerelease) sorts before its release. */
 function isNewer(latest: string, current: string): boolean {
-  const parts = (v: string) => v.split("-")[0].split(".").map((n) => Number.parseInt(n, 10) || 0);
+  const parts = (v: string) =>
+    v
+      .split("-")[0]
+      .split(".")
+      .map((n) => Number.parseInt(n, 10) || 0);
   const [a, b] = [parts(latest), parts(current)];
   for (let i = 0; i < 3; i++) {
     if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
@@ -41,16 +45,23 @@ async function latestVersion(): Promise<string | undefined> {
   try {
     const cached = parseCache(await readFile(cachePath(), "utf8"));
     if (cached && Date.now() - cached.checkedAt < CACHE_TTL_MS) return cached.latest;
-  } catch { /* no cache yet, or unreadable — fetch below */ }
+  } catch {
+    /* no cache yet, or unreadable — fetch below */
+  }
 
   try {
-    const response = await fetch(REGISTRY, { signal: AbortSignal.timeout(1000), headers: { accept: "application/json" } });
+    const response = await fetch(REGISTRY, {
+      signal: AbortSignal.timeout(1000),
+      headers: { accept: "application/json" },
+    });
     if (!response.ok) return undefined;
     const latest = jsonObject(parseJsonValue(await response.text()))?.version;
     if (!isString(latest)) return undefined;
     await writeFile(cachePath(), JSON.stringify({ checkedAt: Date.now(), latest } satisfies Cache)).catch(() => {});
     return latest;
-  } catch { /* offline / slow / DNS — skip silently */ }
+  } catch {
+    /* offline / slow / DNS — skip silently */
+  }
   return undefined;
 }
 
@@ -59,6 +70,10 @@ export async function notifyIfOutdated(current: string): Promise<void> {
   if (process.env.SPROUTBOAT_NO_UPDATE_CHECK || process.env.CI) return;
   const latest = await latestVersion();
   if (latest && isNewer(latest, current)) {
-    console.error(dim(`  update available: sproutboat ${current} → ${latest}  ·  bump the dependency or run \`bunx sproutboat@latest\``));
+    console.error(
+      dim(
+        `  update available: sproutboat ${current} → ${latest}  ·  bump the dependency or run \`bunx sproutboat@latest\``,
+      ),
+    );
   }
 }

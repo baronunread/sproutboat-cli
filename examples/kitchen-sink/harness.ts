@@ -30,12 +30,21 @@ const PORF = join(CLI, "node_modules/porffor/runtime/index.js");
 
 const workdir = mkdtempSync(join(tmpdir(), "sb-kitchen-"));
 const cleanup: Array<() => void> = [() => rmSync(workdir, { recursive: true, force: true })];
-const die = (m: string) => { console.error("FAIL:", m); for (const c of cleanup.reverse()) try { c(); } catch {} process.exit(1); };
+const die = (m: string) => {
+  console.error("FAIL:", m);
+  for (const c of cleanup.reverse())
+    try {
+      c();
+    } catch {}
+  process.exit(1);
+};
 
 let passed = 0;
 function check(name: string, cond: boolean, detail?: JsonValue) {
-  if (cond) { passed++; console.log("  ok  " + name); }
-  else die(`${name}${detail === undefined ? "" : " — " + JSON.stringify(detail)}`);
+  if (cond) {
+    passed++;
+    console.log("  ok  " + name);
+  } else die(`${name}${detail === undefined ? "" : " — " + JSON.stringify(detail)}`);
 }
 
 // --- config -> bindings --------------------------------------------------
@@ -49,7 +58,10 @@ const QUOTES = [
   { content: "Make it work, make it right, make it fast.", author: "Kent Beck" },
   { content: "Programs must be written for people to read.", author: "Harold Abelson" },
 ];
-const upstream = Bun.serve({ port: 0, fetch: () => Response.json(QUOTES[Math.floor(Date.now() / 4000) % QUOTES.length]) });
+const upstream = Bun.serve({
+  port: 0,
+  fetch: () => Response.json(QUOTES[Math.floor(Date.now() / 4000) % QUOTES.length]),
+});
 cleanup.push(() => upstream.stop(true));
 const upstreamHost = `127.0.0.1:${upstream.port}`;
 
@@ -90,7 +102,8 @@ writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"
 console.log("compiling sprout (host native)…");
 const compile = Bun.spawnSync(["node", PORF, "native", gen, "-o", bin], {
   env: { ...process.env, PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}` },
-  stdout: "pipe", stderr: "pipe",
+  stdout: "pipe",
+  stderr: "pipe",
 });
 if (compile.exitCode !== 0) die("porffor compile failed:\n" + compile.stderr.toString() + compile.stdout.toString());
 
@@ -107,19 +120,28 @@ const broker = createBroker({
   assetsDir,
 });
 const brokerServer = listen(broker, "127.0.0.1", 0);
-cleanup.push(() => { brokerServer.stop(); broker.close(); });
+cleanup.push(() => {
+  brokerServer.stop();
+  broker.close();
+});
 
 // --- sprout process -----------------------------------------------
 const sprout = Bun.spawn([bin], {
   env: { ...process.env, PORT: String(sproutPort), SB_BROKER_PORT: String(brokerServer.port), SB_BROKER_TOKEN: TOKEN },
-  stdout: "inherit", stderr: "inherit",
+  stdout: "inherit",
+  stderr: "inherit",
 });
 cleanup.push(() => sprout.kill(9));
 
 const base = `http://127.0.0.1:${sproutPort}`;
 async function up() {
   for (let i = 0; i < 100; i++) {
-    try { await fetch(base + "/"); return; } catch { await Bun.sleep(50); }
+    try {
+      await fetch(base + "/");
+      return;
+    } catch {
+      await Bun.sleep(50);
+    }
   }
   die("sprout never listened");
 }
@@ -129,8 +151,11 @@ await up();
 const jget = async (p: string, init?: RequestInit): Promise<{ status: number; body: JsonValue }> => {
   const r = await fetch(base + p, init);
   const t = await r.text();
-  try { return { status: r.status, body: parseJsonValue(t) }; }
-  catch { return { status: r.status, body: t }; }
+  try {
+    return { status: r.status, body: parseJsonValue(t) };
+  } catch {
+    return { status: r.status, body: t };
+  }
 };
 
 console.log("\nbindings:");
@@ -140,10 +165,17 @@ check("vars: GET / uses env.SITE_NAME", String((await jget("/")).body).includes(
 
 // static assets: env.ASSETS.fetch serves index.html; SPA fallback for unknown GET
 const home = await fetch(base + "/");
-check("assets: GET / serves index.html with html content-type",
-  home.status === 200 && (home.headers.get("content-type") || "").includes("text/html") && (await home.text()).includes("<h1>Sproutboat Notes"));
+check(
+  "assets: GET / serves index.html with html content-type",
+  home.status === 200 &&
+    (home.headers.get("content-type") || "").includes("text/html") &&
+    (await home.text()).includes("<h1>Sproutboat Notes"),
+);
 const spa = await fetch(base + "/some/client/route");
-check("assets: unknown GET falls back to the SPA shell (200)", spa.status === 200 && (await spa.text()).includes("<h1>Sproutboat Notes"));
+check(
+  "assets: unknown GET falls back to the SPA shell (200)",
+  spa.status === 200 && (await spa.text()).includes("<h1>Sproutboat Notes"),
+);
 
 // KV (login -> whoami)
 const login = await jget("/login", { method: "POST" });
@@ -162,33 +194,58 @@ check("D1: GET /notes lists it", arr(list.body).length >= 1, list.body);
 // Durable Object (view counter increments atomically)
 const v1 = await jget(`/notes/${noteId}`);
 const v2 = await jget(`/notes/${noteId}`);
-check("DO: view count increments across requests", Number(obj(v2.body).views) === Number(obj(v1.body).views) + 1, { v1: obj(v1.body).views, v2: obj(v2.body).views });
+check("DO: view count increments across requests", Number(obj(v2.body).views) === Number(obj(v1.body).views) + 1, {
+  v1: obj(v1.body).views,
+  v2: obj(v2.body).views,
+});
 
 // R2 (attach + fetch back + list)
 const att = await jget(`/notes/${noteId}/attach`, { method: "POST", body: "the file contents" });
 check("R2: attach stores a key", isString(obj(att.body).key), att.body);
 const file = await fetch(base + `/attach/${encodeURIComponent(String(obj(att.body).key))}`);
-check("R2: GET /attach returns the body + etag", (await file.text()) === "the file contents" && !!file.headers.get("etag"));
+check(
+  "R2: GET /attach returns the body + etag",
+  (await file.text()) === "the file contents" && !!file.headers.get("etag"),
+);
 const atts = await jget("/attachments");
-check("R2: GET /attachments lists the object", arr(atts.body).some((o) => obj(o).key === obj(att.body).key), atts.body);
+check(
+  "R2: GET /attachments lists the object",
+  arr(atts.body).some((o) => obj(o).key === obj(att.body).key),
+  atts.body,
+);
 
 // async handler: the prelude must return the handler's own promise untouched
 const asyncRes = await jget("/async");
-check("async: a promise-returning route resolves", asyncRes.status === 200 && obj(asyncRes.body).async === true, asyncRes.body);
+check(
+  "async: a promise-returning route resolves",
+  asyncRes.status === 200 && obj(asyncRes.body).async === true,
+  asyncRes.body,
+);
 
 // outbound fetch (allowlisted)
 const quote = await jget("/quote");
-check("fetch: /quote proxies the allowlisted upstream", quote.status === 200 && isString(obj(quote.body).content) && String(obj(quote.body).author).length > 0, quote.body);
+check(
+  "fetch: /quote proxies the allowlisted upstream",
+  quote.status === 200 && isString(obj(quote.body).content) && String(obj(quote.body).author).length > 0,
+  quote.body,
+);
 
 // secret gate
 const denied = await jget("/admin/stats", { headers: { "x-admin-token": "wrong" } });
 check("secret: /admin/stats rejects a bad ADMIN_TOKEN", denied.status === 403);
 const allowed = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
-check("secret: /admin/stats accepts the real ADMIN_TOKEN", allowed.status === 200 && obj(allowed.body).site === "Sproutboat Notes", allowed.body);
+check(
+  "secret: /admin/stats accepts the real ADMIN_TOKEN",
+  allowed.status === 200 && obj(allowed.body).site === "Sproutboat Notes",
+  allowed.body,
+);
 
 // analytics engine — env.METRICS.query() feeds the dashboard
-check("analytics: METRICS.query reports data points", Number(obj(allowed.body).analytics_points) > 0
-  && Array.isArray(obj(allowed.body).analytics_recent), allowed.body);
+check(
+  "analytics: METRICS.query reports data points",
+  Number(obj(allowed.body).analytics_points) > 0 && Array.isArray(obj(allowed.body).analytics_recent),
+  allowed.body,
+);
 
 // queue: POST /notes enqueued an EMAILS job; the broker consumer delivers it
 let emailLogged = 0;
@@ -211,5 +268,8 @@ const afterCron = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr
 check("cron: heartbeat row written by scheduled()", Number(obj(afterCron.body).cron_heartbeats) > 0, afterCron.body);
 
 console.log(`\n${passed} checks passed — every binding exercised end to end.`);
-for (const c2 of cleanup.reverse()) try { c2(); } catch {}
+for (const c2 of cleanup.reverse())
+  try {
+    c2();
+  } catch {}
 process.exit(0);

@@ -21,13 +21,26 @@ export type AssetManifest = {
 };
 
 const TYPES = new Map<string, string>([
-  ["html", "text/html; charset=utf-8"], ["css", "text/css; charset=utf-8"],
-  ["js", "text/javascript; charset=utf-8"], ["mjs", "text/javascript; charset=utf-8"],
-  ["json", "application/json; charset=utf-8"], ["map", "application/json; charset=utf-8"],
-  ["txt", "text/plain; charset=utf-8"], ["xml", "application/xml; charset=utf-8"],
-  ["svg", "image/svg+xml"], ["png", "image/png"], ["jpg", "image/jpeg"], ["jpeg", "image/jpeg"],
-  ["gif", "image/gif"], ["webp", "image/webp"], ["avif", "image/avif"], ["ico", "image/x-icon"],
-  ["woff2", "font/woff2"], ["woff", "font/woff"], ["ttf", "font/ttf"], ["wasm", "application/wasm"],
+  ["html", "text/html; charset=utf-8"],
+  ["css", "text/css; charset=utf-8"],
+  ["js", "text/javascript; charset=utf-8"],
+  ["mjs", "text/javascript; charset=utf-8"],
+  ["json", "application/json; charset=utf-8"],
+  ["map", "application/json; charset=utf-8"],
+  ["txt", "text/plain; charset=utf-8"],
+  ["xml", "application/xml; charset=utf-8"],
+  ["svg", "image/svg+xml"],
+  ["png", "image/png"],
+  ["jpg", "image/jpeg"],
+  ["jpeg", "image/jpeg"],
+  ["gif", "image/gif"],
+  ["webp", "image/webp"],
+  ["avif", "image/avif"],
+  ["ico", "image/x-icon"],
+  ["woff2", "font/woff2"],
+  ["woff", "font/woff"],
+  ["ttf", "font/ttf"],
+  ["wasm", "application/wasm"],
   ["webmanifest", "application/manifest+json"],
 ]);
 
@@ -68,10 +81,17 @@ export function walkAssets(dir: string) {
       if (ent.name.startsWith(".")) continue;
       const childAbs = join(abs, ent.name);
       const childRel = posix.join(rel, ent.name);
-      if (ent.isDirectory()) { recurse(childAbs, childRel); continue; }
+      if (ent.isDirectory()) {
+        recurse(childAbs, childRel);
+        continue;
+      }
       if (!ent.isFile()) continue;
       const body = readFileSync(childAbs);
-      out[`/${childRel}`] = { hash: createHash("sha256").update(body).digest("hex"), size: body.byteLength, type: contentType(ent.name) };
+      out[`/${childRel}`] = {
+        hash: createHash("sha256").update(body).digest("hex"),
+        size: body.byteLength,
+        type: contentType(ent.name),
+      };
     }
   };
   recurse(dir, "");

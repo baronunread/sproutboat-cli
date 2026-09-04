@@ -4,7 +4,14 @@ import { resolve } from "node:path";
 import { walkAssets, type AssetManifest } from "./assets";
 import { resourceRefs, type SproutboatConfig } from "./config";
 import { compileSprout } from "./compile";
-import { ARTIFACT_SCHEMA_VERSION, CAPABILITY_PROFILE, DEPLOY_TARGET, hostTarget, RUNTIME, type ArtifactManifest } from "./manifest";
+import {
+  ARTIFACT_SCHEMA_VERSION,
+  CAPABILITY_PROFILE,
+  DEPLOY_TARGET,
+  hostTarget,
+  RUNTIME,
+  type ArtifactManifest,
+} from "./manifest";
 import { ensureZig, esbuildVersion, porfforVersion, toolchainStamp } from "./toolchain";
 
 export type BuildInput = {
@@ -41,7 +48,7 @@ function digest(value: Uint8Array | string): `sha256:${string}` {
  * does not come up.
  */
 export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
-  const source = input.source ?? await readFile(input.sourcePath);
+  const source = input.source ?? (await readFile(input.sourcePath));
   const sourceHash = digest(source);
   const artifactId = sourceHash.slice("sha256:".length, 24);
   const artifactDir = resolve(input.projectDir, ".sproutboat/dist", artifactId);
@@ -114,9 +121,10 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   // frozen at v2. The control plane reads this to configure the per-deployment
   // broker (KV / D1 / R2 / queue names, secret names, outbound allowlist, cron
   // schedules, Durable Object classes).
-  const hasBindings = Object.values(bindings).some((value) => Array.isArray(value) && value.length > 0)
-    || Object.keys(bindings.resources).length > 0
-    || Object.keys(bindings.vars).length > 0;
+  const hasBindings =
+    Object.values(bindings).some((value) => Array.isArray(value) && value.length > 0) ||
+    Object.keys(bindings.resources).length > 0 ||
+    Object.keys(bindings.vars).length > 0;
   if (hasBindings) {
     await writeFile(resolve(artifactDir, "bindings.json"), `${JSON.stringify(bindings, null, 2)}\n`);
   }
@@ -127,7 +135,11 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   if (input.config.assets) {
     const srcDir = resolve(input.projectDir, input.config.assets.directory);
     const outDir = resolve(artifactDir, "assets");
-    if (!(await stat(srcDir).then((s) => s.isDirectory()).catch(() => false))) {
+    if (
+      !(await stat(srcDir)
+        .then((s) => s.isDirectory())
+        .catch(() => false))
+    ) {
       throw new Error(`assets.directory "${input.config.assets.directory}" not found — run your site build first`);
     }
     await cp(srcDir, outDir, { recursive: true });

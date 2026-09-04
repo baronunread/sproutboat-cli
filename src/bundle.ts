@@ -30,7 +30,8 @@ const entryLabel = (entryPath: string, projectDir: string): string => relative(p
 /** Bun reports resolution failures on `AggregateError.errors`; its own message is just "Bundle failed". */
 function bundleDetail(cause: unknown): string {
   const errors = cause instanceof AggregateError ? cause.errors : [];
-  if (errors.length > 0) return errors.map((error) => `  ${error instanceof Error ? error.message : String(error)}`).join("\n");
+  if (errors.length > 0)
+    return errors.map((error) => `  ${error instanceof Error ? error.message : String(error)}`).join("\n");
   return `  ${cause instanceof Error ? cause.message : String(cause)}`;
 }
 

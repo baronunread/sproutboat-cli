@@ -39,8 +39,8 @@ async function asyncEcho(path) {
 function ensureSchema(env) {
   env.DB.exec(
     "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, body TEXT, attachment TEXT, created TEXT);" +
-    "CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, sent_at TEXT);" +
-    "CREATE TABLE IF NOT EXISTS heartbeat (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, cron TEXT)",
+      "CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, sent_at TEXT);" +
+      "CREATE TABLE IF NOT EXISTS heartbeat (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, cron TEXT)",
   );
 }
 
@@ -104,12 +104,13 @@ export default {
       // The native-fetch server caps an inbound request body at 1 MiB, so that —
       // not the broker frame — is the real upload ceiling. Large-object R2
       // (chunked put / streaming get) is tracked in baronunread/sproutboat#56.
-      if (body.length > 900 * 1024) return json({ error: "file too large — demo R2 upload cap is ~900 KB (see issue #56)" }, 413);
+      if (body.length > 900 * 1024)
+        return json({ error: "file too large — demo R2 upload cap is ~900 KB (see issue #56)" }, 413);
       const key = "note-" + id + "-" + Date.now() + ".txt";
       try {
         env.UPLOADS.put(key, body, { customMetadata: { noteId: id } });
       } catch (e) {
-        return json({ error: "R2 put failed: " + (e && e.message || e) }, 502);
+        return json({ error: "R2 put failed: " + ((e && e.message) || e) }, 502);
       }
       env.DB.prepare("UPDATE notes SET attachment = ? WHERE id = ?").bind(key, id).run();
       return json({ key });
@@ -177,7 +178,9 @@ export default {
         if (!s.expires || s.expires < now) env.SESSIONS.delete(keys[i]);
       }
     }
-    env.DB.prepare("INSERT INTO heartbeat (at, cron) VALUES (?, ?)").bind(new Date(event.scheduledTime).toISOString(), event.cron).run();
+    env.DB.prepare("INSERT INTO heartbeat (at, cron) VALUES (?, ?)")
+      .bind(new Date(event.scheduledTime).toISOString(), event.cron)
+      .run();
   },
 
   // queue consumer for EMAILS: pretend to send, log to D1

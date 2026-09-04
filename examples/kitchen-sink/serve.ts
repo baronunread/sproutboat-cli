@@ -22,7 +22,10 @@ const PORF = join(CLI, "node_modules/porffor/runtime/index.js");
 const workdir = mkdtempSync(join(tmpdir(), "sb-kitchen-serve-"));
 
 const cfg = parseConfig(readFileSync(join(HERE, "sproutboat.jsonc"), "utf8"));
-if (!cfg.ok) { console.error(cfg.errors.join("; ")); process.exit(1); }
+if (!cfg.ok) {
+  console.error(cfg.errors.join("; "));
+  process.exit(1);
+}
 const c = cfg.value;
 
 const QUOTES = [
@@ -31,12 +34,19 @@ const QUOTES = [
   { content: "Programs must be written for people to read.", author: "Harold Abelson" },
   { content: "The cheapest, fastest, most reliable components are those that aren't there.", author: "Gordon Bell" },
 ];
-const upstream = Bun.serve({ port: 0, fetch: () => Response.json(QUOTES[Math.floor(Date.now() / 4000) % QUOTES.length]) });
+const upstream = Bun.serve({
+  port: 0,
+  fetch: () => Response.json(QUOTES[Math.floor(Date.now() / 4000) % QUOTES.length]),
+});
 const upstreamHost = `127.0.0.1:${upstream.port}`;
 
 const bindings: Bindings = {
-  kv: c.kv_namespaces ?? [], secrets: c.secrets ?? [], outbound: [upstreamHost],
-  d1: c.d1_databases ?? [], r2: c.r2_buckets ?? [], queues: c.queues ?? [],
+  kv: c.kv_namespaces ?? [],
+  secrets: c.secrets ?? [],
+  outbound: [upstreamHost],
+  d1: c.d1_databases ?? [],
+  r2: c.r2_buckets ?? [],
+  queues: c.queues ?? [],
   analytics: c.analytics_engine_datasets ?? [],
   do: Object.entries(c.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
   crons: c.triggers?.crons ?? [],
@@ -48,7 +58,10 @@ const assetsDir = join(workdir, "assets");
 if (c.assets) {
   buildWebUi();
   const assetSrc = join(HERE, c.assets.directory);
-  if (!existsSync(assetSrc)) { console.error(`assets dir not found: ${assetSrc}`); process.exit(1); }
+  if (!existsSync(assetSrc)) {
+    console.error(`assets dir not found: ${assetSrc}`);
+    process.exit(1);
+  }
   cpSync(assetSrc, assetsDir, { recursive: true });
   const assetManifest: AssetManifest = {
     notFound: c.assets.not_found_handling ?? "none",
@@ -65,34 +78,60 @@ writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"
 
 console.log("compiling sprout (host native)…");
 const compile = Bun.spawnSync(["node", PORF, "native", gen, "-o", bin], {
-  env: { ...process.env, PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}` }, stdout: "pipe", stderr: "pipe",
+  env: { ...process.env, PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}` },
+  stdout: "pipe",
+  stderr: "pipe",
 });
-if (compile.exitCode !== 0) { console.error(compile.stderr.toString() + compile.stdout.toString()); process.exit(1); }
+if (compile.exitCode !== 0) {
+  console.error(compile.stderr.toString() + compile.stdout.toString());
+  process.exit(1);
+}
 
 const TOKEN = "dev-token";
 const sproutPort = Number(process.env.PORT) || 8787;
 const broker = createBroker({
-  db: join(workdir, "state.sqlite"), dataDir: join(workdir, "d1"), token: TOKEN, bindings,
-  secrets: { ADMIN_TOKEN: "s3cr3t-admin" }, sproutUrl: `http://127.0.0.1:${sproutPort}/`,
+  db: join(workdir, "state.sqlite"),
+  dataDir: join(workdir, "d1"),
+  token: TOKEN,
+  bindings,
+  secrets: { ADMIN_TOKEN: "s3cr3t-admin" },
+  sproutUrl: `http://127.0.0.1:${sproutPort}/`,
   assetsDir: c.assets ? assetsDir : undefined,
 });
 const brokerServer = listen(broker, "127.0.0.1", 0);
 const sprout = Bun.spawn([bin], {
   env: { ...process.env, PORT: String(sproutPort), SB_BROKER_PORT: String(brokerServer.port), SB_BROKER_TOKEN: TOKEN },
-  stdout: "inherit", stderr: "inherit",
+  stdout: "inherit",
+  stderr: "inherit",
 });
 
-const stop = () => { sprout.kill(9); brokerServer.stop(); broker.close(); upstream.stop(true); rmSync(workdir, { recursive: true, force: true }); process.exit(0); };
+const stop = () => {
+  sprout.kill(9);
+  brokerServer.stop();
+  broker.close();
+  upstream.stop(true);
+  rmSync(workdir, { recursive: true, force: true });
+  process.exit(0);
+};
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 
 const base = `http://127.0.0.1:${sproutPort}`;
-for (let i = 0; i < 100; i++) { try { await fetch(base + "/"); break; } catch { await Bun.sleep(50); } }
+for (let i = 0; i < 100; i++) {
+  try {
+    await fetch(base + "/");
+    break;
+  } catch {
+    await Bun.sleep(50);
+  }
+}
 console.log(`\n  sprout   ${base}`);
 console.log(`  broker   127.0.0.1:${brokerServer.port}  (state: ${workdir})`);
 console.log(`\n  open ${base}/ in a browser for the UI, or:`);
 console.log(`    curl ${base}/`);
-console.log(`    TOKEN=$(curl -s -XPOST ${base}/login | bun -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).token))')`);
+console.log(
+  `    TOKEN=$(curl -s -XPOST ${base}/login | bun -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).token))')`,
+);
 console.log(`    curl -H "authorization: Bearer $TOKEN" ${base}/whoami`);
 console.log(`    curl -XPOST ${base}/notes -d '{"title":"hi","body":"there"}'`);
 console.log(`    curl ${base}/notes`);

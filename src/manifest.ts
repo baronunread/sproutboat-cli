@@ -30,9 +30,7 @@ export type ArtifactManifest = {
   builtAt: string;
 };
 
-export type ManifestValidation =
-  | { ok: true; value: ArtifactManifest }
-  | { ok: false; errors: string[] };
+export type ManifestValidation = { ok: true; value: ArtifactManifest } | { ok: false; errors: string[] };
 
 type JsonValue = string | number | boolean | null | ManifestJsonObject | JsonValue[];
 
@@ -43,8 +41,7 @@ interface ManifestJsonObject {
 type ManifestInput = JsonValue | undefined;
 
 function isRecord(value: ManifestInput): value is ManifestJsonObject {
-  return value !== null && Object(value) === value && !Array.isArray(value)
-    && !(value instanceof Function);
+  return value !== null && Object(value) === value && !Array.isArray(value) && !(value instanceof Function);
 }
 
 function isString(value: ManifestInput): value is string {
@@ -62,27 +59,47 @@ function isPositiveInteger(value: ManifestInput): value is number {
 export function validateManifest(value: ManifestInput): ManifestValidation {
   if (!isRecord(value)) return { ok: false, errors: ["manifest must be an object"] };
   const errors: string[] = [];
-  const required = ["schemaVersion", "project", "target", "runtime", "capabilityProfile", "porfforVersion", "esbuildVersion", "buildImage", "sourceHash", "binaryHash", "binarySize", "builtAt"];
+  const required = [
+    "schemaVersion",
+    "project",
+    "target",
+    "runtime",
+    "capabilityProfile",
+    "porfforVersion",
+    "esbuildVersion",
+    "buildImage",
+    "sourceHash",
+    "binaryHash",
+    "binarySize",
+    "builtAt",
+  ];
   for (const field of required) if (!(field in value)) errors.push(`missing manifest field: ${field}`);
   const schemaVersion = value.schemaVersion === ARTIFACT_SCHEMA_VERSION ? ARTIFACT_SCHEMA_VERSION : null;
   if (schemaVersion === null) errors.push("schemaVersion must be 2");
-  const project = isString(value.project) && /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/.test(value.project) ? value.project : null;
+  const project =
+    isString(value.project) && /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/.test(value.project) ? value.project : null;
   if (project === null) errors.push("project must be a valid slug");
   const target = value.target === DEPLOY_TARGET ? value.target : null;
   if (target === null) {
     // A `--target host` artifact lands here: runnable where it was built, not
     // on a box. Name that, so the failure reads as "wrong build" not "corrupt".
-    errors.push(isString(value.target) && value.target !== DEPLOY_TARGET
-      ? `target must be ${DEPLOY_TARGET}, got ${value.target} — \`--target host\` builds are for local dev and cannot be deployed`
-      : `target must be ${DEPLOY_TARGET}`);
+    errors.push(
+      isString(value.target) && value.target !== DEPLOY_TARGET
+        ? `target must be ${DEPLOY_TARGET}, got ${value.target} — \`--target host\` builds are for local dev and cannot be deployed`
+        : `target must be ${DEPLOY_TARGET}`,
+    );
   }
   const runtime = value.runtime === RUNTIME ? value.runtime : null;
   if (runtime === null) errors.push("runtime must be native-fetch");
   const capabilityProfile = value.capabilityProfile === CAPABILITY_PROFILE ? value.capabilityProfile : null;
   if (capabilityProfile === null) errors.push("capabilityProfile must be http-sync-v0");
   const versions = ["porfforVersion", "esbuildVersion", "buildImage"] as const;
-  const [porfforVersion, esbuildVersion, buildImage] = versions.map((field) => isString(value[field]) && value[field] ? value[field] : null);
-  for (const [field, version] of versions.map((field, index) => [field, [porfforVersion, esbuildVersion, buildImage][index]] as const)) {
+  const [porfforVersion, esbuildVersion, buildImage] = versions.map((field) =>
+    isString(value[field]) && value[field] ? value[field] : null,
+  );
+  for (const [field, version] of versions.map(
+    (field, index) => [field, [porfforVersion, esbuildVersion, buildImage][index]] as const,
+  )) {
     if (version === null) errors.push(`${field} must be a non-empty string`);
   }
   const sourceHash = sha256(value.sourceHash) ? value.sourceHash : null;
@@ -93,6 +110,38 @@ export function validateManifest(value: ManifestInput): ManifestValidation {
   if (binarySize === null) errors.push("binarySize must be a positive integer");
   const builtAt = isString(value.builtAt) && !Number.isNaN(Date.parse(value.builtAt)) ? value.builtAt : null;
   if (builtAt === null) errors.push("builtAt must be an ISO-8601 timestamp");
-  if (errors.length || schemaVersion === null || project === null || target === null || runtime === null || capabilityProfile === null || porfforVersion === null || esbuildVersion === null || buildImage === null || sourceHash === null || binaryHash === null || binarySize === null || builtAt === null) return { ok: false, errors };
-  return { ok: true, value: { ...value, schemaVersion, project, target, runtime, capabilityProfile, porfforVersion, esbuildVersion, buildImage, sourceHash, binaryHash, binarySize, builtAt } };
+  if (
+    errors.length ||
+    schemaVersion === null ||
+    project === null ||
+    target === null ||
+    runtime === null ||
+    capabilityProfile === null ||
+    porfforVersion === null ||
+    esbuildVersion === null ||
+    buildImage === null ||
+    sourceHash === null ||
+    binaryHash === null ||
+    binarySize === null ||
+    builtAt === null
+  )
+    return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      ...value,
+      schemaVersion,
+      project,
+      target,
+      runtime,
+      capabilityProfile,
+      porfforVersion,
+      esbuildVersion,
+      buildImage,
+      sourceHash,
+      binaryHash,
+      binarySize,
+      builtAt,
+    },
+  };
 }
