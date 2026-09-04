@@ -72,6 +72,11 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     do: Object.entries(input.config.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
     crons: input.config.triggers?.crons ?? [],
     assets: input.config.assets?.binding ?? "",
+    // Baked plain values, read as env.NAME. The broker never serves these (they
+    // are compiled in via SPROUTBOAT_VARS_JSON); they ride along so the control
+    // plane can show what a version was built with. Not secret — `secrets` is
+    // that, and it carries names only.
+    vars: input.config.vars ?? {},
     resources,
   };
 
@@ -110,7 +115,8 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   // broker (KV / D1 / R2 / queue names, secret names, outbound allowlist, cron
   // schedules, Durable Object classes).
   const hasBindings = Object.values(bindings).some((value) => Array.isArray(value) && value.length > 0)
-    || Object.keys(bindings.resources).length > 0;
+    || Object.keys(bindings.resources).length > 0
+    || Object.keys(bindings.vars).length > 0;
   if (hasBindings) {
     await writeFile(resolve(artifactDir, "bindings.json"), `${JSON.stringify(bindings, null, 2)}\n`);
   }
