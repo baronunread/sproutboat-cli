@@ -16,7 +16,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
@@ -33,7 +33,7 @@ jobs:
           sed -i "s/const UWS_TARBALL_SHA256 = \".*\";/const UWS_TARBALL_SHA256 = \"$SHA\";/" src/toolchain.ts
           echo "SHORT=$SHORT" >> "$GITHUB_ENV"
 
-      - uses: peter-evans/create-pull-request@v6
+      - uses: peter-evans/create-pull-request@v8
         with:
           branch: uws-prebuild/${{ env.SHORT }}
           title: "Refresh prebuilt uWebSockets (${{ env.SHORT }})"
