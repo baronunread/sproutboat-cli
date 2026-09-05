@@ -16,7 +16,7 @@ jobs:
     if: github.repository == 'baronunread/sproutboat-cli'
     permissions:
       contents: read
-      id-token: write # OIDC token for Trusted Publishing + provenance
+      id-token: write   # OIDC token for Trusted Publishing + provenance
     steps:
       - uses: actions/checkout@v4
       - name: tag matches package.json version
@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - run: npm install -g npm@latest # Trusted Publishing needs npm >= 11.5.1
+      - run: npm install -g npm@latest   # Trusted Publishing needs npm >= 11.5.1
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test

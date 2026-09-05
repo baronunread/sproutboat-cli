@@ -21,6 +21,9 @@
     "tools/oxlint/anti-slop/**",
     "vendor/**",
     "examples/kitchen-sink/web/dist/**",
-    "**/*.md"
+    "**/*.md",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.css"
   ]
 }
