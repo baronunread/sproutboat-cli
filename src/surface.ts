@@ -59,7 +59,7 @@ const storageCommands: readonly Command[] = STORAGE_PRODUCTS.map((product) => ({
   emoji: product.emoji,
   args: STORAGE_ARGS,
   brief: `<${STORAGE_VERBS.join(" | ")}>`,
-  summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "queues" ? "; consumers are not implemented yet" : ""}.`,
+  summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "queues" ? "; consumers deliver in batches with retries, and stop after 5 attempts" : ""}.`,
 }));
 
 export const COMMANDS: readonly Command[] = [

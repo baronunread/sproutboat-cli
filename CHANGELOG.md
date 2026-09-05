@@ -10,6 +10,20 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-06
+### Fixed
+- `sproutboat queues` help (and the generated `SURFACE.md`) claimed queue
+  consumers "are not implemented yet". They are implemented, and they run on
+  the deployed path as well as under `dev`: the supervisor passes
+  `--sprout-url` to the broker, which delivers messages in batches, retries a
+  failed or explicitly-retried message after 5s, and stops delivering it after
+  5 attempts. The summary now describes what actually happens.
+
+### Changed
+- Tooling only, no change to how the CLI behaves: oxfmt is scoped to the JS
+  family with the pre-commit hook's glob matched to it, TypeScript moves
+  5.9 → 7.0, and the GitHub Actions group is bumped.
+
 ## [0.6.0] — 2026-09-05
 ### Added
 - `bindings.json` now carries `vars` — the baked plain values a sprout was
@@ -169,7 +183,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.11...v0.5.0
 [0.4.11]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.10...v0.4.11
