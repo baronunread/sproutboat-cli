@@ -3,11 +3,9 @@ import { wrapNativeFetchHandler } from "./compile";
 import { DEPLOY_TARGET, hostTarget, validateManifest } from "./manifest";
 
 test("wrap: injects prelude + env, keeps the handler body verbatim", () => {
-  const out = wrapNativeFetchHandler(
-    `export default { fetch(req) { return new Response(env.G); } };`,
-    "/*PRELUDE*/",
-    { G: "hej" },
-  );
+  const out = wrapNativeFetchHandler(`export default { fetch(req) { return new Response(env.G); } };`, "/*PRELUDE*/", {
+    G: "hej",
+  });
   expect(out).toStartWith("/*PRELUDE*/");
   expect(out).toContain(`const env = {"G":"hej"};`);
   expect(out).toContain("return new Response(env.G);");
@@ -17,7 +15,7 @@ test("wrap: injects prelude + env, keeps the handler body verbatim", () => {
 
 test("wrap: async fetch is kept verbatim in __sbHandlers", () => {
   const out = wrapNativeFetchHandler(`export default { async fetch() { return new Response("x"); } };`, "");
-  expect(out).toContain("const __sbHandlers = { async fetch() { return new Response(\"x\"); } };");
+  expect(out).toContain('const __sbHandlers = { async fetch() { return new Response("x"); } };');
   expect(out).toContain("fetch(request) { return __sbEntry(__sbHandlers, request); }");
 });
 
@@ -35,7 +33,18 @@ test("wrap: declared bindings emit one install line after `const env`", () => {
     `export default { fetch() { return new Response("x"); } };`,
     "",
     { V: "1" },
-    { kv: ["CACHE"], secrets: [], outbound: [], d1: [], r2: [], queues: [], analytics: [], do: [], crons: [], assets: "" },
+    {
+      kv: ["CACHE"],
+      secrets: [],
+      outbound: [],
+      d1: [],
+      r2: [],
+      queues: [],
+      analytics: [],
+      do: [],
+      crons: [],
+      assets: "",
+    },
   );
   expect(out).toContain(`const env = {"V":"1"};\nglobalThis.env = env;\n__sbInstallBindings(env, {"kv":["CACHE"]`);
   expect(out).toContain(`fetch(request) { return __sbEntry(__sbHandlers, request); }`);
@@ -47,7 +56,18 @@ test("wrap: an assets binding alone triggers the install line", () => {
     `export default { fetch() { return new Response("x"); } };`,
     "",
     {},
-    { kv: [], secrets: [], outbound: [], d1: [], r2: [], queues: [], analytics: [], do: [], crons: [], assets: "ASSETS" },
+    {
+      kv: [],
+      secrets: [],
+      outbound: [],
+      d1: [],
+      r2: [],
+      queues: [],
+      analytics: [],
+      do: [],
+      crons: [],
+      assets: "ASSETS",
+    },
   );
   expect(out).toContain(`__sbInstallBindings(env, {"kv":[]`);
   expect(out).toContain(`"assets":"ASSETS"`);
@@ -58,7 +78,18 @@ test("wrap: Durable Object classes are neutralised and registered", () => {
     `export class Counter { fetch() { return new Response("1"); } }\nexport default { fetch() { return new Response("x"); } };`,
     "",
     {},
-    { kv: [], secrets: [], outbound: [], d1: [], r2: [], queues: [], analytics: [], do: [{ binding: "COUNTER", className: "Counter" }], crons: [], assets: "" },
+    {
+      kv: [],
+      secrets: [],
+      outbound: [],
+      d1: [],
+      r2: [],
+      queues: [],
+      analytics: [],
+      do: [{ binding: "COUNTER", className: "Counter" }],
+      crons: [],
+      assets: "",
+    },
   );
   expect(out).toContain(`\nclass Counter { fetch()`);
   expect(out).toContain(`__sbRegisterDO({ Counter: Counter });`);
@@ -83,9 +114,17 @@ test("prelude: crypto is CSPRNG-backed, no Math.random downgrade", async () => {
 test("manifest: a host-target artifact is rejected as undeployable", () => {
   const digest = `sha256:${"a".repeat(64)}` as const;
   const base = {
-    schemaVersion: 2, project: "hello", runtime: "native-fetch", capabilityProfile: "http-sync-v0",
-    porfforVersion: "alpha-4", esbuildVersion: "0.28.2", buildImage: "stamp",
-    sourceHash: digest, binaryHash: digest, binarySize: 42, builtAt: "2026-08-26T00:00:00.000Z",
+    schemaVersion: 2,
+    project: "hello",
+    runtime: "native-fetch",
+    capabilityProfile: "http-sync-v0",
+    porfforVersion: "alpha-4",
+    esbuildVersion: "0.28.2",
+    buildImage: "stamp",
+    sourceHash: digest,
+    binaryHash: digest,
+    binarySize: 42,
+    builtAt: "2026-08-26T00:00:00.000Z",
   };
   expect(validateManifest({ ...base, target: DEPLOY_TARGET }).ok).toBe(true);
 

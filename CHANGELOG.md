@@ -10,6 +10,26 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-05
+### Added
+- `bindings.json` now carries `vars` — the baked plain values a sprout was
+  built with — so the control plane can show what a version was compiled
+  against. They ride along for display only; the broker never serves them,
+  they are compiled into the sprout itself. A project whose only binding
+  config is `vars` now gets a sidecar written at all, where before it got
+  none.
+
+### Changed
+- Tooling only, no change to how the CLI behaves: the tree is now formatted
+  with oxfmt 0.66.0 (the config landed in 0.5.0 but was never run over the
+  tree), markdown is excluded from formatting, a lefthook pre-commit hook
+  formats staged files and lints, the last 10 oxlint warnings are cleared,
+  and CI gates lint alongside typecheck and test.
+- README rewritten shorter: a logo lockup that survives both GitHub themes
+  (`docs/logo-light.svg` / `docs/logo-dark.svg` behind a `<picture>`), the
+  everyday commands as a five-row table, and the full command inventory left
+  to the generated `SURFACE.md` instead of duplicated by hand.
+
 ## [0.5.0] — 2026-09-03
 ### Added
 - `dev [--port <n>] [--no-watch]` — run the project on this machine against a
@@ -149,7 +169,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.11...v0.5.0
 [0.4.11]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.10...v0.4.11
 [0.4.10]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.9...v0.4.10

@@ -3,16 +3,22 @@ pre-commit:
   commands:
     # Format first, so lint sees the same code a human would after `bun run fmt`
     # — no back-and-forth where a lint fix reintroduces a format issue or vice
-    # versa. Scoped to staged files only: oxfmt's defaults don't match this
-    # repo's style everywhere yet, and reformatting untouched files on someone
-    # else's commit would be a surprise nobody asked for.
+    # versa. Scoped to staged files only, so someone else's commit never
+    # reformats files you didn't touch.
+    #
+    # This glob must stay a superset of what `bun run fmt` would rewrite, or a
+    # file gets formatted by the tree-wide run and never by the hook, and the
+    # tree drifts with nothing to catch it — .mjs was in exactly that hole.
+    # oxfmt also rewrites .md, .yml/.yaml and .css; .oxfmtrc.json's
+    # ignorePatterns turns all three off, so this stays the JS/TS/JSON family.
+    # Widen both together or not at all.
     format:
-      glob: "*.{js,jsx,ts,tsx,json,jsonc}"
+      glob: "*.{js,cjs,mjs,jsx,ts,cts,mts,tsx,json,jsonc}"
       run: bunx oxfmt --write {staged_files}
       stage_fixed: true
     # Whole-tree, not staged-file-scoped: oxlint is ~100ms here, and a lint
     # issue anywhere should block every commit, not just ones that happen to
     # touch the file it's in.
     lint:
-      glob: "*.{js,jsx,ts,tsx}"
+      glob: "*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}"
       run: bun run lint

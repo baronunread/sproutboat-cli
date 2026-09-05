@@ -43,18 +43,21 @@ async function readDevVars(projectDir: string): Promise<Record<string, string>> 
   const path = resolve(projectDir, ".dev.vars");
   if (!existsSync(path)) return {};
   const text = await readFile(path, "utf8");
-  return Object.fromEntries(text.split("\n").flatMap((line): Array<[string, string]> => {
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) return [];
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) return [];
-    const value = trimmed.slice(eq + 1).trim();
-    // Accept quoted values, since a secret can legitimately contain spaces.
-    const unquoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))
-      ? value.slice(1, -1)
-      : value;
-    return [[trimmed.slice(0, eq).trim(), unquoted]];
-  }));
+  return Object.fromEntries(
+    text.split("\n").flatMap((line): Array<[string, string]> => {
+      const trimmed = line.trim();
+      if (trimmed === "" || trimmed.startsWith("#")) return [];
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) return [];
+      const value = trimmed.slice(eq + 1).trim();
+      // Accept quoted values, since a secret can legitimately contain spaces.
+      const unquoted =
+        (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))
+          ? value.slice(1, -1)
+          : value;
+      return [[trimmed.slice(0, eq).trim(), unquoted]];
+    }),
+  );
 }
 
 /** `bindings.json` is written by the build whenever the project declares any. */
@@ -114,7 +117,15 @@ async function start(input: DevInput, source: string): Promise<Running> {
     stdout: "inherit",
     stderr: "inherit",
   });
-  return { sprout, broker, stopBroker: () => { server.stop(); broker.close(); }, expected: false };
+  return {
+    sprout,
+    broker,
+    stopBroker: () => {
+      server.stop();
+      broker.close();
+    },
+    expected: false,
+  };
 }
 
 function stop(running: Running): void {
@@ -171,7 +182,11 @@ export async function runDev(input: DevInput): Promise<void> {
           } catch (cause) {
             // Keep the last good build serving; a typo should not take the
             // server down mid-edit.
-            console.error(amber(`  rebuild failed, still serving the previous build:\n  ${cause instanceof Error ? cause.message : String(cause)}`));
+            console.error(
+              amber(
+                `  rebuild failed, still serving the previous build:\n  ${cause instanceof Error ? cause.message : String(cause)}`,
+              ),
+            );
           } finally {
             rebuilding = false;
           }
@@ -188,7 +203,9 @@ export async function runDev(input: DevInput): Promise<void> {
   // and save, not a reason to tear the whole session down. Without a watcher
   // there is nothing to wait for but this one process.
   if (input.watch) {
-    await new Promise<void>((resolve) => { resolveShutdown = resolve; });
+    await new Promise<void>((resolve) => {
+      resolveShutdown = resolve;
+    });
   } else {
     await running.sprout.exited;
     stop(running);

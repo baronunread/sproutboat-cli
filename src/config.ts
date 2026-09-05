@@ -11,7 +11,9 @@ export type ResourceRef = string | ResourceBinding;
 
 /** Normalizes a storage-binding array to `{ binding, id? }` rows. */
 export function resourceRefs(field: readonly ResourceRef[] | undefined): Array<{ binding: string; id?: string }> {
-  return (field ?? []).map((entry) => (isString(entry) ? { binding: entry } : { binding: entry.binding, id: entry.id }));
+  return (field ?? []).map((entry) =>
+    isString(entry) ? { binding: entry } : { binding: entry.binding, id: entry.id },
+  );
 }
 
 /**
@@ -73,9 +75,7 @@ export type AssetsConfig = {
   run_sprout_first?: boolean | string[];
 };
 
-export type ConfigValidation =
-  | { ok: true; value: SproutboatConfig }
-  | { ok: false; errors: string[] };
+export type ConfigValidation = { ok: true; value: SproutboatConfig } | { ok: false; errors: string[] };
 
 type JsonValue = string | number | boolean | null | ConfigJsonObject | JsonValue[];
 
@@ -86,8 +86,7 @@ interface ConfigJsonObject {
 type ConfigInput = JsonValue | undefined;
 
 function isRecord(value: ConfigInput): value is ConfigJsonObject {
-  return value !== null && Object(value) === value && !Array.isArray(value)
-    && !(value instanceof Function);
+  return value !== null && Object(value) === value && !Array.isArray(value) && !(value instanceof Function);
 }
 
 function isString(value: ConfigInput): value is string {
@@ -102,9 +101,21 @@ function validateConfig(value: ConfigInput): ConfigValidation {
   const errors: string[] = [];
   if (!isRecord(value)) return { ok: false, errors: ["config must be an object"] };
   const allowed = new Set([
-    "$schema", "name", "main", "compatibility_date", "vars",
-    "kv_namespaces", "secrets", "outbound", "d1_databases", "r2_buckets",
-    "queues", "analytics_engine_datasets", "durable_objects", "triggers", "assets",
+    "$schema",
+    "name",
+    "main",
+    "compatibility_date",
+    "vars",
+    "kv_namespaces",
+    "secrets",
+    "outbound",
+    "d1_databases",
+    "r2_buckets",
+    "queues",
+    "analytics_engine_datasets",
+    "durable_objects",
+    "triggers",
+    "assets",
   ]);
   for (const key of Object.keys(value)) if (!allowed.has(key)) errors.push(`unsupported config field: ${key}`);
   const name = isString(value.name) && isProjectSlug(value.name) ? value.name : null;
@@ -115,7 +126,10 @@ function validateConfig(value: ConfigInput): ConfigValidation {
   if (main === null) {
     errors.push("main must be a relative entry point under src/");
   }
-  const compatibility_date = isString(value.compatibility_date) && /^\d{4}-\d{2}-\d{2}$/.test(value.compatibility_date) ? value.compatibility_date : null;
+  const compatibility_date =
+    isString(value.compatibility_date) && /^\d{4}-\d{2}-\d{2}$/.test(value.compatibility_date)
+      ? value.compatibility_date
+      : null;
   if (compatibility_date === null) {
     errors.push("compatibility_date must use YYYY-MM-DD");
   }
@@ -127,7 +141,8 @@ function validateConfig(value: ConfigInput): ConfigValidation {
     else {
       vars = {};
       for (const [key, item] of Object.entries(value.vars)) {
-        if (!/^[A-Z][A-Z0-9_]*$/.test(key) || !isString(item)) errors.push(`vars.${key} must be a string environment name`);
+        if (!/^[A-Z][A-Z0-9_]*$/.test(key) || !isString(item))
+          errors.push(`vars.${key} must be a string environment name`);
         else vars[key] = item;
       }
     }
@@ -174,9 +189,14 @@ function validateConfig(value: ConfigInput): ConfigValidation {
       if (isString(entry)) {
         if (bindingName.test(entry)) out.push(entry);
         else errors.push(`${field}: "${entry}" must be an UPPER_SNAKE binding name`);
-      } else if (isRecord(entry) && isString(entry.binding) && isString(entry.id)
-        && bindingName.test(entry.binding) && idPattern.test(entry.id)
-        && Object.keys(entry).every((key) => key === "binding" || key === "id")) {
+      } else if (
+        isRecord(entry) &&
+        isString(entry.binding) &&
+        isString(entry.id) &&
+        bindingName.test(entry.binding) &&
+        idPattern.test(entry.id) &&
+        Object.keys(entry).every((key) => key === "binding" || key === "id")
+      ) {
         out.push({ binding: entry.binding, id: entry.id });
       } else {
         errors.push(`${field} entries must be an UPPER_SNAKE name or { binding: "NAME", id: "${kind}_…" }`);
@@ -189,7 +209,11 @@ function validateConfig(value: ConfigInput): ConfigValidation {
   const outbound = stringArray("outbound", hostPattern, "hostnames");
   // Analytics Engine datasets aren't provisioned — the dataset name springs into
   // existence on first writeDataPoint(), so there's no resource id to bind (#74).
-  const analytics_engine_datasets = stringArray("analytics_engine_datasets", bindingName, "binding names (UPPER_SNAKE_CASE)");
+  const analytics_engine_datasets = stringArray(
+    "analytics_engine_datasets",
+    bindingName,
+    "binding names (UPPER_SNAKE_CASE)",
+  );
   const kv_namespaces = resourceArray("kv_namespaces", "kv");
   const d1_databases = resourceArray("d1_databases", "d1");
   const r2_buckets = resourceArray("r2_buckets", "r2");
@@ -198,7 +222,7 @@ function validateConfig(value: ConfigInput): ConfigValidation {
   let durable_objects: Record<string, string> | undefined;
   if (value.durable_objects !== undefined) {
     if (!isRecord(value.durable_objects)) {
-      errors.push("durable_objects must be an object of { BINDING_NAME: \"ClassName\" }");
+      errors.push('durable_objects must be an object of { BINDING_NAME: "ClassName" }');
     } else {
       durable_objects = {};
       for (const [binding, className] of Object.entries(value.durable_objects)) {
@@ -230,15 +254,24 @@ function validateConfig(value: ConfigInput): ConfigValidation {
       errors.push("assets must be an object with a `directory`");
     } else {
       const raw = value.assets;
-      const dir = isString(raw.directory) && raw.directory.length > 0 && !raw.directory.includes("..")
-        ? raw.directory.replace(/^\.\//, "").replace(/\/$/, "")
-        : null;
+      const dir =
+        isString(raw.directory) && raw.directory.length > 0 && !raw.directory.includes("..")
+          ? raw.directory.replace(/^\.\//, "").replace(/\/$/, "")
+          : null;
       if (dir === null) errors.push("assets.directory must be a project-relative path");
-      const binding = raw.binding === undefined ? undefined
-        : isString(raw.binding) && bindingName.test(raw.binding) ? raw.binding : null;
+      const binding =
+        raw.binding === undefined
+          ? undefined
+          : isString(raw.binding) && bindingName.test(raw.binding)
+            ? raw.binding
+            : null;
       if (binding === null) errors.push("assets.binding must be a binding name (UPPER_SNAKE_CASE)");
-      const nfh = raw.not_found_handling === "none" || raw.not_found_handling === "single-page-application"
-        || raw.not_found_handling === "404-page" ? raw.not_found_handling : undefined;
+      const nfh =
+        raw.not_found_handling === "none" ||
+        raw.not_found_handling === "single-page-application" ||
+        raw.not_found_handling === "404-page"
+          ? raw.not_found_handling
+          : undefined;
       if (raw.not_found_handling !== undefined && nfh === undefined) {
         errors.push('assets.not_found_handling must be "none", "single-page-application", or "404-page"');
       }
@@ -259,16 +292,22 @@ function validateConfig(value: ConfigInput): ConfigValidation {
     }
   }
 
-  const resourceNames = (refs: ResourceRef[] | undefined): string[] =>
-    resourceRefs(refs).map((ref) => ref.binding);
+  const resourceNames = (refs: ResourceRef[] | undefined): string[] => resourceRefs(refs).map((ref) => ref.binding);
   const bindingSlots = [
-    ...resourceNames(kv_namespaces), ...(secrets ?? []), ...resourceNames(d1_databases), ...resourceNames(r2_buckets),
-    ...resourceNames(queues), ...(analytics_engine_datasets ?? []), ...Object.keys(durable_objects ?? {}), ...Object.keys(vars ?? {}),
+    ...resourceNames(kv_namespaces),
+    ...(secrets ?? []),
+    ...resourceNames(d1_databases),
+    ...resourceNames(r2_buckets),
+    ...resourceNames(queues),
+    ...(analytics_engine_datasets ?? []),
+    ...Object.keys(durable_objects ?? {}),
+    ...Object.keys(vars ?? {}),
     ...(assets?.binding ? [assets.binding] : []),
   ];
   if (new Set(bindingSlots).size !== bindingSlots.length) errors.push("vars and binding names must not collide");
 
-  if (errors.length || name === null || main === null || compatibility_date === null || schema === null) return { ok: false, errors };
+  if (errors.length || name === null || main === null || compatibility_date === null || schema === null)
+    return { ok: false, errors };
   const config: SproutboatConfig = { name, main, compatibility_date };
   if ("$schema" in value) config.$schema = schema;
   if ("vars" in value) config.vars = vars;
@@ -307,6 +346,9 @@ export function parseConfig(source: string): ConfigValidation {
     json = json.replace(/,\s*([}\]])/g, "$1");
     return validateConfig(JSON.parse(json));
   } catch (error) {
-    return { ok: false, errors: [`invalid sproutboat.jsonc: ${error instanceof Error ? error.message : String(error)}`] };
+    return {
+      ok: false,
+      errors: [`invalid sproutboat.jsonc: ${error instanceof Error ? error.message : String(error)}`],
+    };
   }
 }

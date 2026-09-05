@@ -9,8 +9,7 @@ type JsonObject = { [key: string]: JsonValue };
 const obj = (value: JsonValue | undefined): JsonObject =>
   value instanceof Object && !Array.isArray(value) ? value : {};
 const arr = (value: JsonValue | undefined): JsonValue[] => (Array.isArray(value) ? value : []);
-const text = (value: JsonValue | undefined): string =>
-  value === undefined || value === null ? "" : String(value);
+const text = (value: JsonValue | undefined): string => (value === undefined || value === null ? "" : String(value));
 const isNumber = (value: JsonValue | undefined): value is number => Number.isFinite(value);
 /** `created` is an ISO string, analytics `at` is an epoch ms number — both are dates. */
 const when = (value: JsonValue | undefined): Date => new Date(isNumber(value) ? value : text(value));
@@ -28,7 +27,11 @@ async function j(path: string, opts?: RequestInit): Promise<JsonValue> {
   const r = await fetch(path, opts);
   const t = await r.text();
   let b: JsonValue;
-  try { b = JSON.parse(t); } catch { b = t; }
+  try {
+    b = JSON.parse(t);
+  } catch {
+    b = t;
+  }
   if (!r.ok) throw new Error(text(obj(b).error) || r.statusText);
   return b;
 }
@@ -62,12 +65,15 @@ loginButton.addEventListener("click", async () => {
     const me = await j("/whoami", { headers: { authorization: "Bearer " + token } });
     loginButton.textContent = "Log in again";
     $("#who").textContent = `${text(obj(me).user)} · token ${String(token).slice(0, 8)}… in KV`;
-  } catch (e) { $("#who").textContent = message(e); }
+  } catch (e) {
+    $("#who").textContent = message(e);
+  }
 });
 
 /* ---- notes (D1 + DO + Queue + R2 upload) ---- */
 async function loadNotes(): Promise<void> {
-  const err = $("#notes-err"); err.textContent = "";
+  const err = $("#notes-err");
+  err.textContent = "";
   try {
     const notes = arr(await j("/notes"));
     const ul = $("#notes-list");
@@ -82,12 +88,17 @@ async function loadNotes(): Promise<void> {
       li.addEventListener("click", () => openNote(li, Number(n.id)));
       ul.append(li);
     }
-  } catch (e) { err.textContent = message(e); }
+  } catch (e) {
+    err.textContent = message(e);
+  }
 }
 
 async function openNote(li: HTMLElement, id: number): Promise<void> {
   const existing = li.querySelector(".detail");
-  if (existing) { existing.remove(); return; }
+  if (existing) {
+    existing.remove();
+    return;
+  }
   const full = obj(await j(`/notes/${id}`));
   const note = obj(full.note);
   const d = document.createElement("div");
@@ -108,8 +119,10 @@ const MAX_UPLOAD = 900 * 1024; // native-fetch server caps an inbound body at 1 
 const newNoteForm = $<HTMLFormElement>("#new-note");
 newNoteForm.addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const err = $("#notes-err"); err.textContent = "";
-  const ok = $("#notes-ok"); ok.textContent = "";
+  const err = $("#notes-err");
+  err.textContent = "";
+  const ok = $("#notes-ok");
+  ok.textContent = "";
   const fileInput = $<HTMLInputElement>("#new-file");
   const file = fileInput.files?.[0];
   if (file && file.size > MAX_UPLOAD) {
@@ -130,9 +143,12 @@ newNoteForm.addEventListener("submit", async (ev) => {
       await loadAttachments();
     }
     ok.textContent = msg;
-    newNoteForm.reset(); fileInput.value = "";
+    newNoteForm.reset();
+    fileInput.value = "";
     await loadNotes();
-  } catch (e) { err.textContent = message(e); }
+  } catch (e) {
+    err.textContent = message(e);
+  }
 });
 
 /* ---- attachments (R2) ---- */
@@ -141,11 +157,15 @@ async function loadAttachments(): Promise<void> {
   try {
     const rows = arr(await j("/attachments"));
     tb.innerHTML = "";
-    if (!rows.length) { tb.innerHTML = `<tr><td colspan="4" class="muted">no objects yet — attach a file from the Notes tab</td></tr>`; return; }
+    if (!rows.length) {
+      tb.innerHTML = `<tr><td colspan="4" class="muted">no objects yet — attach a file from the Notes tab</td></tr>`;
+      return;
+    }
     for (const row of rows) {
       const o = obj(row);
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td></td><td>${text(o.size)} B</td><td>${when(o.uploaded).toLocaleTimeString()}</td>` +
+      tr.innerHTML =
+        `<td></td><td>${text(o.size)} B</td><td>${when(o.uploaded).toLocaleTimeString()}</td>` +
         `<td><a href="/attach/${encodeURIComponent(text(o.key))}">download</a></td>`;
       q(tr, "td").textContent = text(o.key);
       tb.append(tr);
@@ -165,7 +185,9 @@ async function loadQuote(): Promise<void> {
     by.className = "by";
     by.textContent = `— ${text(q2.author)}`;
     $("#quote").append(by);
-  } catch { $("#quote").textContent = "(outbound fetch unavailable)"; }
+  } catch {
+    $("#quote").textContent = "(outbound fetch unavailable)";
+  }
 }
 $("#refresh-quote").addEventListener("click", () => void loadQuote());
 
@@ -201,7 +223,9 @@ async function fetchStats(pw: string): Promise<void> {
     ["Cron heartbeats", s.cron_heartbeats],
     ["Analytics points", s.analytics_points],
   ];
-  $("#tiles").innerHTML = tiles.map(([k, n]) => `<div class="tile"><div class="n">${text(n)}</div><div class="k">${k}</div></div>`).join("");
+  $("#tiles").innerHTML = tiles
+    .map(([k, n]) => `<div class="tile"><div class="n">${text(n)}</div><div class="k">${k}</div></div>`)
+    .join("");
   const box = $("#events");
   box.innerHTML = `<b>recent analytics events</b> · last heartbeat ${s.last_heartbeat ? when(obj(s.last_heartbeat).at).toLocaleTimeString() : "—"}`;
   for (const event of arr(s.analytics_recent)) {

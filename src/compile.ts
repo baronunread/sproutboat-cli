@@ -51,13 +51,15 @@ export async function compileSprout(input: CompileInput): Promise<void> {
     const haveGit = Bun.which("git");
     const haveMake = Bun.which("make");
     if (haveGit && haveMake) {
-      console.warn(`prebuilt uWebSockets unusable (${error.message.split("\n")[0]}); falling back to git + make (slower, one-time)`);
+      console.warn(
+        `prebuilt uWebSockets unusable (${error.message.split("\n")[0]}); falling back to git + make (slower, one-time)`,
+      );
     } else {
       const missing = [!haveGit && "git", !haveMake && "make"].filter(Boolean).join(" and ");
       throw new Error(
         `${error.message}\n\nThe prebuilt uWebSockets is unusable, and ${missing} ` +
-        `${missing.includes("and") ? "are" : "is"} not on PATH for the fallback build. ` +
-        `Install ${missing}, or set SPROUTBOAT_UWS_TARBALL to a valid archive.`,
+          `${missing.includes("and") ? "are" : "is"} not on PATH for the fallback build. ` +
+          `Install ${missing}, or set SPROUTBOAT_UWS_TARBALL to a valid archive.`,
       );
     }
   }
@@ -95,7 +97,10 @@ export async function compileSprout(input: CompileInput): Promise<void> {
     { cwd: outDir, stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: path } },
   );
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; child.kill(); }, COMPILE_TIMEOUT_MS);
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, COMPILE_TIMEOUT_MS);
   const [code, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),

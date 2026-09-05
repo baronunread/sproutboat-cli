@@ -88,13 +88,21 @@ test("D1: query / run / batch on a bound database, isolated per name", async () 
   expect(obj(arr(batch.results)[1]).results).toEqual([{ n: 2 }]);
 
   // a different bound name is a different database
-  await expect(b.dispatch({ op: "d1.query", db: "OTHER", sql: "SELECT * FROM t", params: [] })).rejects.toThrow("no such table");
+  await expect(b.dispatch({ op: "d1.query", db: "OTHER", sql: "SELECT * FROM t", params: [] })).rejects.toThrow(
+    "no such table",
+  );
   await expect(b.dispatch({ op: "d1.query", db: "NOPE", sql: "SELECT 1", params: [] })).rejects.toThrow("not bound");
 });
 
 test("R2: put / get / head / list / delete on a bound bucket", async () => {
   const b = make({ bindings: { r2: ["ASSETS"] } });
-  const put = await b.dispatch({ op: "r2.put", bucket: "ASSETS", key: "a/1.txt", body: "hello", customMetadata: { k: "v" } });
+  const put = await b.dispatch({
+    op: "r2.put",
+    bucket: "ASSETS",
+    key: "a/1.txt",
+    body: "hello",
+    customMetadata: { k: "v" },
+  });
   expect(put).toMatchObject({ ok: true });
   expect(obj(put.object).size).toBe(5);
 
@@ -132,18 +140,32 @@ test("Durable Object storage: get / put / delete / list / deleteAll scoped to (c
   await b.dispatch({ op: "do.storage.put", cls: "Counter", id: "a", key: "n", value: "5" });
   await b.dispatch({ op: "do.storage.put", cls: "Counter", id: "a", key: "m", value: "9" });
   await b.dispatch({ op: "do.storage.put", cls: "Counter", id: "b", key: "n", value: "1" });
-  expect(await b.dispatch({ op: "do.storage.get", cls: "Counter", id: "a", key: "n" })).toMatchObject({ found: true, value: "5" });
-  expect((await b.dispatch({ op: "do.storage.list", cls: "Counter", id: "a", prefix: "" })).entries).toEqual([["m", "9"], ["n", "5"]]);
-  expect(await b.dispatch({ op: "do.storage.delete", cls: "Counter", id: "a", key: "m" })).toEqual({ ok: true, deleted: true });
+  expect(await b.dispatch({ op: "do.storage.get", cls: "Counter", id: "a", key: "n" })).toMatchObject({
+    found: true,
+    value: "5",
+  });
+  expect((await b.dispatch({ op: "do.storage.list", cls: "Counter", id: "a", prefix: "" })).entries).toEqual([
+    ["m", "9"],
+    ["n", "5"],
+  ]);
+  expect(await b.dispatch({ op: "do.storage.delete", cls: "Counter", id: "a", key: "m" })).toEqual({
+    ok: true,
+    deleted: true,
+  });
   await b.dispatch({ op: "do.storage.delete_all", cls: "Counter", id: "a" });
   expect((await b.dispatch({ op: "do.storage.list", cls: "Counter", id: "a", prefix: "" })).entries).toEqual([]);
-  expect(await b.dispatch({ op: "do.storage.get", cls: "Counter", id: "b", key: "n" })).toMatchObject({ found: true, value: "1" });
+  expect(await b.dispatch({ op: "do.storage.get", cls: "Counter", id: "b", key: "n" })).toMatchObject({
+    found: true,
+    value: "1",
+  });
   await expect(b.dispatch({ op: "do.storage.get", cls: "Nope", id: "a", key: "n" })).rejects.toThrow("not bound");
 });
 
 test("Analytics Engine: write is bound-gated; query reads back count + recent rows", async () => {
   const b = make({ bindings: { analytics: ["METRICS"] } });
-  expect(await b.dispatch({ op: "ae.write", dataset: "METRICS", blobs: ["GET", "/a"], doubles: [1] })).toEqual({ ok: true });
+  expect(await b.dispatch({ op: "ae.write", dataset: "METRICS", blobs: ["GET", "/a"], doubles: [1] })).toEqual({
+    ok: true,
+  });
   await b.dispatch({ op: "ae.write", dataset: "METRICS", blobs: ["POST", "/b"], doubles: [1] });
   await expect(b.dispatch({ op: "ae.write", dataset: "OTHER" })).rejects.toThrow("not bound");
 
@@ -160,7 +182,15 @@ test("Queues: send enqueues; the consumer delivers a batch and acked messages ar
     const body = obj(parseJsonValue(String(init?.body)));
     delivered.push(body);
     // ack all but the first
-    return new Response(JSON.stringify({ ack: arr(body.messages).slice(1).map((m) => obj(m).id), retry: [] }), { status: 200 });
+    return new Response(
+      JSON.stringify({
+        ack: arr(body.messages)
+          .slice(1)
+          .map((m) => obj(m).id),
+        retry: [],
+      }),
+      { status: 200 },
+    );
   };
 
   const b = make({ bindings: { queues: ["JOBS"] }, sproutUrl: "http://127.0.0.1:1/", fetchImpl });
@@ -192,19 +222,28 @@ test("assets.get: serves a bound file, falls back per not_found_handling", async
   write("none");
   const b1 = make({ bindings: { assets: "ASSETS" }, assetsDir });
   expect(await b1.dispatch({ op: "assets.get", path: "/index.html" })).toMatchObject({
-    found: true, status: 200, type: "text/html; charset=utf-8", body: "<h1>home</h1>",
+    found: true,
+    status: 200,
+    type: "text/html; charset=utf-8",
+    body: "<h1>home</h1>",
   });
   expect(await b1.dispatch({ op: "assets.get", path: "/" })).toMatchObject({ found: true, body: "<h1>home</h1>" });
-  expect(await b1.dispatch({ op: "assets.get", path: "/sub/page.css" })).toMatchObject({ type: "text/css; charset=utf-8" });
+  expect(await b1.dispatch({ op: "assets.get", path: "/sub/page.css" })).toMatchObject({
+    type: "text/css; charset=utf-8",
+  });
   expect(await b1.dispatch({ op: "assets.get", path: "/missing" })).toMatchObject({ found: false, status: 404 });
 
   write("single-page-application");
   const b2 = make({ bindings: { assets: "ASSETS" }, assetsDir });
   expect(await b2.dispatch({ op: "assets.get", path: "/client/route" })).toMatchObject({
-    found: true, status: 200, body: "<h1>home</h1>",
+    found: true,
+    status: 200,
+    body: "<h1>home</h1>",
   });
 
-  await expect(make({ bindings: { assets: "" }, assetsDir }).dispatch({ op: "assets.get", path: "/x" })).rejects.toThrow("not bound");
+  await expect(
+    make({ bindings: { assets: "" }, assetsDir }).dispatch({ op: "assets.get", path: "/x" }),
+  ).rejects.toThrow("not bound");
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -247,7 +286,11 @@ test("resource-backed KV persists across brokers and is shared by id", async () 
       resourceDir,
       bindings: { kv: ["SHORTENER"], resources: { SHORTENER: { kind: "kv", id: kvId } } },
     });
-    expect(await second.dispatch({ op: "kv.get", ns: "SHORTENER", key: "a" })).toEqual({ ok: true, found: true, value: "1" });
+    expect(await second.dispatch({ op: "kv.get", ns: "SHORTENER", key: "a" })).toEqual({
+      ok: true,
+      found: true,
+      value: "1",
+    });
     second.close();
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -271,7 +314,10 @@ test("a bare-string binding still uses the per-broker db, not resourceDir", asyn
 
 test("token line is enforced by handlePayload", async () => {
   const b = make({ token: "t0k" });
-  expect(await b.handlePayload(`wrong\n${JSON.stringify({ op: "ping" })}`)).toEqual({ ok: false, error: "unauthorized" });
+  expect(await b.handlePayload(`wrong\n${JSON.stringify({ op: "ping" })}`)).toEqual({
+    ok: false,
+    error: "unauthorized",
+  });
   expect(await b.handlePayload(`t0k\n${JSON.stringify({ op: "ping" })}`)).toMatchObject({ ok: true, op: "pong" });
 });
 
@@ -280,7 +326,9 @@ test("listen(): framed request/reply over a real socket, delivered split", async
   const server = listen(b, "127.0.0.1", 0);
   let recv = Buffer.alloc(0);
   let resolveReply: (s: string) => void;
-  const reply = new Promise<string>((r) => { resolveReply = r; });
+  const reply = new Promise<string>((r) => {
+    resolveReply = r;
+  });
   try {
     const sock = await Bun.connect({
       hostname: "127.0.0.1",

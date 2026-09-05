@@ -35,12 +35,30 @@ export type Bindings = {
   assets: string;
 };
 
-export const EMPTY_BINDINGS: Bindings = { kv: [], secrets: [], outbound: [], d1: [], r2: [], queues: [], analytics: [], do: [], crons: [], assets: "" };
+export const EMPTY_BINDINGS: Bindings = {
+  kv: [],
+  secrets: [],
+  outbound: [],
+  d1: [],
+  r2: [],
+  queues: [],
+  analytics: [],
+  do: [],
+  crons: [],
+  assets: "",
+};
 
 function hasBindings(b: Bindings): boolean {
   return (
-    b.kv.length > 0 || b.secrets.length > 0 || b.outbound.length > 0 || b.d1.length > 0 || b.r2.length > 0 ||
-    b.queues.length > 0 || b.analytics.length > 0 || b.do.length > 0 || b.assets !== ""
+    b.kv.length > 0 ||
+    b.secrets.length > 0 ||
+    b.outbound.length > 0 ||
+    b.d1.length > 0 ||
+    b.r2.length > 0 ||
+    b.queues.length > 0 ||
+    b.analytics.length > 0 ||
+    b.do.length > 0 ||
+    b.assets !== ""
   );
 }
 
@@ -67,7 +85,10 @@ export function neutraliseExports(source: string): string | null {
   if (block === undefined) return null;
   let handler: string | null = null;
   const aliases: string[] = [];
-  for (const entry of block[1].split(",").map((part) => part.trim()).filter(Boolean)) {
+  for (const entry of block[1]
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)) {
     const parts = entry.match(/^(\S+)(?:\s+as\s+(\S+))?$/);
     if (parts === null) continue;
     const local = parts[1];
@@ -140,10 +161,13 @@ export function readVarsFromEnv(): Record<string, string> {
   if (!raw) return {};
   const parsed: VarsJson = JSON.parse(raw);
   if (!isVarsObject(parsed)) throw new Error("SPROUTBOAT_VARS_JSON must be a JSON object");
-  return Object.fromEntries(Object.entries(parsed).map(([key, value]): [string, string] => {
-    if (!/^[A-Z][A-Z0-9_]*$/.test(key) || !isVarsString(value)) throw new Error(`SPROUTBOAT_VARS_JSON.${key} must map an UPPER_SNAKE name to a string`);
-    return [key, value];
-  }));
+  return Object.fromEntries(
+    Object.entries(parsed).map(([key, value]): [string, string] => {
+      if (!/^[A-Z][A-Z0-9_]*$/.test(key) || !isVarsString(value))
+        throw new Error(`SPROUTBOAT_VARS_JSON.${key} must map an UPPER_SNAKE name to a string`);
+      return [key, value];
+    }),
+  );
 }
 
 /**

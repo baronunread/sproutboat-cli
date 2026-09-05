@@ -50,10 +50,16 @@ test("#89: a Node API reached through a dependency is still rejected", async () 
 });
 
 test("#89: an unresolvable import names the specifier that failed", async () => {
-  const dir = project({ "src/index.js": `import { x } from "./missing.js";\nexport default { fetch() { return new Response(x); } };` });
+  const dir = project({
+    "src/index.js": `import { x } from "./missing.js";\nexport default { fetch() { return new Response(x); } };`,
+  });
   try {
     let thrown: Error | null = null;
-    try { await bundleHandler(join(dir, "src/index.js"), dir); } catch (cause) { thrown = cause instanceof Error ? cause : new Error(String(cause)); }
+    try {
+      await bundleHandler(join(dir, "src/index.js"), dir);
+    } catch (cause) {
+      thrown = cause instanceof Error ? cause : new Error(String(cause));
+    }
     expect(thrown).toBeInstanceOf(BundleError);
     expect(thrown?.message).toContain("./missing.js");
   } finally {
@@ -82,7 +88,9 @@ test("neutraliseExports handles a minified one-line bundle", () => {
 });
 
 test("dynamic import() is rejected: nothing can resolve it at build time", () => {
-  const result = validateHttpSyncSource(`var d={async fetch(){const m=await import("./x.js");return new Response(m.v);}};export{d as default};`);
+  const result = validateHttpSyncSource(
+    `var d={async fetch(){const m=await import("./x.js");return new Response(m.v);}};export{d as default};`,
+  );
   expect(result.ok).toBe(false);
   if (result.ok) throw new Error("unreachable");
   expect(result.errors.join(" ")).toContain("dynamic import()");
@@ -99,12 +107,21 @@ test("neutraliseExports rejects a module with no default export", () => {
  * the first sign of trouble is a 502 from a handler that built cleanly.
  */
 test("Proxy is rejected: the compiler ignores its traps", () => {
-  const viaSource = validateHttpSyncSource(`var d={fetch(){const p=new Proxy({},{get:()=>1});return new Response(p.x);}};export{d as default};`);
+  const viaSource = validateHttpSyncSource(
+    `var d={fetch(){const p=new Proxy({},{get:()=>1});return new Response(p.x);}};export{d as default};`,
+  );
   expect(viaSource.ok).toBe(false);
   if (viaSource.ok) throw new Error("unreachable");
   expect(viaSource.errors.join(" ")).toContain("Proxy is not supported");
 
-  expect(validateHttpSyncSource(`var d={fetch(){return new Response(Proxy.revocable({},{}).proxy);}};export{d as default};`).ok).toBe(false);
+  expect(
+    validateHttpSyncSource(`var d={fetch(){return new Response(Proxy.revocable({},{}).proxy);}};export{d as default};`)
+      .ok,
+  ).toBe(false);
   // A variable that merely mentions the word is not a Proxy construction.
-  expect(validateHttpSyncSource(`var proxyUrl="http://x";var d={fetch(){return new Response(proxyUrl);}};export{d as default};`).ok).toBe(true);
+  expect(
+    validateHttpSyncSource(
+      `var proxyUrl="http://x";var d={fetch(){return new Response(proxyUrl);}};export{d as default};`,
+    ).ok,
+  ).toBe(true);
 });

@@ -29,12 +29,15 @@ export async function ensurePorfforPatched(): Promise<void> {
   if (done) return;
   const file = resolve(porfforRoot(), "compiler/render.js");
   const src = await readFile(file, "utf8");
-  if (src.includes(MARKER)) { done = true; return; }
+  if (src.includes(MARKER)) {
+    done = true;
+    return;
+  }
   const anchorAt = src.indexOf(ANCHOR);
   if (anchorAt === -1) {
     throw new Error(
       `could not patch Porffor for $PORT: anchor not found in ${file}. ` +
-      "Porffor's native-fetch renderer changed — check patches/UPSTREAM.md.",
+        "Porffor's native-fetch renderer changed — check patches/UPSTREAM.md.",
     );
   }
   const patched = src.slice(0, anchorAt + ANCHOR.length) + INJECT + src.slice(anchorAt + ANCHOR.length);

@@ -21,7 +21,15 @@ export function isBoolean(value: JsonValue | undefined): value is boolean {
 
 export function parseJsonValue(source: string): JsonValue {
   const value = JSON.parse(source);
-  if (value === null || value === true || value === false || value === String(value) || Number.isFinite(value) || value instanceof Object) return value;
+  if (
+    value === null ||
+    value === true ||
+    value === false ||
+    value === String(value) ||
+    Number.isFinite(value) ||
+    value instanceof Object
+  )
+    return value;
   throw new Error("response was not valid JSON");
 }
 

@@ -63,43 +63,121 @@ const storageCommands: readonly Command[] = STORAGE_PRODUCTS.map((product) => ({
 }));
 
 export const COMMANDS: readonly Command[] = [
-  { name: "init", group: "Develop", emoji: "🌱", args: "[name]",
-    summary: "Scaffold sproutboat.jsonc + src/index.js in ./<name>." },
-  { name: "check", group: "Develop", emoji: "🔍", args: "[project-dir]",
-    summary: "Validate the config and entry point without building." },
-  { name: "dev", group: "Develop", emoji: "⚡", args: "[project-dir] [--port <n>] [--no-watch]", brief: "[project-dir] [--port <n>]",
-    summary: "Run the project on this machine against a real broker, rebuilding on save." },
-  { name: "build", group: "Develop", emoji: "🔨", args: "[project-dir] [--target host]", brief: "[project-dir]",
-    summary: "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable." },
+  {
+    name: "init",
+    group: "Develop",
+    emoji: "🌱",
+    args: "[name]",
+    summary: "Scaffold sproutboat.jsonc + src/index.js in ./<name>.",
+  },
+  {
+    name: "check",
+    group: "Develop",
+    emoji: "🔍",
+    args: "[project-dir]",
+    summary: "Validate the config and entry point without building.",
+  },
+  {
+    name: "dev",
+    group: "Develop",
+    emoji: "⚡",
+    args: "[project-dir] [--port <n>] [--no-watch]",
+    brief: "[project-dir] [--port <n>]",
+    summary: "Run the project on this machine against a real broker, rebuilding on save.",
+  },
+  {
+    name: "build",
+    group: "Develop",
+    emoji: "🔨",
+    args: "[project-dir] [--target host]",
+    brief: "[project-dir]",
+    summary:
+      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable.",
+  },
 
-  { name: "deploy", group: "Ship", emoji: "🚀",
-    args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision]", brief: "[project-dir] [--dry-run]",
-    summary: "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores." },
-  { name: "versions", group: "Ship", emoji: "📜", args: "<list | view <version-id>> [project-dir]", brief: "<list | view>",
-    summary: "List the project's deployed versions, or show one version's artifact and bindings." },
-  { name: "rollback", group: "Ship", emoji: "⏮", args: "<version-id> [project-dir]", brief: "<version-id>",
-    summary: "Re-activate a previous version." },
-  { name: "tail", group: "Ship", emoji: "📡", args: "[project-dir] [--sprout]",
-    summary: "Print recent request logs; --sprout prints the running sprout + broker stdout/stderr instead." },
+  {
+    name: "deploy",
+    group: "Ship",
+    emoji: "🚀",
+    args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision]",
+    brief: "[project-dir] [--dry-run]",
+    summary:
+      "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores.",
+  },
+  {
+    name: "versions",
+    group: "Ship",
+    emoji: "📜",
+    args: "<list | view <version-id>> [project-dir]",
+    brief: "<list | view>",
+    summary: "List the project's deployed versions, or show one version's artifact and bindings.",
+  },
+  {
+    name: "rollback",
+    group: "Ship",
+    emoji: "⏮",
+    args: "<version-id> [project-dir]",
+    brief: "<version-id>",
+    summary: "Re-activate a previous version.",
+  },
+  {
+    name: "tail",
+    group: "Ship",
+    emoji: "📡",
+    args: "[project-dir] [--sprout]",
+    summary: "Print recent request logs; --sprout prints the running sprout + broker stdout/stderr instead.",
+  },
 
   ...storageCommands,
 
-  { name: "domains", group: "Configure", emoji: "🌐",
-    args: "<list | add <host> | verify <host> | delete <host>> [project-dir]", brief: "<list | add | verify | delete>",
-    summary: "Attach a custom domain to the project (TXT-verified). No sub-command lists." },
-  { name: "secrets", group: "Configure", emoji: "🔑",
-    args: "<list | put <NAME> [--value <value>] | delete <NAME>> [project-dir]", brief: "<list | put | delete>",
-    summary: "Manage encrypted project secrets (read as env.NAME). `put` reads the value from stdin unless --value is given, so it stays out of shell history; applies on next deploy." },
-  { name: "delete", group: "Configure", emoji: "🗑",
-    args: "[project-dir] [--name <project>] --yes", brief: "[project-dir] --yes",
-    summary: "Delete the project, every version, and its route." },
+  {
+    name: "domains",
+    group: "Configure",
+    emoji: "🌐",
+    args: "<list | add <host> | verify <host> | delete <host>> [project-dir]",
+    brief: "<list | add | verify | delete>",
+    summary: "Attach a custom domain to the project (TXT-verified). No sub-command lists.",
+  },
+  {
+    name: "secrets",
+    group: "Configure",
+    emoji: "🔑",
+    args: "<list | put <NAME> [--value <value>] | delete <NAME>> [project-dir]",
+    brief: "<list | put | delete>",
+    summary:
+      "Manage encrypted project secrets (read as env.NAME). `put` reads the value from stdin unless --value is given, so it stays out of shell history; applies on next deploy.",
+  },
+  {
+    name: "delete",
+    group: "Configure",
+    emoji: "🗑",
+    args: "[project-dir] [--name <project>] --yes",
+    brief: "[project-dir] --yes",
+    summary: "Delete the project, every version, and its route.",
+  },
 
-  { name: "login", group: "Account", emoji: "🔓", args: "[--api-url <url>] [--token <token>]", brief: "[--token <token>]",
-    summary: "Device-code browser flow, or store <token> for <url> directly." },
-  { name: "logout", group: "Account", emoji: "🔒", args: "[--api-url <url>]",
-    summary: "Forget the stored credential for the active endpoint, or for <url>." },
-  { name: "whoami", group: "Account", emoji: "👤", args: "",
-    summary: "Show the active endpoint and the account the stored token belongs to." },
+  {
+    name: "login",
+    group: "Account",
+    emoji: "🔓",
+    args: "[--api-url <url>] [--token <token>]",
+    brief: "[--token <token>]",
+    summary: "Device-code browser flow, or store <token> for <url> directly.",
+  },
+  {
+    name: "logout",
+    group: "Account",
+    emoji: "🔒",
+    args: "[--api-url <url>]",
+    summary: "Forget the stored credential for the active endpoint, or for <url>.",
+  },
+  {
+    name: "whoami",
+    group: "Account",
+    emoji: "👤",
+    args: "",
+    summary: "Show the active endpoint and the account the stored token belongs to.",
+  },
 ];
 
 export type EnvVar = { name: string; purpose: string };
@@ -108,18 +186,48 @@ export const ENV_VARS: readonly EnvVar[] = [
   { name: "SPROUTBOAT_API_URL", purpose: "Control-plane URL. Overrides the saved active endpoint." },
   { name: "SPROUTBOAT_TOKEN", purpose: "API token. Overrides the saved credential for the endpoint." },
   { name: "SPROUTBOAT_ZIG", purpose: "Path to a Zig binary to use instead of downloading the pinned one." },
-  { name: "SPROUTBOAT_UWS_TARBALL", purpose: "Path to a prebuilt uWebSockets (x86_64-linux-musl) tarball to seed the Porffor cache with, instead of downloading it (removes the first-build git + make need)." },
+  {
+    name: "SPROUTBOAT_UWS_TARBALL",
+    purpose:
+      "Path to a prebuilt uWebSockets (x86_64-linux-musl) tarball to seed the Porffor cache with, instead of downloading it (removes the first-build git + make need).",
+  },
   { name: "SPROUTBOAT_COMPILE_TIMEOUT_MS", purpose: "Porffor compile timeout in ms (default 600000)." },
-  { name: "SPROUTBOAT_VARS_JSON", purpose: "JSON object of baked `vars` (UPPER_SNAKE -> string), read by the wrapper when generating the sprout module." },
-  { name: "SPROUTBOAT_BINDINGS_JSON", purpose: "The artifact's bindings.json, read by the wrapper to emit the `__sbInstallBindings` line." },
+  {
+    name: "SPROUTBOAT_VARS_JSON",
+    purpose:
+      "JSON object of baked `vars` (UPPER_SNAKE -> string), read by the wrapper when generating the sprout module.",
+  },
+  {
+    name: "SPROUTBOAT_BINDINGS_JSON",
+    purpose: "The artifact's bindings.json, read by the wrapper to emit the `__sbInstallBindings` line.",
+  },
   { name: "SPROUTBOAT_CONFIG_DIR", purpose: "Directory for credentials.json (default ~/.config/sproutboat)." },
-  { name: "NO_COLOR", purpose: "When set, disables coloured terminal output (https://no-color.org). Output is also plain whenever stdout is not a TTY." },
-  { name: "SPROUTBOAT_NO_UPDATE_CHECK", purpose: "When set, skips the once-a-day npm check for a newer `sproutboat` release (also skipped when CI is set)." },
+  {
+    name: "NO_COLOR",
+    purpose:
+      "When set, disables coloured terminal output (https://no-color.org). Output is also plain whenever stdout is not a TTY.",
+  },
+  {
+    name: "SPROUTBOAT_NO_UPDATE_CHECK",
+    purpose: "When set, skips the once-a-day npm check for a newer `sproutboat` release (also skipped when CI is set).",
+  },
   { name: "XDG_CONFIG_HOME", purpose: "Base for the default credentials dir when SPROUTBOAT_CONFIG_DIR is unset." },
   { name: "PORFFOR_VERSION", purpose: "Override the Porffor identity string recorded in the manifest." },
-  { name: "SB_BROKER_PORT", purpose: "Loopback port of the binding broker, read by the compiled sprout at runtime (set by the control plane, or by `src/broker.ts` for local runs)." },
-  { name: "SB_BROKER_TOKEN", purpose: "Per-deployment auth token the sprout sends on every broker frame, and the broker sends back on scheduled/queue triggers (paired with SB_BROKER_PORT)." },
-  { name: "SB_SPROUT_URL", purpose: "http://127.0.0.1:<PORT> of the sprout; when set, `src/broker.ts` runs the cron scheduler and queue consumer and delivers triggers to it." },
+  {
+    name: "SB_BROKER_PORT",
+    purpose:
+      "Loopback port of the binding broker, read by the compiled sprout at runtime (set by the control plane, or by `src/broker.ts` for local runs).",
+  },
+  {
+    name: "SB_BROKER_TOKEN",
+    purpose:
+      "Per-deployment auth token the sprout sends on every broker frame, and the broker sends back on scheduled/queue triggers (paired with SB_BROKER_PORT).",
+  },
+  {
+    name: "SB_SPROUT_URL",
+    purpose:
+      "http://127.0.0.1:<PORT> of the sprout; when set, `src/broker.ts` runs the cron scheduler and queue consumer and delivers triggers to it.",
+  },
 ];
 
 const GROUP_ORDER: readonly Group[] = ["Develop", "Ship", "Storage", "Configure", "Account"];

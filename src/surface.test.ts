@@ -69,7 +69,11 @@ test("SURFACE.md is up to date", () => {
     return;
   }
   let onDisk = "";
-  try { onDisk = readFileSync(surfacePath, "utf8"); } catch { /* missing -> fail below */ }
+  try {
+    onDisk = readFileSync(surfacePath, "utf8");
+  } catch {
+    /* missing -> fail below */
+  }
   expect(onDisk, "SURFACE.md is stale or missing — run `UPDATE_SURFACE=1 bun test`").toBe(rendered);
 });
 

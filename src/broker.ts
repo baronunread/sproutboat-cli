@@ -80,8 +80,19 @@ export type BrokerOptions = {
 
 type SqlParam = string | number | null;
 /** The `{ results, meta }` shape Cloudflare's D1 client expects back per statement. */
-type D1Result = { results: JsonValue[]; meta: { duration: number; changes: number; last_row_id: number; rows_read: number } };
-type R2Row = { key: string; body: string; size: number; etag: string; uploaded: string; http_json: string; custom_json: string };
+type D1Result = {
+  results: JsonValue[];
+  meta: { duration: number; changes: number; last_row_id: number; rows_read: number };
+};
+type R2Row = {
+  key: string;
+  body: string;
+  size: number;
+  etag: string;
+  uploaded: string;
+  http_json: string;
+  custom_json: string;
+};
 const isNumber = (v: JsonValue | undefined): v is number => Number.isFinite(v);
 const sqlParams = (v: JsonValue | undefined): SqlParam[] => {
   if (!Array.isArray(v)) return [];
@@ -103,7 +114,20 @@ export type Broker = {
 };
 
 export function createBroker(opts: BrokerOptions = {}): Broker {
-  const bindings: Bindings = { kv: [], secrets: [], outbound: [], d1: [], r2: [], queues: [], analytics: [], do: [], crons: [], assets: "", resources: {}, ...opts.bindings };
+  const bindings: Bindings = {
+    kv: [],
+    secrets: [],
+    outbound: [],
+    d1: [],
+    r2: [],
+    queues: [],
+    analytics: [],
+    do: [],
+    crons: [],
+    assets: "",
+    resources: {},
+    ...opts.bindings,
+  };
   const secrets = opts.secrets ?? {};
 
   // Static assets: read the manifest once. Files are read from disk per request
@@ -143,7 +167,9 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     const conn = new Database(path, { create: true });
     conn.exec("PRAGMA journal_mode = WAL");
     conn.exec("PRAGMA synchronous = NORMAL");
-    conn.exec("CREATE TABLE IF NOT EXISTS kv (ns TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (ns, key))");
+    conn.exec(
+      "CREATE TABLE IF NOT EXISTS kv (ns TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (ns, key))",
+    );
     conn.exec(
       "CREATE TABLE IF NOT EXISTS r2 (bucket TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, size INTEGER NOT NULL, " +
         "etag TEXT NOT NULL, uploaded TEXT NOT NULL, http_json TEXT NOT NULL DEFAULT '{}', custom_json TEXT NOT NULL DEFAULT '{}', " +
@@ -204,20 +230,26 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     if (!stmts) {
       stmts = {
         get: store.query<{ value: string }, [string, string]>("SELECT value FROM kv WHERE ns = ? AND key = ?"),
-        put: store.query("INSERT INTO kv (ns, key, value) VALUES (?1, ?2, ?3) ON CONFLICT (ns, key) DO UPDATE SET value = ?3"),
+        put: store.query(
+          "INSERT INTO kv (ns, key, value) VALUES (?1, ?2, ?3) ON CONFLICT (ns, key) DO UPDATE SET value = ?3",
+        ),
         del: store.query("DELETE FROM kv WHERE ns = ? AND key = ?"),
-        list: store.query<{ key: string }, [string, string]>("SELECT key FROM kv WHERE ns = ? AND key LIKE ? || '%' ORDER BY key LIMIT 1000"),
+        list: store.query<{ key: string }, [string, string]>(
+          "SELECT key FROM kv WHERE ns = ? AND key LIKE ? || '%' ORDER BY key LIMIT 1000",
+        ),
       };
       kvStmtCache.set(store, stmts);
     }
     return stmts;
   };
 
-  const bound = (list: string[], kind: string) => (name: JsonValue | undefined): string => {
-    const n = str(name);
-    if (!list.includes(n)) throw new Error(`${kind} not bound: ${n}`);
-    return n;
-  };
+  const bound =
+    (list: string[], kind: string) =>
+    (name: JsonValue | undefined): string => {
+      const n = str(name);
+      if (!list.includes(n)) throw new Error(`${kind} not bound: ${n}`);
+      return n;
+    };
   const requireKv = bound(bindings.kv, "KV namespace");
   const requireD1 = bound(bindings.d1, "D1 database");
   const requireR2 = bound(bindings.r2, "R2 bucket");
@@ -256,12 +288,19 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     const started = performance.now();
     // SQLite hands back column->(string|number|null|blob) rows, i.e. a JSON object.
     const results = conn.query<JsonObject, SqlParam[]>(sql).all(...params);
-    const m = conn.query<{ changes: number; last_row_id: number }, []>(
-      "SELECT changes() AS changes, last_insert_rowid() AS last_row_id",
-    ).get();
+    const m = conn
+      .query<{ changes: number; last_row_id: number }, []>(
+        "SELECT changes() AS changes, last_insert_rowid() AS last_row_id",
+      )
+      .get();
     return {
       results,
-      meta: { duration: performance.now() - started, changes: m?.changes ?? 0, last_row_id: m?.last_row_id ?? 0, rows_read: results.length },
+      meta: {
+        duration: performance.now() - started,
+        changes: m?.changes ?? 0,
+        last_row_id: m?.last_row_id ?? 0,
+        rows_read: results.length,
+      },
     };
   };
 
@@ -323,7 +362,12 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       }
       case "kv.list": {
         const { store, part } = storeFor("kv", requireKv(msg.ns));
-        return { ok: true, keys: kvStmts(store).list.all(part, str(msg.prefix)).map((r) => r.key) };
+        return {
+          ok: true,
+          keys: kvStmts(store)
+            .list.all(part, str(msg.prefix))
+            .map((r) => r.key),
+        };
       }
       case "secret.get": {
         const name = str(msg.name);
@@ -354,25 +398,32 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         const { store, part: bucket } = storeFor("r2", requireR2(msg.bucket));
         const body = str(msg.body);
         const etag = createHash("sha256").update(body).digest("hex");
-        store.query(
-          "INSERT INTO r2 (bucket, key, body, size, etag, uploaded, http_json, custom_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) " +
-            "ON CONFLICT (bucket, key) DO UPDATE SET body=?3, size=?4, etag=?5, uploaded=?6, http_json=?7, custom_json=?8",
-        ).run(
-          bucket,
-          str(msg.key),
-          body,
-          Buffer.byteLength(body),
-          etag,
-          new Date().toISOString(),
-          JSON.stringify(msg.httpMetadata ?? {}),
-          JSON.stringify(msg.customMetadata ?? {}),
-        );
-        return { ok: true, object: { key: str(msg.key), size: Buffer.byteLength(body), etag, uploaded: new Date().toISOString() } };
+        store
+          .query(
+            "INSERT INTO r2 (bucket, key, body, size, etag, uploaded, http_json, custom_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) " +
+              "ON CONFLICT (bucket, key) DO UPDATE SET body=?3, size=?4, etag=?5, uploaded=?6, http_json=?7, custom_json=?8",
+          )
+          .run(
+            bucket,
+            str(msg.key),
+            body,
+            Buffer.byteLength(body),
+            etag,
+            new Date().toISOString(),
+            JSON.stringify(msg.httpMetadata ?? {}),
+            JSON.stringify(msg.customMetadata ?? {}),
+          );
+        return {
+          ok: true,
+          object: { key: str(msg.key), size: Buffer.byteLength(body), etag, uploaded: new Date().toISOString() },
+        };
       }
       case "r2.get":
       case "r2.head": {
         const { store, part: bucket } = storeFor("r2", requireR2(msg.bucket));
-        const row = store.query<R2Row, [string, string]>("SELECT * FROM r2 WHERE bucket = ? AND key = ?").get(bucket, str(msg.key));
+        const row = store
+          .query<R2Row, [string, string]>("SELECT * FROM r2 WHERE bucket = ? AND key = ?")
+          .get(bucket, str(msg.key));
         if (!row) return { ok: true, found: false };
         return { ok: true, found: true, object: r2Row(row), body: msg.op === "r2.get" ? row.body : undefined };
       }
@@ -386,9 +437,11 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         const prefix = str(msg.prefix);
         const cursor = str(msg.cursor);
         const limit = Math.min(Math.max(Number(msg.limit) || 1000, 1), 1000);
-        const rows = store.query<R2Row, [string, string, string, number]>(
-          "SELECT * FROM r2 WHERE bucket = ? AND key LIKE ? || '%' AND key > ? ORDER BY key LIMIT ?",
-        ).all(bucket, prefix, cursor, limit + 1);
+        const rows = store
+          .query<R2Row, [string, string, string, number]>(
+            "SELECT * FROM r2 WHERE bucket = ? AND key LIKE ? || '%' AND key > ? ORDER BY key LIMIT ?",
+          )
+          .all(bucket, prefix, cursor, limit + 1);
         const truncated = rows.length > limit;
         const page = truncated ? rows.slice(0, limit) : rows;
         return {
@@ -402,7 +455,9 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       case "queue.send": {
         const { store, part: q } = storeFor("queue", requireQueue(msg.queue));
         const at = Date.now() + Math.max(0, Number(msg.delaySeconds) || 0) * 1000;
-        store.query("INSERT INTO mq (queue, id, body, visible_at) VALUES (?, ?, ?, ?)").run(q, newId(), str(msg.body), at);
+        store
+          .query("INSERT INTO mq (queue, id, body, visible_at) VALUES (?, ?, ?, ?)")
+          .run(q, newId(), str(msg.body), at);
         return { ok: true };
       }
       case "queue.send_batch": {
@@ -410,7 +465,8 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         const msgs = Array.isArray(msg.messages) ? msg.messages.map((m) => jsonObject(m) ?? {}) : [];
         const ins = store.query("INSERT INTO mq (queue, id, body, visible_at) VALUES (?, ?, ?, ?)");
         store.transaction(() => {
-          for (const m of msgs) ins.run(q, newId(), str(m.body), Date.now() + Math.max(0, Number(m.delaySeconds) || 0) * 1000);
+          for (const m of msgs)
+            ins.run(q, newId(), str(m.body), Date.now() + Math.max(0, Number(m.delaySeconds) || 0) * 1000);
         })();
         return { ok: true, count: msgs.length };
       }
@@ -431,9 +487,11 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         // query it via the SQL API). Exposed here so a dashboard can read back.
         const ds = requireAe(msg.dataset);
         const limit = Math.min(Math.max(Number(msg.limit) || 20, 1), 200);
-        const rows = db.query<{ ts: number; indexes_json: string; blobs_json: string; doubles_json: string }, [string, number]>(
-          "SELECT ts, indexes_json, blobs_json, doubles_json FROM ae WHERE dataset = ? ORDER BY ts DESC, rowid DESC LIMIT ?",
-        ).all(ds, limit);
+        const rows = db
+          .query<{ ts: number; indexes_json: string; blobs_json: string; doubles_json: string }, [string, number]>(
+            "SELECT ts, indexes_json, blobs_json, doubles_json FROM ae WHERE dataset = ? ORDER BY ts DESC, rowid DESC LIMIT ?",
+          )
+          .all(ds, limit);
         const total = db.query<{ n: number }, [string]>("SELECT count(*) AS n FROM ae WHERE dataset = ?").get(ds);
         return {
           ok: true,
@@ -449,9 +507,11 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
 
       case "do.storage.get": {
         const cls = requireDoClass(msg.cls);
-        const row = db.query<{ value: string }, [string, string, string]>(
-          "SELECT value FROM do_storage WHERE cls = ? AND id = ? AND key = ?",
-        ).get(cls, str(msg.id), str(msg.key));
+        const row = db
+          .query<{ value: string }, [string, string, string]>(
+            "SELECT value FROM do_storage WHERE cls = ? AND id = ? AND key = ?",
+          )
+          .get(cls, str(msg.id), str(msg.key));
         return row ? { ok: true, found: true, value: row.value } : { ok: true, found: false };
       }
       case "do.storage.put":
@@ -461,9 +521,9 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         ).run(requireDoClass(msg.cls), str(msg.id), str(msg.key), str(msg.value));
         return { ok: true };
       case "do.storage.delete": {
-        const r = db.query("DELETE FROM do_storage WHERE cls = ? AND id = ? AND key = ?").run(
-          requireDoClass(msg.cls), str(msg.id), str(msg.key),
-        );
+        const r = db
+          .query("DELETE FROM do_storage WHERE cls = ? AND id = ? AND key = ?")
+          .run(requireDoClass(msg.cls), str(msg.id), str(msg.key));
         return { ok: true, deleted: r.changes > 0 };
       }
       case "do.storage.delete_all":
@@ -472,9 +532,11 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       case "do.storage.list": {
         const cls = requireDoClass(msg.cls);
         const limit = Math.min(Math.max(Number(msg.limit) || 1000, 1), 10000);
-        const rows = db.query<{ key: string; value: string }, [string, string, string, number]>(
-          "SELECT key, value FROM do_storage WHERE cls = ? AND id = ? AND key LIKE ? || '%' ORDER BY key LIMIT ?",
-        ).all(cls, str(msg.id), str(msg.prefix), limit);
+        const rows = db
+          .query<{ key: string; value: string }, [string, string, string, number]>(
+            "SELECT key, value FROM do_storage WHERE cls = ? AND id = ? AND key LIKE ? || '%' ORDER BY key LIMIT ?",
+          )
+          .all(cls, str(msg.id), str(msg.prefix), limit);
         return { ok: true, entries: rows.map((r) => [r.key, r.value]) };
       }
 
@@ -487,7 +549,8 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         const nfh = assetManifest?.notFound ?? "none";
         if (nfh === "single-page-application") {
           const shell = readAsset("/index.html");
-          if (shell) return { ok: true, found: true, status: 200, type: shell.type, hash: shell.hash, body: shell.body };
+          if (shell)
+            return { ok: true, found: true, status: 200, type: shell.type, hash: shell.hash, body: shell.body };
         }
         if (nfh === "404-page") {
           const page = readAsset("/404.html");
@@ -540,9 +603,11 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       // `store`/`part` route the rows to this queue's backing file (#74); the
       // trigger payload still carries the binding name the sprout matches on.
       const { store, part } = storeFor("queue", binding);
-      const rows = store.query<{ id: string; body: string; attempts: number }, [string, number, number]>(
-        "SELECT id, body, attempts FROM mq WHERE queue = ? AND dead = 0 AND visible_at <= ? ORDER BY visible_at LIMIT ?",
-      ).all(part, now, QUEUE_BATCH);
+      const rows = store
+        .query<{ id: string; body: string; attempts: number }, [string, number, number]>(
+          "SELECT id, body, attempts FROM mq WHERE queue = ? AND dead = 0 AND visible_at <= ? ORDER BY visible_at LIMIT ?",
+        )
+        .all(part, now, QUEUE_BATCH);
       if (rows.length === 0) continue;
       // hide the batch so the next tick doesn't re-deliver it while in flight
       const hideUntil = now + 30_000;
@@ -561,9 +626,12 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
             const ids = (value: JsonValue | undefined) => (Array.isArray(value) ? value.filter(isString) : null);
             ack = (parsed && ids(parsed.ack)) ?? ack;
             retry = (parsed && ids(parsed.retry)) ?? [];
-          } catch { /* keep defaults */ }
+          } catch {
+            /* keep defaults */
+          }
         } else {
-          ack = []; retry = rows.map((r) => r.id); // delivery failed → retry all
+          ack = [];
+          retry = rows.map((r) => r.id); // delivery failed → retry all
         }
         const del = store.query("DELETE FROM mq WHERE id = ?");
         for (const id of ack) del.run(id);
@@ -579,15 +647,17 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     if (bindings.queues.length > 0) timers.push(setInterval(drainQueuesOnce, 500));
     if (bindings.crons.length > 0) {
       let lastTick = "";
-      timers.push(setInterval(() => {
-        const now = new Date();
-        const stamp = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}-${now.getUTCMinutes()}`;
-        if (stamp === lastTick) return; // once per minute
-        lastTick = stamp;
-        for (const expr of bindings.crons) {
-          if (cronMatches(expr, now)) void deliverTrigger("scheduled", { cron: expr, scheduledTime: now.getTime() });
-        }
-      }, 15_000));
+      timers.push(
+        setInterval(() => {
+          const now = new Date();
+          const stamp = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}-${now.getUTCMinutes()}`;
+          if (stamp === lastTick) return; // once per minute
+          lastTick = stamp;
+          for (const expr of bindings.crons) {
+            if (cronMatches(expr, now)) void deliverTrigger("scheduled", { cron: expr, scheduledTime: now.getTime() });
+          }
+        }, 15_000),
+      );
     }
   }
 
@@ -610,7 +680,13 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
 export function cronMatches(expr: string, when: Date): boolean {
   const parts = expr.trim().split(/\s+/);
   if (parts.length !== 5) return false;
-  const fields = [when.getUTCMinutes(), when.getUTCHours(), when.getUTCDate(), when.getUTCMonth() + 1, when.getUTCDay()];
+  const fields = [
+    when.getUTCMinutes(),
+    when.getUTCHours(),
+    when.getUTCDate(),
+    when.getUTCMonth() + 1,
+    when.getUTCDay(),
+  ];
   const inField = (spec: string, value: number): boolean =>
     spec.split(",").some((token) => {
       if (token === "*") return true;
@@ -699,5 +775,7 @@ if (import.meta.main) {
     assetsDir: values["assets-dir"],
   });
   const { port } = listen(broker, "127.0.0.1", Number(values.port ?? process.env.SB_BROKER_PORT ?? 0));
-  console.log(`sproutboat broker: 127.0.0.1:${port} db=${values.db ?? ":memory:"} sprout=${values["sprout-url"] ?? process.env.SB_SPROUT_URL ?? "(none)"}`);
+  console.log(
+    `sproutboat broker: 127.0.0.1:${port} db=${values.db ?? ":memory:"} sprout=${values["sprout-url"] ?? process.env.SB_SPROUT_URL ?? "(none)"}`,
+  );
 }

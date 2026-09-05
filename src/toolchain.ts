@@ -49,7 +49,10 @@ const UWS_TARBALL_SHA256 = "e83736f3f8cf9d56a1ebe6ea61625a7af12386763374d47c14cf
 function platformKey(): ZigPlatform {
   const arch = process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : null;
   const os = process.platform === "linux" ? "linux" : process.platform === "darwin" ? "macos" : null;
-  if (!arch || !os) throw new Error(`no pinned Zig for ${process.platform}/${process.arch} — set SPROUTBOAT_ZIG to a zig ${ZIG_VERSION} binary`);
+  if (!arch || !os)
+    throw new Error(
+      `no pinned Zig for ${process.platform}/${process.arch} — set SPROUTBOAT_ZIG to a zig ${ZIG_VERSION} binary`,
+    );
   return `${arch}-${os}`;
 }
 
@@ -88,7 +91,10 @@ export async function ensureZig(): Promise<string> {
   }
 
   // `tar -xJ` (xz) works on macOS bsdtar and GNU tar with xz on PATH.
-  const untar = Bun.spawn(["tar", "-xJf", archive, "-C", dir, "--strip-components=1"], { stdout: "pipe", stderr: "pipe" });
+  const untar = Bun.spawn(["tar", "-xJf", archive, "-C", dir, "--strip-components=1"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [code, err] = await Promise.all([untar.exited, new Response(untar.stderr).text()]);
   if (code !== 0) throw new Error(`could not extract Zig (needs \`tar\` with xz support): ${err.trim()}`);
   await rm(archive, { force: true });
@@ -144,12 +150,17 @@ export async function ensureUWebSockets(): Promise<void> {
   if (!process.env.SPROUTBOAT_UWS_TARBALL) {
     const actual = await sha256File(archive);
     if (actual !== UWS_TARBALL_SHA256) {
-      throw new UwsUnavailableError(`vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`);
+      throw new UwsUnavailableError(
+        `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+      );
     }
   }
 
   await mkdir(dir, { recursive: true });
-  const untar = Bun.spawn(["tar", "-xJf", archive, "-C", dir, "--strip-components=1"], { stdout: "pipe", stderr: "pipe" });
+  const untar = Bun.spawn(["tar", "-xJf", archive, "-C", dir, "--strip-components=1"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [code, err] = await Promise.all([untar.exited, new Response(untar.stderr).text()]);
   if (code !== 0) {
     await rm(dir, { recursive: true, force: true });

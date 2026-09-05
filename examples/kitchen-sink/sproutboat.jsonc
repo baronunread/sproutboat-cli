@@ -7,7 +7,7 @@
   // Every binding Sproutboat supports, in one app.
   "vars": {
     "SITE_NAME": "Sproutboat Notes",
-    "QUOTE_URL": "https://api.quotable.local/random"
+    "QUOTE_URL": "https://api.quotable.local/random",
   },
   "secrets": ["ADMIN_TOKEN"],
   "kv_namespaces": ["SESSIONS"],
@@ -23,6 +23,6 @@
     "directory": "web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_sprout_first": true
-  }
+    "run_sprout_first": true,
+  },
 }
