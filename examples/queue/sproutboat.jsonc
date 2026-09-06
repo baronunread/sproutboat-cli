@@ -1,0 +1,8 @@
+{
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "queue",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-07",
+  "queues": ["JOBS"],
+  "d1_databases": ["DB"],
+}

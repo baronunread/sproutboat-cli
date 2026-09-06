@@ -42,6 +42,7 @@
     "prepare": "lefthook install || true",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint .",
+    "examples": "bun examples/smoke.ts",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
     "test": "bun test",

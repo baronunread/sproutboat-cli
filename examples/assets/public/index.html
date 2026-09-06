@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>assets</title>
+<h1>Served from public/</h1>
+<p>The clock below comes from the handler, not a file.</p>
+<pre id="t">…</pre>
+<script>
+  fetch("/api/time").then((r) => r.json()).then((d) => (document.getElementById("t").textContent = d.now));
+</script>

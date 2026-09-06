@@ -1,0 +1,8 @@
+{
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "cron",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-07",
+  "kv_namespaces": ["STATE"],
+  "triggers": { "crons": ["*/1 * * * *"] },
+}
