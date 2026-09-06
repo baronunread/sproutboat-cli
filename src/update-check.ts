@@ -28,7 +28,7 @@ function cachePath(): string {
 }
 
 /** Numeric x.y.z compare; a trailing `-tag` (prerelease) sorts before its release. */
-function isNewer(latest: string, current: string): boolean {
+export function isNewer(latest: string, current: string): boolean {
   const parts = (v: string) =>
     v
       .split("-")[0]

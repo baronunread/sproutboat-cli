@@ -13,11 +13,26 @@ import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
 import { helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
 import { notifyIfOutdated } from "./update-check";
+import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
 
 const defaultApiUrl = "https://dashboard.sproutboat.com";
 
+/** Warn at most once per run: every API response carries the headers, and one
+ *  command makes several calls. */
+let skewWarned = false;
+
 async function responseText(response: Response, failure: string): Promise<string> {
+  // Checked here rather than at each call site: every control-plane response
+  // funnels through this helper, including the failures — and a version-skew
+  // 400 is exactly when the user most needs to be told which side is old.
+  if (!skewWarned) {
+    const warning = controlVersionWarning(response, CLI_VERSION);
+    if (warning) {
+      skewWarned = true;
+      console.warn(amber(`! ${warning}`));
+    }
+  }
   if (response.ok) return response.text();
   fail(`${failure} (${response.status}): ${await response.text()}`);
 }
