@@ -77,6 +77,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     queues: refsByKind.queue.map((ref) => ref.binding),
     analytics: input.config.analytics_engine_datasets ?? [],
     do: Object.entries(input.config.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
+    services: input.config.services ?? [],
     crons: input.config.triggers?.crons ?? [],
     assets: input.config.assets?.binding ?? "",
     // Baked plain values, read as env.NAME. The broker never serves these (they

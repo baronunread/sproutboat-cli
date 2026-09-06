@@ -128,3 +128,30 @@ test("pinBindingId is a no-op when the binding is already an object or absent", 
   const absent = `{ "name": "a", "kv_namespaces": ["Y"] }`;
   expect(pinBindingId(absent, "kv_namespaces", "Z", "kv_z")).toBe(absent);
 });
+
+test("services: valid entries parse; bad shapes and collisions are rejected", () => {
+  const base = { name: "hello", main: "src/index.js", compatibility_date: "2026-09-06" };
+  const ok = parseConfig(JSON.stringify({ ...base, services: [{ binding: "AUTH", service: "auth-api" }] }));
+  expect(ok.ok).toBe(true);
+  if (ok.ok) expect(ok.value.services).toEqual([{ binding: "AUTH", service: "auth-api" }]);
+
+  const lower = parseConfig(JSON.stringify({ ...base, services: [{ binding: "auth", service: "auth-api" }] }));
+  expect(lower.ok).toBe(false);
+
+  const dupe = parseConfig(
+    JSON.stringify({
+      ...base,
+      services: [
+        { binding: "A_B", service: "one" },
+        { binding: "A_B", service: "two" },
+      ],
+    }),
+  );
+  expect(dupe.ok).toBe(false);
+
+  // a service binding occupies a binding slot like any other
+  const collide = parseConfig(
+    JSON.stringify({ ...base, vars: { AUTH: "x" }, services: [{ binding: "AUTH", service: "auth-api" }] }),
+  );
+  expect(collide.ok).toBe(false);
+});

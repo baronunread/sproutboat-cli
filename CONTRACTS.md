@@ -77,6 +77,7 @@ Ops:
 - `r2.list`
 - `r2.put`
 - `secret.get`
+- `service.fetch`
 
 ## Storage
 
@@ -101,6 +102,7 @@ Tables in a resource file, which outlives every redeploy:
 - `queues`
 - `r2`
 - `secrets`
+- `services`
 
 ## Project config
 
@@ -121,6 +123,7 @@ still a compatibility event.
 - `queues`
 - `analytics_engine_datasets`
 - `durable_objects`
+- `services`
 - `triggers`
 - `assets`
 

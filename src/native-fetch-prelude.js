@@ -713,6 +713,34 @@ globalThis.__sbInstallBindings = function (target, bindings) {
     };
   }
 
+  // #48 — worker-to-worker. Same wire shape as outbound fetch, but the broker
+  // resolves the target itself and forwards it internally, so this is not
+  // egress and is not subject to the outbound allowlist.
+  for (let i = 0; i < (bindings.services || []).length; i++) {
+    const binding = bindings.services[i].binding;
+    target[binding] = {
+      fetch(input, init) {
+        const url = __sbIsStr(input) ? input : String((input && input.url) || "https://service/");
+        const opts = init || (!__sbIsStr(input) && input) || {};
+        const headers = [];
+        if (opts.headers) {
+          if (__sbIsFn(opts.headers.forEach)) opts.headers.forEach((v, k) => headers.push([k, v]));
+          else for (const k in opts.headers) headers.push([k, opts.headers[k]]);
+        }
+        const r = __sbRpc("service.fetch", {
+          binding,
+          url,
+          method: opts.method || "GET",
+          headers,
+          body: opts.body == null ? null : String(opts.body),
+        });
+        const respHeaders = new Headers();
+        for (let j = 0; j < (r.headers || []).length; j++) respHeaders.set(r.headers[j][0], r.headers[j][1]);
+        return new Response(r.body == null ? "" : r.body, { status: r.status || 502, headers: respHeaders });
+      },
+    };
+  }
+
   if ((bindings.outbound || []).length > 0) {
     globalThis.fetch = function (input, init) {
       const url = __sbIsStr(input) ? input : String(input.url);

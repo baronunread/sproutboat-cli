@@ -44,6 +44,9 @@ export type Bindings = {
   queues: string[];
   analytics: string[];
   do: Array<{ binding: string; className: string }>;
+  /** #48 — worker-to-worker: binding name -> the project it calls. The hostname
+   *  it resolves to is a runtime input, not part of the artifact. */
+  services: Array<{ binding: string; service: string }>;
   crons: string[];
   /** Static-asset binding name for `env.<NAME>.fetch(request)`; `""` when assets are edge-only. */
   assets: string;
@@ -58,6 +61,7 @@ export const EMPTY_BINDINGS: Bindings = {
   queues: [],
   analytics: [],
   do: [],
+  services: [],
   crons: [],
   assets: "",
 };
@@ -72,6 +76,7 @@ function hasBindings(b: Bindings): boolean {
     b.queues.length > 0 ||
     b.analytics.length > 0 ||
     b.do.length > 0 ||
+    b.services.length > 0 ||
     b.assets !== ""
   );
 }
@@ -200,6 +205,14 @@ export function readBindingsFromEnv(): Bindings {
   const parsed: VarsJson = JSON.parse(raw);
   if (!isVarsObject(parsed)) throw new Error("SPROUTBOAT_BINDINGS_JSON must be a JSON object");
   const strings = (v: VarsJson): string[] => (Array.isArray(v) ? v.filter(isVarsString) : []);
+  const services: Array<{ binding: string; service: string }> = [];
+  if (Array.isArray(parsed.services)) {
+    for (const entry of parsed.services) {
+      if (isVarsObject(entry) && isVarsString(entry.binding) && isVarsString(entry.service)) {
+        services.push({ binding: entry.binding, service: entry.service });
+      }
+    }
+  }
   const dos: Array<{ binding: string; className: string }> = [];
   if (Array.isArray(parsed.do)) {
     for (const entry of parsed.do) {
@@ -217,6 +230,7 @@ export function readBindingsFromEnv(): Bindings {
     queues: strings(parsed.queues),
     analytics: strings(parsed.analytics),
     do: dos,
+    services,
     crons: strings(parsed.crons),
     assets: isVarsString(parsed.assets) ? parsed.assets : "",
   };

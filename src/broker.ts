@@ -34,6 +34,8 @@ export type Bindings = {
   queues: string[];
   analytics: string[];
   do: Array<{ binding: string; className: string }>;
+  /** #48 — worker-to-worker: binding name -> the project it calls. */
+  services: Array<{ binding: string; service: string }>;
   crons: string[];
   /** Static-asset binding name, or `""` when assets are edge-only. */
   assets: string;
@@ -56,6 +58,21 @@ export type BrokerOptions = {
   db?: string;
   /** Directory for per-D1-binding SQLite files. Defaults to `<dirname(db)>/d1`, or in-memory when `db` is `:memory:`. */
   dataDir?: string;
+  /**
+   * #48 — where to send a service-binding call: the node's edge, on loopback.
+   * Forwarding through the edge rather than dialling the target sprout directly
+   * reuses everything the request path already does — routing, the process
+   * pool, cold start, metrics, logs — and means the broker needs no knowledge
+   * of where a deployment is running.
+   */
+  edgeUrl?: string;
+  /**
+   * #48 — binding name -> the target's hostname, resolved by the control plane
+   * at activation. Not part of the artifact: the same binary deploys to boxes
+   * with different domains, and a target can be redeployed without rebuilding
+   * its callers.
+   */
+  services?: Record<string, string>;
   /**
    * #74 — directory holding one `<resource-id>.sqlite` per account-level KV / R2 /
    * queue / D1 resource. Defaults to `<dirname(db)>/resources`, in-memory when
@@ -123,6 +140,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     queues: [],
     analytics: [],
     do: [],
+    services: [],
     crons: [],
     assets: "",
     resources: {},
@@ -152,6 +170,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     return { type: entry.type, hash: entry.hash, body: readFileSync(abs, "utf8") };
   };
   const token = opts.token ?? "";
+  const serviceHosts = opts.services ?? {};
   const doFetch = opts.fetchImpl ?? fetch;
 
   const dbPath = opts.db ?? ":memory:";
@@ -347,6 +366,52 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     return { ok: true, status: res.status, headers: outHeaders, body: await res.text() };
   }
 
+  /**
+   * #48 — forward a service-binding call to the target deployment via the edge.
+   *
+   * The Host header is the whole routing decision: the edge matches a route by
+   * hostname, so this is exactly the request the outside world would make,
+   * minus the trip through the network (and therefore minus TLS and the
+   * default-deny egress rules, which is why this is not `fetch`).
+   */
+  async function serviceFetch(msg: Frame): Promise<Frame> {
+    const binding = str(msg.binding);
+    const declared = bindings.services.find((entry) => entry.binding === binding);
+    if (!declared) throw new Error(`service not bound: ${binding}`);
+    const host = serviceHosts[binding];
+    // Declared in the artifact but unresolved at activation: the target project
+    // does not exist, or is not deployed yet. Say which, rather than 502.
+    if (!host) throw new Error(`service ${binding} -> "${declared.service}" is not deployed on this control plane`);
+    if (!opts.edgeUrl) throw new Error(`service ${binding} cannot be called: this broker has no edge url`);
+
+    let path = "/";
+    try {
+      const parsed = new URL(str(msg.url));
+      path = `${parsed.pathname}${parsed.search}`;
+    } catch {
+      path = str(msg.url) || "/";
+      if (!path.startsWith("/")) path = `/${path}`;
+    }
+    const headers = new Headers();
+    if (Array.isArray(msg.headers)) {
+      for (const pair of msg.headers) {
+        if (Array.isArray(pair) && pair.length === 2) headers.set(str(pair[0]), str(pair[1]));
+      }
+    }
+    headers.set("host", host);
+    const method = str(msg.method || "GET").toUpperCase();
+    const target = new URL(path, opts.edgeUrl);
+    const res = await doFetch(target, {
+      method,
+      headers,
+      body: msg.body == null || method === "GET" || method === "HEAD" ? undefined : str(msg.body),
+      redirect: "manual",
+    });
+    const outHeaders: Array<[string, string]> = [];
+    res.headers.forEach((v, k) => outHeaders.push([k, v]));
+    return { ok: true, status: res.status, headers: outHeaders, body: await res.text() };
+  }
+
   async function dispatch(msg: Frame): Promise<Frame> {
     switch (msg.op) {
       case "ping":
@@ -383,6 +448,9 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       }
       case "fetch":
         return proxyFetch(msg);
+
+      case "service.fetch":
+        return serviceFetch(msg);
 
       case "d1.query": {
         const conn = d1(requireD1(msg.db));
@@ -818,6 +886,8 @@ if (import.meta.main) {
       secrets: { type: "string" },
       "sprout-url": { type: "string" },
       "assets-dir": { type: "string" },
+      "edge-url": { type: "string" },
+      services: { type: "string" },
     },
   });
   // SAFETY: --bindings and --secrets are the artifact's own bindings.json /
@@ -829,6 +899,22 @@ if (import.meta.main) {
   const secrets: Record<string, string> | undefined = values.secrets
     ? (JSON.parse(readFileSync(values.secrets, "utf8")) as Record<string, string>)
     : undefined;
+  // #48 — binding -> hostname, resolved by the control plane at activation and
+  // passed as JSON. Malformed input disables service calls rather than taking
+  // the broker down: every other binding still works.
+  let services: Record<string, string> | undefined;
+  if (values.services) {
+    try {
+      const parsed = jsonObject(parseJsonValue(values.services));
+      if (parsed) {
+        services = Object.fromEntries(
+          Object.entries(parsed).flatMap(([binding, host]) => (isString(host) ? [[binding, host] as const] : [])),
+        );
+      }
+    } catch {
+      console.error("sproutboat broker: --services is not valid JSON; service bindings disabled");
+    }
+  }
   const broker = createBroker({
     db: values.db,
     dataDir: values["data-dir"],
@@ -838,6 +924,8 @@ if (import.meta.main) {
     secrets,
     sproutUrl: values["sprout-url"] ?? process.env.SB_SPROUT_URL,
     assetsDir: values["assets-dir"],
+    edgeUrl: values["edge-url"],
+    services,
   });
   const { port } = listen(broker, "127.0.0.1", Number(values.port ?? process.env.SB_BROKER_PORT ?? 0));
   console.log(

@@ -424,3 +424,76 @@ test("alarm: a failed delivery is retried, not lost", async () => {
   const pending = await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" });
   expect(pending.at).not.toBeNull();
 });
+
+// --- service bindings (#48) --------------------------------------------------
+
+const svcBindings = { services: [{ binding: "AUTH", service: "auth-api" }] };
+
+test("service: forwards through the edge with the target's Host header", async () => {
+  const seen: Array<{ url: string; host: string | null; method: string; body: string | null }> = [];
+  const fetchImpl: FetchLike = async (url, init) => {
+    const headers = new Headers(init?.headers);
+    seen.push({
+      url: String(url),
+      host: headers.get("host"),
+      method: String(init?.method),
+      body: init?.body == null ? null : String(init.body),
+    });
+    return new Response("pong", { status: 200, headers: { "content-type": "text/plain" } });
+  };
+  const b = make({
+    bindings: svcBindings,
+    services: { AUTH: "auth-api.andrea.example.com" },
+    edgeUrl: "http://127.0.0.1:8080/",
+    fetchImpl,
+  });
+
+  const reply = await b.dispatch({
+    op: "service.fetch",
+    binding: "AUTH",
+    url: "https://service/verify?token=abc",
+    method: "POST",
+    headers: [["content-type", "application/json"]],
+    body: '{"t":1}',
+  });
+
+  expect(reply.status).toBe(200);
+  expect(reply.body).toBe("pong");
+  // The path and query survive; the destination is the edge, and the Host
+  // header is what actually routes it to the target deployment.
+  expect(seen[0].url).toBe("http://127.0.0.1:8080/verify?token=abc");
+  expect(seen[0].host).toBe("auth-api.andrea.example.com");
+  expect(seen[0].method).toBe("POST");
+  expect(seen[0].body).toBe('{"t":1}');
+});
+
+test("service: a binding the artifact never declared is refused", async () => {
+  const b = make({ bindings: svcBindings, services: { AUTH: "a.example.com" }, edgeUrl: "http://127.0.0.1:8080/" });
+  await expect(b.dispatch({ op: "service.fetch", binding: "GHOST", url: "https://service/" })).rejects.toThrow(
+    /service not bound: GHOST/,
+  );
+});
+
+test("service: declared but not deployed says so, instead of a bare 502", async () => {
+  const b = make({ bindings: svcBindings, services: {}, edgeUrl: "http://127.0.0.1:8080/" });
+  await expect(b.dispatch({ op: "service.fetch", binding: "AUTH", url: "https://service/" })).rejects.toThrow(
+    /"auth-api" is not deployed/,
+  );
+});
+
+test("service: a call is not subject to the outbound allowlist", async () => {
+  // The target is reached internally through the edge, so a project with no
+  // `outbound` hosts can still call a service binding.
+  const fetchImpl: FetchLike = async () => new Response("ok", { status: 200 });
+  const b = make({
+    bindings: { ...svcBindings, outbound: [] },
+    services: { AUTH: "auth-api.andrea.example.com" },
+    edgeUrl: "http://127.0.0.1:8080/",
+    fetchImpl,
+  });
+  expect((await b.dispatch({ op: "service.fetch", binding: "AUTH", url: "https://service/" })).status).toBe(200);
+  // ...while real egress to the same host is still refused.
+  await expect(b.dispatch({ op: "fetch", url: "https://auth-api.andrea.example.com/" })).rejects.toThrow(
+    /outbound allowlist/,
+  );
+});
