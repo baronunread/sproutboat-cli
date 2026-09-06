@@ -13,8 +13,9 @@
 //   assets    ASSETS (public/)     UI served via env.ASSETS.fetch(request)
 
 export class ViewCounter {
-  constructor(state) {
+  constructor(state, env) {
     this.state = state;
+    this.env = env;
   }
   // sync: state.storage.* are blocking calls, so no async needed (http-sync-v0)
   fetch(request) {
@@ -22,9 +23,24 @@ export class ViewCounter {
     if (url.pathname === "/incr") {
       const n = (this.state.storage.get("n") || 0) + 1;
       this.state.storage.put("n", n);
+      // Debounced roll-up: every view schedules the same alarm a second out, so
+      // a burst of views produces one alarm rather than one per view. That is
+      // the pattern alarms exist for, and the reason at-most-one-pending is the
+      // rule rather than a queue.
+      this.state.storage.setAlarm(Date.now() + 1000);
       return new Response(String(n));
     }
     return new Response(String(this.state.storage.get("n") || 0));
+  }
+
+  // Runs after the views stop. Writes through to D1 so the effect is visible
+  // outside the object, and re-reads the counter rather than trusting a value
+  // captured when the alarm was set.
+  alarm() {
+    const views = this.state.storage.get("n") || 0;
+    this.env.DB.prepare("INSERT INTO view_rollup (views, at) VALUES (?, ?)")
+      .bind(views, new Date().toISOString())
+      .run();
   }
 }
 
@@ -40,7 +56,8 @@ function ensureSchema(env) {
   env.DB.exec(
     "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, body TEXT, attachment TEXT, created TEXT);" +
       "CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, sent_at TEXT);" +
-      "CREATE TABLE IF NOT EXISTS heartbeat (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, cron TEXT)",
+      "CREATE TABLE IF NOT EXISTS heartbeat (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, cron TEXT);" +
+      "CREATE TABLE IF NOT EXISTS view_rollup (id INTEGER PRIMARY KEY AUTOINCREMENT, views INTEGER, at TEXT)",
   );
 }
 
@@ -147,6 +164,7 @@ export default {
         r2_objects: env.UPLOADS.list().objects.length,
         queue_emails_processed: env.DB.prepare("SELECT count(*) AS n FROM email_log").first("n"),
         cron_heartbeats: env.DB.prepare("SELECT count(*) AS n FROM heartbeat").first("n"),
+        do_alarm_rollups: env.DB.prepare("SELECT count(*) AS n FROM view_rollup").first("n"),
         analytics_points: metrics.count,
         analytics_recent: metrics.rows.map((r) => ({ at: r.timestamp, method: r.blobs[0], path: r.blobs[1] })),
         last_heartbeat: env.DB.prepare("SELECT at, cron FROM heartbeat ORDER BY id DESC LIMIT 1").first(),

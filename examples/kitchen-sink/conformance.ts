@@ -139,6 +139,18 @@ export async function runConformance(
     allowed.body,
   );
 
+  // DO alarms (#125): viewing a note debounces an alarm a second out, whose
+  // handler rolls the count up into D1. Poll, because the whole point is that
+  // it happens after the request that scheduled it has gone.
+  let rollups = 0;
+  for (let i = 0; i < 20; i++) {
+    const stats = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
+    rollups = Number(obj(stats.body).do_alarm_rollups || 0);
+    if (rollups > 0) break;
+    await Bun.sleep(300);
+  }
+  check("DO alarm: the debounced roll-up ran and wrote to D1", rollups > 0, { rollups });
+
   // queue: POST /notes enqueued an EMAILS job; the broker consumer delivers it
   let emailLogged = 0;
   for (let i = 0; i < 20; i++) {
