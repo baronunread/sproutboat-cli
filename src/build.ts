@@ -41,6 +41,10 @@ export type BuildOutput = {
   manifest: ArtifactManifest;
 };
 
+/** Baking megabytes of assets into the module makes the Porffor compile crawl;
+ *  past this it is the wrong tool and the error says what to do instead. */
+const MAX_BAKED_ASSET_BYTES = 8_000_000;
+
 function digest(value: Uint8Array | string): `sha256:${string}` {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
@@ -102,6 +106,34 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     input.transport === "embedded"
       ? [await ensureSqliteObject({ target: input.target ?? "linux-x86_64", zigBin })]
       : [];
+  // #15 — an embedded binary has no files beside it, so assets are baked into
+  // the module. Read them from the source directory: the artifact copy happens
+  // after the compile, and the compile is what needs them. Bytes travel as a
+  // latin1 string, one char per byte, which is what the asset shim hands back.
+  let bakedAssets: { manifest: AssetManifest; files: Record<string, string> } | undefined;
+  if (input.transport === "embedded" && input.config.assets) {
+    const dir = resolve(input.projectDir, input.config.assets.directory);
+    const manifest: AssetManifest = {
+      notFound: input.config.assets.not_found_handling ?? "none",
+      runSproutFirst: input.config.assets.run_sprout_first ?? false,
+      files: walkAssets(dir),
+    };
+    const files: Record<string, string> = {};
+    let total = 0;
+    for (const key of Object.keys(manifest.files)) {
+      const bytes = await readFile(resolve(dir, `.${key}`));
+      total += bytes.byteLength;
+      if (total > MAX_BAKED_ASSET_BYTES) {
+        throw new Error(
+          `assets are too large to compile into a standalone binary (over ${MAX_BAKED_ASSET_BYTES / 1_000_000} MB). ` +
+            "Serve them from R2, or drop the assets binding and put a web server in front.",
+        );
+      }
+      files[key] = bytes.toString("latin1");
+    }
+    bakedAssets = { manifest, files };
+  }
+
   await compileSprout({
     sourcePath: input.sourcePath,
     source: input.source,
@@ -113,6 +145,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     compatibilityDate: input.config.compatibility_date,
     transport: input.transport,
     appName: input.config.name,
+    assets: bakedAssets,
     extraLink,
   });
 

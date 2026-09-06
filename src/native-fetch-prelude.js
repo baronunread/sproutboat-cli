@@ -824,7 +824,14 @@ function __sbEnv(name) {
 
 function __sbTriggerAuthed(request) {
   const want = __sbEnv("SB_BROKER_TOKEN");
-  if (!want) return true; // no token configured (local/dev)
+  // No token configured means no caller can be trusted to send one, so refuse
+  // rather than wave the request through. Every path that legitimately delivers
+  // a trigger over HTTP sets SB_BROKER_TOKEN — the supervisor per deployment,
+  // `sproutboat dev`, the standalone launcher. The one build that has no token
+  // is the embedded binary (#15), which fires its own triggers in-process and
+  // is also the one most likely to be listening on a public interface: exactly
+  // where "anyone may invoke scheduled()" would be a hole.
+  if (!want) return false;
   return request.headers.get("x-sb-token") === want;
 }
 

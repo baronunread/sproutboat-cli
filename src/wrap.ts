@@ -165,6 +165,8 @@ export function wrapNativeFetchHandler(
   port: number = DEFAULT_PORT,
   compatibilityDate: string = BASELINE_COMPATIBILITY_DATE,
   appName: string = "app",
+  /** #15 — assets baked into the module for a binary that has no files beside it. */
+  assets?: { manifest: unknown; files: Record<string, string> },
 ): string {
   const neutralised = neutraliseExports(source);
   if (neutralised === null || !/\bfetch\s*\(/.test(source)) {
@@ -179,7 +181,8 @@ export function wrapNativeFetchHandler(
     // #15 — the embedded transport derives its default data directory from this.
     `globalThis.__sbAppName = ${JSON.stringify(appName)};\n` +
     // #15 — and enforces the outbound allowlist itself, with no broker to do it.
-    `globalThis.__sbOutbound = ${JSON.stringify(bindings.outbound)};\n`;
+    `globalThis.__sbOutbound = ${JSON.stringify(bindings.outbound)};\n` +
+    (assets ? `globalThis.__sbAssets = ${JSON.stringify(assets)};\n` : "");
   const wire = hasBindings(bindings) ? `__sbInstallBindings(env, ${JSON.stringify(bindings)});\n` : "";
   const registerDO = bindings.do.length
     ? `__sbRegisterDO({ ${bindings.do.map((d) => `${d.className}: ${d.className}`).join(", ")} });\n`

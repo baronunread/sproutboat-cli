@@ -48,6 +48,8 @@ export type CompileInput = {
   transport?: Transport;
   /** #15 — the project name, baked so an embedded build can default its data dir. */
   appName?: string;
+  /** #15 — assets baked into the module (embedded builds have no files on disk). */
+  assets?: { manifest: unknown; files: Record<string, string> };
   /** #15 — objects to add to the native-fetch link line (the SQLite amalgamation). */
   extraLink?: string[];
   /** Cross-compiler for `linux-x86_64`. Not needed, and not used, for `host`. */
@@ -60,6 +62,21 @@ export type CompileInput = {
    */
   target?: "linux-x86_64" | "host";
 };
+
+/**
+ * The prelude with a transport spliced in — the exact text the compiler sees.
+ *
+ * Exported because more than one caller composes a sprout: the build, and the
+ * kitchen-sink harness that compiles one itself. Reading
+ * `native-fetch-prelude.js` alone yields a module with no `__sbCall` at all.
+ */
+export async function loadPrelude(transport: Transport = "broker"): Promise<string> {
+  const [core, chosen] = await Promise.all([readFile(preludePath, "utf8"), readFile(transportPath(transport), "utf8")]);
+  if (!core.includes(TRANSPORT_MARKER)) {
+    throw new Error("prelude is missing its transport marker — src/native-fetch-prelude.js changed shape");
+  }
+  return core.replace(TRANSPORT_MARKER, chosen);
+}
 
 /** Child env for the Porffor run. `SB_EXTRA_LINK` is read by the patched link
  *  step (#15) and is absent entirely for a normal build. */
@@ -103,15 +120,10 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   // first rather than failing with "can't write output file".
   await rm(input.outPath, { force: true });
   const generatedPath = resolve(outDir, "sprout.generated.js");
-  const [source, preludeCore, transport] = await Promise.all([
+  const [source, prelude] = await Promise.all([
     input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),
-    readFile(preludePath, "utf8"),
-    readFile(transportPath(input.transport ?? "broker"), "utf8"),
+    loadPrelude(input.transport ?? "broker"),
   ]);
-  if (!preludeCore.includes(TRANSPORT_MARKER)) {
-    throw new Error("prelude is missing its transport marker — src/native-fetch-prelude.js changed shape");
-  }
-  const prelude = preludeCore.replace(TRANSPORT_MARKER, transport);
   await writeFile(
     generatedPath,
     wrapNativeFetchHandler(
@@ -122,6 +134,7 @@ export async function compileSprout(input: CompileInput): Promise<void> {
       undefined,
       input.compatibilityDate,
       input.appName,
+      input.assets,
     ),
   );
 

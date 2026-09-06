@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildWebUi } from "./build-web";
 import { runConformance } from "./conformance";
-import { wrapNativeFetchHandler, type Bindings } from "../../src/compile";
+import { loadPrelude, wrapNativeFetchHandler, type Bindings } from "../../src/compile";
 import { parseConfig } from "../../src/config";
 import { createBroker, listen } from "../../src/broker";
 import { walkAssets, type AssetManifest } from "../../src/assets";
@@ -91,7 +91,9 @@ const assetManifest: AssetManifest = {
 writeFileSync(join(workdir, "assets.json"), JSON.stringify(assetManifest, null, 2));
 
 // --- compile the sprout for the host ----------------------------------
-const prelude = readFileSync(join(CLI, "src/native-fetch-prelude.js"), "utf8");
+// The prelude needs its transport spliced in; reading the file alone yields a
+// module with no __sbCall (#15).
+const prelude = await loadPrelude("broker");
 const gen = join(workdir, "sprout.generated.js");
 const bin = join(workdir, "sprout.bin");
 writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"), "utf8"), prelude, vars, bindings));

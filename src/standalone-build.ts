@@ -45,10 +45,7 @@ export type StandaloneBackend = "bundled" | "embedded";
  * `fetch()` silently does nothing means discovering it in production, on a
  * device someone has to physically reach.
  */
-export function unsupportedBindings(
-  bindings: Partial<StandaloneManifest["bindings"]>,
-  backend: StandaloneBackend,
-): string[] {
+export function unsupportedBindings(bindings: Partial<StandaloneManifest["bindings"]>): string[] {
   const reasons: string[] = [];
   // No edge, no other deployments to call — true of any standalone binary.
   if ((bindings.services ?? []).length > 0) {
@@ -95,7 +92,7 @@ export async function buildStandalone(input: StandaloneBuildInput): Promise<Stan
     bindings = {}; // a project with no bindings at all
   }
 
-  const blocked = unsupportedBindings(bindings, backend);
+  const blocked = unsupportedBindings(bindings);
   if (blocked.length > 0) {
     throw new Error(`cannot build a standalone binary for this project:\n  - ${blocked.join("\n  - ")}`);
   }

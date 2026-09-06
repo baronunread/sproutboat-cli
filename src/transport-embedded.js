@@ -175,6 +175,25 @@ static int sb_bind_params(sqlite3_stmt* st, const char* json) {
   return 0;
 }
 
+// Run a script: one or more statements separated by semicolons. sqlite3_exec
+// handles the whole string, which prepare/step does not — it compiles the first
+// statement and silently ignores the rest, so a schema built from one exec call
+// would come out with only its first table.
+static char* sb_sql_script(const char* path, const char* sql) {
+  sb_buf b = { 0, 0, 0 };
+  int idx = sb_db_for(path);
+  if (idx < 0) { sb_puts(&b, "{\"ok\":false,\"error\":\"cannot open database\"}"); return b.p; }
+  char* err = 0;
+  if (sqlite3_exec(sb_dbs[idx], sql, 0, 0, &err) != 0) {
+    sb_puts(&b, "{\"ok\":false,\"error\":");
+    sb_putjson(&b, err ? err : "exec failed", err ? strlen(err) : 11);
+    sb_puts(&b, "}");
+    return b.p;
+  }
+  sb_puts(&b, "{\"ok\":true}");
+  return b.p;
+}
+
 // Run one statement. Returns malloc'd JSON:
 //   {"ok":true,"cols":[...],"rows":[[...]],"changes":n,"rowid":n}
 // or {"ok":false,"error":"..."}.
@@ -389,6 +408,32 @@ static char* sb_http_request(const char* host, int port, const char* path, const
 }
 `;
 
+// Multi-statement exec. Same string-param pattern as __sbSqlRaw.
+// oxlint-disable-next-line no-unused-vars -- read inside the RawC block below, not by JS.
+function __sbSqlScriptRaw(path, sql) {
+  let res = "";
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
+  Porffor.c`
+    const char* __p; size_t __pl; char* __po = 0;
+    porf_native_fetch_read_value(path, &__p, &__pl, &__po);
+    char* __path = (char*)malloc(__pl + 1); memcpy(__path, __p, __pl); __path[__pl] = 0;
+    if (__po) free(__po);
+
+    const char* __s; size_t __sl; char* __so = 0;
+    porf_native_fetch_read_value(sql, &__s, &__sl, &__so);
+    char* __sql = (char*)malloc(__sl + 1); memcpy(__sql, __s, __sl); __sql[__sl] = 0;
+    if (__so) free(__so);
+
+    char* __out = sb_sql_script(__path, __sql);
+    free(__path); free(__sql);
+    if (__out) {
+      res = porf_box((f64)porf_native_fetch_alloc_bytestring(__out, strlen(__out)), 195);
+      free(__out);
+    }
+  `;
+  return res;
+}
+
 // Outbound HTTP. Six string params so C can read each directly; the JS side has
 // already split the URL and enforced the allowlist.
 // oxlint-disable-next-line no-unused-vars -- read inside the RawC block below, not by JS.
@@ -579,6 +624,46 @@ function __sbEmbeddedDispatch(msg) {
     return { ok: true, keys };
   }
 
+  if (op === "assets.get") {
+    // Assets are baked into the module by the build (wrap.ts), so a standalone
+    // binary serves them with nothing beside it on disk. Same resolution rules
+    // as src/assets.ts and the same reply shape as the broker.
+    const bundle = globalThis.__sbAssets;
+    if (!bundle) throw new Error("assets not bound");
+    const files = bundle.files || {};
+    const meta = (bundle.manifest && bundle.manifest.files) || {};
+    let path = String(msg.path || "/");
+    if (path.charAt(0) !== "/") path = "/" + path;
+
+    let key = null;
+    if (path.charAt(path.length - 1) === "/") {
+      const index = path + "index.html";
+      if (files[index] != null) key = index;
+    } else if (files[path] != null) {
+      key = path;
+    } else {
+      const base = path.slice(path.lastIndexOf("/") + 1);
+      if (base.indexOf(".") === -1) {
+        if (files[path + ".html"] != null) key = path + ".html";
+        else if (files[path + "/index.html"] != null) key = path + "/index.html";
+      }
+    }
+    if (key != null) {
+      const info = meta[key] || {};
+      return { ok: true, found: true, status: 200, type: info.type, hash: info.hash, body: files[key] };
+    }
+    const nfh = (bundle.manifest && bundle.manifest.notFound) || "none";
+    if (nfh === "single-page-application" && files["/index.html"] != null) {
+      const info = meta["/index.html"] || {};
+      return { ok: true, found: true, status: 200, type: info.type, hash: info.hash, body: files["/index.html"] };
+    }
+    if (nfh === "404-page" && files["/404.html"] != null) {
+      const info = meta["/404.html"] || {};
+      return { ok: true, found: false, status: 404, type: info.type, body: files["/404.html"] };
+    }
+    return { ok: true, found: false, status: 404, body: "Not Found" };
+  }
+
   if (op === "fetch") {
     const url = new URL(String(msg.url));
     if (url.protocol === "https:") {
@@ -624,7 +709,10 @@ function __sbEmbeddedDispatch(msg) {
   if (op === "d1.query" || op === "d1.exec" || op === "d1.batch") {
     const path = __sbD1Path(String(msg.db));
     if (op === "d1.exec") {
-      __sbSql(path, String(msg.sql), []);
+      // exec() takes a script; a single prepare would run only its first
+      // statement and quietly drop the rest.
+      const reply = JSON.parse(__sbSqlScriptRaw(path, String(msg.sql)));
+      if (reply.ok === false) throw new Error("sqlite: " + reply.error);
       return { ok: true };
     }
     if (op === "d1.batch") {
@@ -655,7 +743,10 @@ function __sbEmbeddedDispatch(msg) {
         JSON.stringify(msg.customMetadata || {}),
       ],
     );
-    return { ok: true, etag, size: body.length };
+    return {
+      ok: true,
+      object: { key: msg.key, size: body.length, etag, uploaded: new Date().toISOString() },
+    };
   }
   if (op === "r2.get" || op === "r2.head") {
     const r = __sbSql(
@@ -665,15 +756,19 @@ function __sbEmbeddedDispatch(msg) {
     );
     if (!r.rows.length) return { ok: true, found: false };
     const row = r.rows[0];
+    // Shape must match the broker's exactly: the shim reads `r.object`.
     return {
       ok: true,
       found: true,
+      object: {
+        key: msg.key,
+        size: Number(row[1]),
+        etag: row[2],
+        uploaded: row[3],
+        httpMetadata: JSON.parse(row[4] || "{}"),
+        customMetadata: JSON.parse(row[5] || "{}"),
+      },
       body: op === "r2.get" ? row[0] : undefined,
-      size: Number(row[1]),
-      etag: row[2],
-      uploaded: row[3],
-      httpMetadata: JSON.parse(row[4] || "{}"),
-      customMetadata: JSON.parse(row[5] || "{}"),
     };
   }
   if (op === "r2.delete") {
@@ -688,7 +783,14 @@ function __sbEmbeddedDispatch(msg) {
     );
     const objects = [];
     for (let i = 0; i < r.rows.length; i++) {
-      objects.push({ key: r.rows[i][0], size: Number(r.rows[i][1]), etag: r.rows[i][2], uploaded: r.rows[i][3] });
+      objects.push({
+        key: r.rows[i][0],
+        size: Number(r.rows[i][1]),
+        etag: r.rows[i][2],
+        uploaded: r.rows[i][3],
+        httpMetadata: {},
+        customMetadata: {},
+      });
     }
     return { ok: true, objects };
   }
@@ -768,11 +870,14 @@ function __sbEmbeddedDispatch(msg) {
     return { ok: true };
   }
   if (op === "ae.query") {
+    // Reply must match the broker's: { count, rows: [{timestamp, indexes, blobs, doubles}] }.
+    const limit = Math.min(Math.max(Number(msg.limit) || 20, 1), 200);
     const r = __sbSql(
       store,
-      "SELECT ts, indexes_json, blobs_json, doubles_json FROM ae WHERE dataset = ? ORDER BY ts DESC LIMIT 100",
-      [msg.dataset],
+      "SELECT ts, indexes_json, blobs_json, doubles_json FROM ae WHERE dataset = ? ORDER BY ts DESC, rowid DESC LIMIT ?",
+      [msg.dataset, limit],
     );
+    const total = __sbSql(store, "SELECT count(*) FROM ae WHERE dataset = ?", [msg.dataset]);
     const rows = [];
     for (let i = 0; i < r.rows.length; i++) {
       rows.push({
@@ -782,7 +887,7 @@ function __sbEmbeddedDispatch(msg) {
         doubles: JSON.parse(r.rows[i][3]),
       });
     }
-    return { ok: true, rows };
+    return { ok: true, count: total.rows.length ? Number(total.rows[0][0]) : 0, rows };
   }
 
   throw new Error("unknown op: " + op);

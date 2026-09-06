@@ -24,7 +24,22 @@ export type CheckFn = (name: string, cond: boolean, detail?: JsonValue) => void;
  * post the internal trigger requests (cron / queue) the broker would normally
  * send. `check` reports; it is expected to abort on failure.
  */
-export async function runConformance(base: string, TOKEN: string, check: CheckFn): Promise<void> {
+export type ConformanceOptions = {
+  /**
+   * Skip the checks that post an internal `x-sb-trigger` request. An embedded
+   * standalone binary runs its own cron and queue timers in-process, so there is
+   * no broker to impersonate — the behaviour is covered, just not reachable this
+   * way.
+   */
+  skipTriggers?: boolean;
+};
+
+export async function runConformance(
+  base: string,
+  TOKEN: string,
+  check: CheckFn,
+  options: ConformanceOptions = {},
+): Promise<void> {
   const jget = async (p: string, init?: RequestInit): Promise<{ status: number; body: JsonValue }> => {
     const r = await fetch(base + p, init);
     const t = await r.text();
@@ -134,7 +149,10 @@ export async function runConformance(base: string, TOKEN: string, check: CheckFn
   }
   check("queue: EMAILS job consumed -> email_log row", emailLogged > 0, { emailLogged });
 
-  // cron: fire the scheduled trigger the way the broker would
+  // cron: fire the scheduled trigger the way the broker would. An embedded
+  // binary has no broker and no token, so it refuses external triggers by
+  // design (#15) and drives its own on a timer instead.
+  if (options.skipTriggers) return;
   const sched = await fetch(base + "/", {
     method: "POST",
     headers: { "x-sb-trigger": "scheduled", "x-sb-token": TOKEN, "content-type": "application/json" },
