@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "project": "hello",
+  "target": "linux-x86_64",
+  "runtime": "native-fetch",
+  "capabilityProfile": "http-sync-v0",
+  "porfforVersion": "alpha-4 (a415d19)",
+  "esbuildVersion": "0.28.2",
+  "buildImage": "zig-musl/0.16.0+porffor/a415d19+uws/360c276d",
+  "sourceHash": "sha256:9f2c1b4e8a7d3f605e1c8b2a4d7f0e3c6b9a2d5f8e1c4b7a0d3f6e9c2b5a8d1f",
+  "binaryHash": "sha256:1a4d7f0e3c6b9a2d5f8e1c4b7a0d3f6e9c2b5a8d1f4e7c0b3a6d9f2e5c8b1a4d",
+  "binarySize": 428032,
+  "builtAt": "2026-08-26T10:14:03.000Z"
+}
