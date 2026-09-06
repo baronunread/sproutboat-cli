@@ -584,3 +584,36 @@ test("v0 frames still work, so an older artifact keeps running", async () => {
   expect(reply[4]).not.toBe(1); // a v0 request gets a v0 reply
   expect(obj(parseJsonValue(reply.subarray(4, 4 + len).toString("utf8"))).ok).toBe(true);
 });
+
+test("a resent request is applied once, not twice (#63 §3)", async () => {
+  const b = make({ bindings: { d1: ["DB"] } });
+  const frame = (msg: Frame) => Buffer.from(`\n${JSON.stringify(msg)}`, "utf8");
+  await b.handleFrame(frame({ v: 1, id: 1, op: "d1.exec", db: "DB", sql: "CREATE TABLE t (v TEXT)" }));
+
+  // The same id three times is what a reconnect produces: the transport retries
+  // the exact bytes, having no way to know whether the first attempt landed.
+  const insert = { v: 1, id: 42, op: "d1.query", db: "DB", sql: "INSERT INTO t (v) VALUES ('x')" };
+  await b.handleFrame(frame(insert));
+  await b.handleFrame(frame(insert));
+  await b.handleFrame(frame(insert));
+
+  const counted = await b.dispatch({ op: "d1.query", db: "DB", sql: "SELECT count(*) AS n FROM t" });
+  expect(obj(arr(counted.results)[0]).n).toBe(1);
+
+  // A different id is a different request and does apply.
+  await b.handleFrame(frame({ ...insert, id: 43 }));
+  const after = await b.dispatch({ op: "d1.query", db: "DB", sql: "SELECT count(*) AS n FROM t" });
+  expect(obj(arr(after.results)[0]).n).toBe(2);
+});
+
+test("replaying a read is allowed, since it changes nothing", async () => {
+  const b = make({ bindings: { kv: ["CACHE"] } });
+  await b.handleFrame(
+    Buffer.from(`\n${JSON.stringify({ v: 1, id: 1, op: "kv.put", ns: "CACHE", key: "k", value: "v" })}`, "utf8"),
+  );
+  const read = async () =>
+    b.handleFrame(Buffer.from(`\n${JSON.stringify({ v: 1, id: 2, op: "kv.get", ns: "CACHE", key: "k" })}`, "utf8"));
+  const a = await read();
+  const c = await read();
+  expect(a.subarray(4).toString()).toBe(c.subarray(4).toString());
+});

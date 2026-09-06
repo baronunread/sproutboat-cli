@@ -107,22 +107,37 @@ static int sb_broker_exchange(const char* req, size_t req_len, char** resp_out, 
   return rc;
 }
 
+// Backoff between attempts: 0, 5, 25, then 100 ms.
+static void sb_backoff(int attempt) {
+  static const long ms[4] = { 0, 5, 25, 100 };
+  long wait = ms[attempt < 4 ? attempt : 3];
+  if (wait <= 0) return;
+  struct timespec ts;
+  ts.tv_sec = wait / 1000;
+  ts.tv_nsec = (wait % 1000) * 1000000L;
+  nanosleep(&ts, 0);
+}
+
 static int sb_broker_roundtrip(const char* req, size_t req_len, char** resp_out, size_t* resp_len_out) {
   *resp_out = NULL;
   *resp_len_out = 0;
-  // Two tries: a broker restart (or an idle-closed socket) invalidates the fd,
-  // so a failed exchange drops the connection and reconnects once before failing.
-  for (int attempt = 0; attempt < 2; attempt++) {
+  // Four tries with backoff. One retry was tuned for "systemd restarted it in
+  // 20 ms"; a broker being upgraded, or a shared one restarting, is every
+  // deployment's binding calls failing inside that window. Retrying the same
+  // bytes is safe because each request carries an id the broker deduplicates.
+  int rc = -3;
+  for (int attempt = 0; attempt < 4; attempt++) {
+    sb_backoff(attempt);
     if (sb_broker_fd < 0) {
-      int rc = sb_broker_connect();
-      if (rc != 0) return rc;
+      int c = sb_broker_connect();
+      if (c != 0) { rc = c; continue; }
     }
-    int rc = sb_broker_exchange(req, req_len, resp_out, resp_len_out);
+    rc = sb_broker_exchange(req, req_len, resp_out, resp_len_out);
     if (rc == 0) return 0;
     close(sb_broker_fd);
     sb_broker_fd = -1;
   }
-  return -3;
+  return rc;
 }
 
 // A v1 exchange: marker, json length, json, then the body bytes. The reply is
@@ -140,10 +155,11 @@ static int sb_broker_roundtrip_v1(const char* json, size_t json_len, const char*
 
   char* resp = 0; size_t resp_len = 0;
   int rc = -3;
-  for (int attempt = 0; attempt < 2; attempt++) {
+  for (int attempt = 0; attempt < 4; attempt++) {
+    sb_backoff(attempt);
     if (sb_broker_fd < 0) {
       int c = sb_broker_connect();
-      if (c != 0) { free(req); return c; }
+      if (c != 0) { rc = c; continue; }
     }
     rc = sb_broker_exchange_raw(req, req_len, &resp, &resp_len);
     if (rc == 0) break;

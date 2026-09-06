@@ -354,8 +354,14 @@ function __sbRandomBytes(nStr) {
   return out;
 }
 
+// #63 — every request carries the protocol version it was built against and an
+// id unique to this process. The id is what makes a resend safe: the transport
+// retries the *same bytes*, so a broker that already applied the request can
+// recognise it and replay its answer instead of applying it twice.
+var __sbReqId = 0;
+
 function __sbRpc(op, extra) {
-  const req = { op };
+  const req = { v: 1, id: ++__sbReqId, op };
   if (extra) for (const k in extra) req[k] = extra[k];
   const reply = JSON.parse(__sbCall(JSON.stringify(req)));
   if (reply && reply.ok === false) throw new Error(`sproutboat ${op}: ${reply.error || "failed"}`);

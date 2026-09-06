@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveAssetKey, type AssetManifest } from "./assets";
+import { isSafeInteger } from "./json";
 import { isBoolean, isString, jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "./json";
 
 export type Bindings = {
@@ -205,6 +206,8 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     return { type: entry.type, hash: entry.hash, body: readFileSync(abs, "utf8") };
   };
   const token = opts.token ?? "";
+  /** #63 §3 — replies to recent non-idempotent requests, keyed by op and id. */
+  const replayed = new Map<string, Frame>();
   const serviceHosts = opts.services ?? {};
   const doFetch = opts.fetchImpl ?? fetch;
 
@@ -772,7 +775,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       return { reply: { ok: true, found: true, object: r2Row(row) }, bytes: r2Bytes(row.body) };
     }
 
-    return { reply: await dispatch(msg) };
+    return { reply: await dispatchOnce(msg) };
   }
 
   /** One wire frame in, one out. See `handleFrame` on the Broker type. */
@@ -793,6 +796,58 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     }
   }
 
+  /**
+   * #63 §3 — ops that must not be applied twice.
+   *
+   * The transport retries the same bytes when a connection dies, and a broker
+   * that already applied a request but never got its reply out would otherwise
+   * apply it again: a second queue message, a second INSERT. Reads are absent
+   * deliberately — replaying a `d1.query` costs nothing and caching its reply
+   * could hold megabytes.
+   */
+  const REPLAYABLE = new Set([
+    "kv.put",
+    "kv.delete",
+    "queue.send",
+    "queue.send_batch",
+    "d1.query",
+    "d1.exec",
+    "d1.batch",
+    "r2.put",
+    "r2.delete",
+    "do.storage.put",
+    "do.storage.delete",
+    "do.storage.delete_all",
+    "do.alarm.set",
+    "do.alarm.delete",
+    "ae.write",
+  ]);
+
+  /** How many recent replies to keep. A resend follows its original within
+   *  milliseconds, so this only has to outlive a reconnect, not a session. */
+  const REPLAY_WINDOW = 256;
+
+  /**
+   * Run `msg`, or replay what it answered last time. Keyed by the id the sprout
+   * put on the request; a request without one is always run.
+   */
+  async function dispatchOnce(msg: Frame): Promise<Frame> {
+    const id = isSafeInteger(msg.id) ? msg.id : null;
+    const op = str(msg.op);
+    if (id === null || !REPLAYABLE.has(op)) return dispatch(msg);
+    const key = `${op}:${id}`;
+    const seen = replayed.get(key);
+    if (seen) return seen;
+    const reply = await dispatch(msg);
+    replayed.set(key, reply);
+    // Insertion-ordered, so the oldest key is the first one out.
+    if (replayed.size > REPLAY_WINDOW) {
+      const oldest = replayed.keys().next().value;
+      if (oldest !== undefined) replayed.delete(oldest);
+    }
+    return reply;
+  }
+
   async function handlePayload(payload: string): Promise<Frame> {
     const nl = payload.indexOf("\n");
     const gotToken = nl === -1 ? "" : payload.slice(0, nl);
@@ -801,7 +856,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     try {
       const msg = jsonObject(parseJsonValue(json));
       if (!msg) throw new Error("request frame was not a JSON object");
-      return await dispatch(msg);
+      return await dispatchOnce(msg);
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
