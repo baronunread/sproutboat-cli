@@ -431,6 +431,139 @@ static char* sb_http_plain(const char* host, int port, const char* path, const c
 extern const br_x509_trust_anchor sb_trust_anchors[];
 extern const size_t sb_trust_anchor_count;
 
+// SB_CA_BUNDLE: extra roots, read at run time.
+//
+// Adds trust, never removes it — the compiled-in Mozilla set stays in force, so
+// pointing at a file with one corporate CA cannot silently stop public
+// certificates from validating. Nothing here can disable verification.
+//
+// Adapted from BearSSL's own tools/certs.c (same MIT licence), which is the
+// reference for turning a DER certificate into a trust anchor.
+static br_x509_trust_anchor* sb_ca_extra = 0;
+static size_t sb_ca_extra_count = 0;
+static const br_x509_trust_anchor* sb_all_anchors = 0;
+static size_t sb_all_anchor_count = 0;
+
+static void sb_buf_append(void* ctx, const void* buf, size_t len) {
+  sb_put((sb_buf*)ctx, (const char*)buf, len);
+}
+
+static unsigned char* sb_blobdup(const void* src, size_t len) {
+  unsigned char* out = (unsigned char*)malloc(len ? len : 1);
+  if (out && len) memcpy(out, src, len);
+  return out;
+}
+
+// One DER certificate -> one appended trust anchor. Returns 0 on success.
+static int sb_add_anchor(const unsigned char* der, size_t len) {
+  br_x509_decoder_context dc;
+  sb_buf dn = { 0, 0, 0 };
+  br_x509_decoder_init(&dc, sb_buf_append, &dn);
+  br_x509_decoder_push(&dc, der, len);
+  br_x509_pkey* pk = br_x509_decoder_get_pkey(&dc);
+  if (!pk) { free(dn.p); return -1; }
+
+  br_x509_trust_anchor ta;
+  memset(&ta, 0, sizeof(ta));
+  ta.dn.data = (unsigned char*)dn.p;
+  ta.dn.len = dn.len;
+  ta.flags = br_x509_decoder_isCA(&dc) ? BR_X509_TA_CA : 0;
+  if (pk->key_type == BR_KEYTYPE_RSA) {
+    ta.pkey.key_type = BR_KEYTYPE_RSA;
+    ta.pkey.key.rsa.n = sb_blobdup(pk->key.rsa.n, pk->key.rsa.nlen);
+    ta.pkey.key.rsa.nlen = pk->key.rsa.nlen;
+    ta.pkey.key.rsa.e = sb_blobdup(pk->key.rsa.e, pk->key.rsa.elen);
+    ta.pkey.key.rsa.elen = pk->key.rsa.elen;
+  } else if (pk->key_type == BR_KEYTYPE_EC) {
+    ta.pkey.key_type = BR_KEYTYPE_EC;
+    ta.pkey.key.ec.curve = pk->key.ec.curve;
+    ta.pkey.key.ec.q = sb_blobdup(pk->key.ec.q, pk->key.ec.qlen);
+    ta.pkey.key.ec.qlen = pk->key.ec.qlen;
+  } else {
+    free(dn.p);
+    return -1; // a key type BearSSL cannot verify with
+  }
+
+  br_x509_trust_anchor* grown =
+    (br_x509_trust_anchor*)realloc(sb_ca_extra, (sb_ca_extra_count + 1) * sizeof(br_x509_trust_anchor));
+  if (!grown) { free(dn.p); return -1; }
+  sb_ca_extra = grown;
+  sb_ca_extra[sb_ca_extra_count++] = ta;
+  return 0;
+}
+
+// Read every CERTIFICATE block out of a PEM file and add it.
+static void sb_load_ca_bundle(const char* path) {
+  FILE* f = fopen(path, "rb");
+  if (!f) {
+    fprintf(stderr, "sproutboat: SB_CA_BUNDLE %s could not be opened; using the built-in roots only\n", path);
+    return;
+  }
+  sb_buf pem = { 0, 0, 0 };
+  char chunk[8192];
+  size_t n;
+  while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) sb_put(&pem, chunk, n);
+  fclose(f);
+
+  br_pem_decoder_context pc;
+  br_pem_decoder_init(&pc);
+  sb_buf der = { 0, 0, 0 };
+  int in_cert = 0, added = 0;
+  size_t off = 0;
+  while (off < pem.len) {
+    size_t used = br_pem_decoder_push(&pc, pem.p + off, pem.len - off);
+    off += used;
+    switch (br_pem_decoder_event(&pc)) {
+      case BR_PEM_BEGIN_OBJ: {
+        const char* name = br_pem_decoder_name(&pc);
+        in_cert = name && (strcmp(name, "CERTIFICATE") == 0 || strcmp(name, "X509 CERTIFICATE") == 0);
+        der.len = 0;
+        if (in_cert) br_pem_decoder_setdest(&pc, sb_buf_append, &der);
+        else br_pem_decoder_setdest(&pc, 0, 0);
+        break;
+      }
+      case BR_PEM_END_OBJ:
+        if (in_cert && der.len && sb_add_anchor((const unsigned char*)der.p, der.len) == 0) added++;
+        der.len = 0;
+        in_cert = 0;
+        break;
+      case BR_PEM_ERROR:
+        fprintf(stderr, "sproutboat: SB_CA_BUNDLE %s is not valid PEM\n", path);
+        off = pem.len;
+        break;
+      default:
+        break;
+    }
+    if (used == 0 && br_pem_decoder_event(&pc) == 0) break; // no progress, no event
+  }
+  free(pem.p);
+  free(der.p);
+  if (added == 0) fprintf(stderr, "sproutboat: SB_CA_BUNDLE %s held no usable certificates\n", path);
+}
+
+// The anchor set every handshake verifies against: built in, plus SB_CA_BUNDLE.
+static void sb_init_anchors(void) {
+  if (sb_all_anchors) return;
+  const char* path = getenv("SB_CA_BUNDLE");
+  if (path && *path) sb_load_ca_bundle(path);
+  if (sb_ca_extra_count == 0) {
+    sb_all_anchors = sb_trust_anchors;
+    sb_all_anchor_count = sb_trust_anchor_count;
+    return;
+  }
+  size_t total = sb_trust_anchor_count + sb_ca_extra_count;
+  br_x509_trust_anchor* all = (br_x509_trust_anchor*)malloc(total * sizeof(br_x509_trust_anchor));
+  if (!all) {
+    sb_all_anchors = sb_trust_anchors;
+    sb_all_anchor_count = sb_trust_anchor_count;
+    return;
+  }
+  memcpy(all, sb_trust_anchors, sb_trust_anchor_count * sizeof(br_x509_trust_anchor));
+  memcpy(all + sb_trust_anchor_count, sb_ca_extra, sb_ca_extra_count * sizeof(br_x509_trust_anchor));
+  sb_all_anchors = all;
+  sb_all_anchor_count = total;
+}
+
 static int sb_sock_read(void* ctx, unsigned char* buf, size_t len) {
   for (;;) {
     ssize_t n = read(*(int*)ctx, buf, len);
@@ -461,7 +594,8 @@ static char* sb_https(const char* host, int port, const char* path, const char* 
     return sb_error_json("out of memory setting up TLS for ", host);
   }
   br_sslio_context ioc;
-  br_ssl_client_init_full(sc, xc, sb_trust_anchors, sb_trust_anchor_count);
+  sb_init_anchors();
+  br_ssl_client_init_full(sc, xc, sb_all_anchors, sb_all_anchor_count);
   br_ssl_engine_set_buffer(&sc->eng, iobuf, BR_SSL_BUFSIZE_BIDI, 1);
   br_ssl_client_reset(sc, host, 0);
   br_sslio_init(&ioc, &sc->eng, sb_sock_read, &fd, sb_sock_write, &fd);

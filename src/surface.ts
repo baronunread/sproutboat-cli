@@ -239,6 +239,11 @@ export const ENV_VARS: readonly EnvVar[] = [
       "Data directory for a standalone binary, after --data and SB_DATA_DIR, before the ./<name>.data default (#15).",
   },
   {
+    name: "SB_CA_BUNDLE",
+    purpose:
+      "PEM bundle of extra certificate authorities a standalone binary should trust, on top of the compiled-in Mozilla root set (#15). Adds trust; nothing disables verification.",
+  },
+  {
     name: "SB_EXTRA_CFLAGS",
     purpose:
       "Flags added to Porffor's native-fetch compile step, set by the build so inline C can include BearSSL's header (#15).",
