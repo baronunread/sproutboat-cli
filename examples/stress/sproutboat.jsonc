@@ -1,0 +1,13 @@
+{
+  "name": "stress",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-06",
+  "kv_namespaces": ["CACHE"],
+  "d1_databases": ["DB"],
+  "r2_buckets": ["UP"],
+  "queues": ["JOBS"],
+  "analytics_engine_datasets": ["METRICS"],
+  "durable_objects": { "BAG": "Bag" },
+  "outbound": ["example.com"],
+  "assets": { "directory": "public", "binding": "ASSETS" },
+}
