@@ -51,6 +51,9 @@ usage: sproutboat <init [name] | check [project-dir] | dev [project-dir] [--port
 | `SB_BROKER_PORT` | Loopback port of the binding broker, read by the compiled sprout at runtime (set by the control plane, or by `src/broker.ts` for local runs). |
 | `SB_BROKER_TOKEN` | Per-deployment auth token the sprout sends on every broker frame, and the broker sends back on scheduled/queue triggers (paired with SB_BROKER_PORT). |
 | `SB_SPROUT_URL` | http://127.0.0.1:<PORT> of the sprout; when set, `src/broker.ts` runs the cron scheduler and queue consumer and delivers triggers to it. |
+| `SB_DATA_DIR` | Where a standalone binary keeps store.sqlite and d1/ (#15). Read by the sprout itself in an embedded build; defaults to ./<name>.data. |
+| `SPROUTBOAT_DATA` | Same as --data for a standalone binary: the data directory, overriding the ./<name>.data default (#15). |
+| `SB_EXTRA_LINK` | Objects to add to Porffor's native-fetch link line, set by the build for an embedded standalone binary so SQLite is linked in (#15). |
 
 ## Build toolchain (pinned)
 

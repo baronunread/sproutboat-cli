@@ -83,7 +83,7 @@ export async function ensureSqliteObject(input: SqliteObjectInput): Promise<stri
   const source = await amalgamation();
   const [cmd, prefix] =
     input.target === "host"
-      ? ([process.env.CC || "cc", []] as const)
+      ? (["cc", []] as const)
       : ([input.zigBin ?? "zig", ["cc", "-target", "x86_64-linux-musl"]] as const);
   const result = await run(cmd, [...prefix, "-c", source, "-o", objectPath, "-O2", ...SQLITE_DEFINES]);
   if (result.code !== 0) throw new Error(`could not compile SQLite for ${input.target}:\n${result.stderr}`);

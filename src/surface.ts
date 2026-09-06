@@ -228,6 +228,20 @@ export const ENV_VARS: readonly EnvVar[] = [
     purpose:
       "http://127.0.0.1:<PORT> of the sprout; when set, `src/broker.ts` runs the cron scheduler and queue consumer and delivers triggers to it.",
   },
+  {
+    name: "SB_DATA_DIR",
+    purpose:
+      "Where a standalone binary keeps store.sqlite and d1/ (#15). Read by the sprout itself in an embedded build; defaults to ./<name>.data.",
+  },
+  {
+    name: "SPROUTBOAT_DATA",
+    purpose: "Same as --data for a standalone binary: the data directory, overriding the ./<name>.data default (#15).",
+  },
+  {
+    name: "SB_EXTRA_LINK",
+    purpose:
+      "Objects to add to Porffor's native-fetch link line, set by the build for an embedded standalone binary so SQLite is linked in (#15).",
+  },
 ];
 
 const GROUP_ORDER: readonly Group[] = ["Develop", "Ship", "Storage", "Configure", "Account"];
