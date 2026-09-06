@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { walkAssets, type AssetManifest } from "./assets";
 import { resourceRefs, type SproutboatConfig } from "./config";
 import { ensureSqliteObject } from "./sqlite";
+import { ensureBearssl } from "./bearssl";
 import { compileSprout, type Transport } from "./compile";
 import {
   ARTIFACT_SCHEMA_VERSION,
@@ -100,12 +101,15 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   // for it — that download is the slowest part of a first local build.
   const host = input.target === "host";
   const zigBin = host ? undefined : await ensureZig();
-  // #15 — an embedded-backend sprout carries SQLite instead of talking to a
-  // broker, so the amalgamation is compiled once and added to the link line.
-  const extraLink =
-    input.transport === "embedded"
-      ? [await ensureSqliteObject({ target: input.target ?? "linux-x86_64", zigBin })]
-      : [];
+  // #15 — an embedded sprout carries its own storage and TLS instead of talking
+  // to a broker: SQLite and BearSSL are compiled once per target and added to
+  // the link line, and BearSSL's header to the compile line.
+  const embedded = input.transport === "embedded";
+  const target = input.target ?? "linux-x86_64";
+  const sqliteObject = embedded ? await ensureSqliteObject({ target, zigBin }) : null;
+  const tls = embedded ? await ensureBearssl({ target, zigBin }) : null;
+  const extraLink = [...(sqliteObject ? [sqliteObject] : []), ...(tls ? tls.objects : [])];
+  const extraCflags = tls ? ["-I", tls.includeDir] : [];
   // #15 — an embedded binary has no files beside it, so assets are baked into
   // the module. Read them from the source directory: the artifact copy happens
   // after the compile, and the compile is what needs them. Bytes travel as a
@@ -147,6 +151,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     appName: input.config.name,
     assets: bakedAssets,
     extraLink,
+    extraCflags,
   });
 
   const sprout = await readFile(sproutPath);

@@ -239,9 +239,14 @@ export const ENV_VARS: readonly EnvVar[] = [
       "Data directory for a standalone binary, after --data and SB_DATA_DIR, before the ./<name>.data default (#15).",
   },
   {
+    name: "SB_EXTRA_CFLAGS",
+    purpose:
+      "Flags added to Porffor's native-fetch compile step, set by the build so inline C can include BearSSL's header (#15).",
+  },
+  {
     name: "SB_EXTRA_LINK",
     purpose:
-      "Objects to add to Porffor's native-fetch link line, set by the build for an embedded standalone binary so SQLite is linked in (#15).",
+      "Objects to add to Porffor's native-fetch link line, set by the build so a standalone binary links SQLite and BearSSL (#15).",
   },
 ];
 

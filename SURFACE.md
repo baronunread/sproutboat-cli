@@ -53,7 +53,8 @@ usage: sproutboat <init [name] | check [project-dir] | dev [project-dir] [--port
 | `SB_SPROUT_URL` | http://127.0.0.1:<PORT> of the sprout; when set, `src/broker.ts` runs the cron scheduler and queue consumer and delivers triggers to it. |
 | `SB_DATA_DIR` | Where a standalone binary keeps store.sqlite and d1/ (#15). Read by the sprout itself in an embedded build; defaults to ./<name>.data. |
 | `SPROUTBOAT_DATA` | Data directory for a standalone binary, after --data and SB_DATA_DIR, before the ./<name>.data default (#15). |
-| `SB_EXTRA_LINK` | Objects to add to Porffor's native-fetch link line, set by the build for an embedded standalone binary so SQLite is linked in (#15). |
+| `SB_EXTRA_CFLAGS` | Flags added to Porffor's native-fetch compile step, set by the build so inline C can include BearSSL's header (#15). |
+| `SB_EXTRA_LINK` | Objects to add to Porffor's native-fetch link line, set by the build so a standalone binary links SQLite and BearSSL (#15). |
 
 ## Build toolchain (pinned)
 

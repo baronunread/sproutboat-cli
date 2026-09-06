@@ -273,11 +273,6 @@ async function buildStandaloneBinary(directory: string | undefined, target: "lin
     });
     console.log(ok(`built ${result.outPath} (${(result.bytes / 1_000_000).toFixed(1)} MB)`));
     console.log(dim(`  run it: ${result.outPath}   ·   state lands in ./${project.config.name}.data`));
-    if ((project.config.outbound ?? []).length > 0) {
-      console.log(
-        amber("  ! outbound fetch() works over http:// only; an https call reports that TLS is not compiled in"),
-      );
-    }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }

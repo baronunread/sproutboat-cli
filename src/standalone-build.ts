@@ -26,10 +26,8 @@ export type StandaloneBuildResult = { outPath: string; bytes: number };
  * nothing is discovered in production, on a device someone has to reach
  * physically.
  *
- * Outbound `fetch` is deliberately absent from this list — it works over
- * `http://`, and an `https://` call reports at runtime that TLS is not compiled
- * in. Blocking the build would refuse every project that only talks to its own
- * network.
+ * Outbound `fetch` is absent from this list: http and https both work, with
+ * BearSSL and the Mozilla root set compiled in.
  */
 export function unsupportedBindings(bindings: Partial<Bindings>): string[] {
   const reasons: string[] = [];

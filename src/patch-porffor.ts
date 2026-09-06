@@ -45,25 +45,49 @@ const LINK_INJECT =
   "          ...(process.env.SB_EXTRA_LINK ? process.env.SB_EXTRA_LINK.split(' ').filter(Boolean) : []),\n";
 const LINK_MARKER = "SB_EXTRA_LINK";
 
+/**
+ * #15 — and the same for the compile step, so the prelude's inline C can
+ * `#include <bearssl.h>`. The link patch alone is not enough: Porffor compiles
+ * the generated C from stdin with a fixed argument list, so there is otherwise
+ * no way to add an include path.
+ */
+const CFLAGS_ANCHOR = "          '-xc', '-', '-c',\n";
+const CFLAGS_INJECT =
+  "          ...(process.env.SB_EXTRA_CFLAGS ? process.env.SB_EXTRA_CFLAGS.split(' ').filter(Boolean) : []),\n";
+const CFLAGS_MARKER = "SB_EXTRA_CFLAGS";
+
 let done = false;
 
-async function patchLinkArgs(): Promise<void> {
+async function patchCompilerArgs(): Promise<void> {
   const file = resolve(porfforRoot(), "compiler/index.js");
-  const src = await readFile(file, "utf8");
-  if (src.includes(LINK_MARKER)) return;
-  const at = src.indexOf(LINK_ANCHOR);
-  if (at === -1) {
-    throw new Error(
-      `could not patch Porffor for extra link args: anchor not found in ${file}. ` +
-        "Porffor's native-fetch link step changed — check patches/UPSTREAM.md.",
-    );
+  let src = await readFile(file, "utf8");
+  let changed = false;
+  for (const [marker, anchor, inject, what] of [
+    [LINK_MARKER, LINK_ANCHOR, LINK_INJECT, "extra link args"],
+    [CFLAGS_MARKER, CFLAGS_ANCHOR, CFLAGS_INJECT, "extra compiler flags"],
+  ] as const) {
+    if (src.includes(marker)) continue;
+    const at = src.indexOf(anchor);
+    if (at === -1) {
+      throw new Error(
+        `could not patch Porffor for ${what}: anchor not found in ${file}. ` +
+          "Porffor's native-fetch build changed — check patches/UPSTREAM.md.",
+      );
+    }
+    // After the anchor for cflags (the args follow it), before it for the link
+    // line (the object list ends with it).
+    src =
+      marker === CFLAGS_MARKER
+        ? src.slice(0, at + anchor.length) + inject + src.slice(at + anchor.length)
+        : src.slice(0, at) + inject + src.slice(at);
+    changed = true;
   }
-  await writeFile(file, src.slice(0, at) + LINK_INJECT + src.slice(at));
+  if (changed) await writeFile(file, src);
 }
 
 export async function ensurePorfforPatched(): Promise<void> {
   if (done) return;
-  await patchLinkArgs();
+  await patchCompilerArgs();
   const file = resolve(porfforRoot(), "compiler/render.js");
   const src = await readFile(file, "utf8");
   if (src.includes(ENV_MARKER)) {

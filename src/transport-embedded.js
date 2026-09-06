@@ -22,6 +22,8 @@ Porffor.c`
 #include <sys/socket.h>
 #include <netdb.h>
 #include <strings.h>
+#include <sys/time.h>
+#include <bearssl.h>
 
 // sqlite3 is linked in via SB_EXTRA_LINK (see patch-porffor.ts). Declared here
 // rather than including sqlite3.h so the build needs no include path.
@@ -257,11 +259,11 @@ static char* sb_sql_run(const char* path, const char* sql, const char* params) {
   return b.p;
 }
 
-// --- outbound HTTP (phase 3) ------------------------------------------------
-// A plain HTTP/1.1 client, enough for a handler to call a service on the LAN or
-// on localhost — an Ollama endpoint, a printer, another mini app. TLS is not
-// here: a certificate store plus a TLS stack is a different order of
-// dependency, so https:// reports that plainly instead of pretending.
+// --- outbound HTTP + HTTPS ---------------------------------------------------
+// Plain sockets for http, BearSSL for https, with the Mozilla root set compiled
+// in (see src/bearssl.ts). Both directions share the request builder and the
+// response parser: the only thing that differs is how bytes move.
+
 static int sb_tcp_connect(const char* host, int port) {
   struct addrinfo hints, *res = 0, *it;
   memset(&hints, 0, sizeof(hints));
@@ -285,69 +287,43 @@ static int sb_tcp_connect(const char* host, int port) {
   return fd;
 }
 
-// Returns malloc'd JSON: {"ok":true,"status":n,"headers":[[k,v],...],"body":"..."}
-static char* sb_http_request(const char* host, int port, const char* path, const char* method,
+static void sb_build_request(sb_buf* req, const char* host, const char* path, const char* method,
                              const char* headers, const char* body) {
-  sb_buf out = { 0, 0, 0 };
-  int fd = sb_tcp_connect(host, port);
-  if (fd < 0) {
-    sb_puts(&out, "{\"ok\":false,\"error\":\"could not connect to ");
-    sb_puts(&out, host);
-    sb_puts(&out, "\"}");
-    return out.p;
-  }
-
-  sb_buf req = { 0, 0, 0 };
-  sb_puts(&req, method); sb_puts(&req, " "); sb_puts(&req, path); sb_puts(&req, " HTTP/1.1\r\n");
-  sb_puts(&req, "Host: "); sb_puts(&req, host); sb_puts(&req, "\r\n");
-  sb_puts(&req, "Connection: close\r\n");
-  sb_puts(&req, "Accept-Encoding: identity\r\n");
-  if (headers && *headers) sb_puts(&req, headers);
+  sb_puts(req, method); sb_puts(req, " "); sb_puts(req, path); sb_puts(req, " HTTP/1.1\r\n");
+  sb_puts(req, "Host: "); sb_puts(req, host); sb_puts(req, "\r\n");
+  sb_puts(req, "Connection: close\r\n");
+  sb_puts(req, "Accept-Encoding: identity\r\n");
+  if (headers && *headers) sb_puts(req, headers);
   size_t blen = body ? strlen(body) : 0;
   if (blen) {
     char cl[64];
     int k = snprintf(cl, sizeof(cl), "Content-Length: %zu\r\n", blen);
-    sb_put(&req, cl, (size_t)k);
+    sb_put(req, cl, (size_t)k);
   }
-  sb_puts(&req, "\r\n");
-  if (blen) sb_put(&req, body, blen);
+  sb_puts(req, "\r\n");
+  if (blen) sb_put(req, body, blen);
+}
 
-  size_t sent = 0;
-  while (sent < req.len) {
-    long n = write(fd, req.p + sent, req.len - sent);
-    if (n <= 0) { if (n < 0 && errno == EINTR) continue; break; }
-    sent += (size_t)n;
-  }
-  free(req.p);
-
-  sb_buf raw = { 0, 0, 0 };
-  char chunk[8192];
-  while (1) {
-    long n = read(fd, chunk, sizeof(chunk));
-    if (n > 0) { sb_put(&raw, chunk, (size_t)n); continue; }
-    if (n < 0 && errno == EINTR) continue;
-    break;
-  }
-  close(fd);
-
-  const char* head_end = raw.p ? strstr(raw.p, "\r\n\r\n") : 0;
+// Turn a whole raw response into the reply frame. Returns malloc'd JSON.
+static char* sb_parse_response(sb_buf* raw) {
+  sb_buf out = { 0, 0, 0 };
+  const char* head_end = raw->p ? strstr(raw->p, "\r\n\r\n") : 0;
   if (!head_end) {
-    free(raw.p);
     sb_puts(&out, "{\"ok\":false,\"error\":\"malformed response\"}");
     return out.p;
   }
   int status = 0;
   {
-    const char* sp = strchr(raw.p, ' ');
+    const char* sp = strchr(raw->p, ' ');
     if (sp) status = atoi(sp + 1);
   }
 
-  // Headers, and whether the body is chunked.
   int chunked = 0;
+  long content_length = -1;
   sb_buf hdrs = { 0, 0, 0 };
   sb_puts(&hdrs, "[");
   {
-    const char* line = strstr(raw.p, "\r\n");
+    const char* line = strstr(raw->p, "\r\n");
     int first = 1;
     while (line && line + 2 < head_end) {
       line += 2;
@@ -357,15 +333,17 @@ static char* sb_http_request(const char* host, int port, const char* path, const
       if (colon) {
         const char* vs = colon + 1;
         while (vs < eol && (*vs == ' ' || *vs == 9)) vs++;
+        size_t klen = (size_t)(colon - line);
         if (!first) sb_puts(&hdrs, ",");
         first = 0;
         sb_puts(&hdrs, "[");
-        sb_putjson(&hdrs, line, (size_t)(colon - line));
+        sb_putjson(&hdrs, line, klen);
         sb_puts(&hdrs, ",");
         sb_putjson(&hdrs, vs, (size_t)(eol - vs));
         sb_puts(&hdrs, "]");
-        if ((size_t)(colon - line) == 17 && strncasecmp(line, "transfer-encoding", 17) == 0 &&
-            strncasecmp(vs, "chunked", 7) == 0) chunked = 1;
+        if (klen == 17 && strncasecmp(line, "transfer-encoding", 17) == 0 && strncasecmp(vs, "chunked", 7) == 0)
+          chunked = 1;
+        if (klen == 14 && strncasecmp(line, "content-length", 14) == 0) content_length = atol(vs);
       }
       line = eol;
     }
@@ -373,7 +351,7 @@ static char* sb_http_request(const char* host, int port, const char* path, const
   sb_puts(&hdrs, "]");
 
   const char* bodyp = head_end + 4;
-  size_t bodylen = raw.len - (size_t)(bodyp - raw.p);
+  size_t bodylen = raw->len - (size_t)(bodyp - raw->p);
 
   sb_buf decoded = { 0, 0, 0 };
   if (chunked) {
@@ -394,8 +372,9 @@ static char* sb_http_request(const char* host, int port, const char* path, const
     bodylen = decoded.len;
   }
 
-  char head[64];
-  int k = snprintf(head, sizeof(head), "{\"ok\":true,\"status\":%d,\"headers\":", status);
+  char head[96];
+  int k = snprintf(head, sizeof(head), "{\"ok\":true,\"status\":%d,\"complete\":%d,\"headers\":",
+                   status, (content_length < 0 || (long)bodylen >= content_length) ? 1 : 0);
   sb_put(&out, head, (size_t)k);
   sb_put(&out, hdrs.p, hdrs.len);
   sb_puts(&out, ",\"body\":");
@@ -403,8 +382,140 @@ static char* sb_http_request(const char* host, int port, const char* path, const
   sb_puts(&out, "}");
   free(hdrs.p);
   free(decoded.p);
-  free(raw.p);
   return out.p;
+}
+
+static char* sb_error_json(const char* prefix, const char* detail) {
+  sb_buf out = { 0, 0, 0 };
+  sb_puts(&out, "{\"ok\":false,\"error\":");
+  sb_buf msg = { 0, 0, 0 };
+  sb_puts(&msg, prefix);
+  if (detail) { sb_puts(&msg, detail); }
+  sb_putjson(&out, msg.p ? msg.p : "", msg.len);
+  sb_puts(&out, "}");
+  free(msg.p);
+  return out.p;
+}
+
+static char* sb_http_plain(const char* host, int port, const char* path, const char* method,
+                           const char* headers, const char* body) {
+  int fd = sb_tcp_connect(host, port);
+  if (fd < 0) return sb_error_json("could not connect to ", host);
+
+  sb_buf req = { 0, 0, 0 };
+  sb_build_request(&req, host, path, method, headers, body);
+  size_t sent = 0;
+  while (sent < req.len) {
+    long n = write(fd, req.p + sent, req.len - sent);
+    if (n <= 0) { if (n < 0 && errno == EINTR) continue; break; }
+    sent += (size_t)n;
+  }
+  free(req.p);
+
+  sb_buf raw = { 0, 0, 0 };
+  char chunk[8192];
+  while (1) {
+    long n = read(fd, chunk, sizeof(chunk));
+    if (n > 0) { sb_put(&raw, chunk, (size_t)n); continue; }
+    if (n < 0 && errno == EINTR) continue;
+    break;
+  }
+  close(fd);
+  char* out = sb_parse_response(&raw);
+  free(raw.p);
+  return out;
+}
+
+// --- TLS ---------------------------------------------------------------------
+// Trust anchors come from src/bearssl.ts: the Mozilla root set, compiled in.
+extern const br_x509_trust_anchor sb_trust_anchors[];
+extern const size_t sb_trust_anchor_count;
+
+static int sb_sock_read(void* ctx, unsigned char* buf, size_t len) {
+  for (;;) {
+    ssize_t n = read(*(int*)ctx, buf, len);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) return -1;
+    return (int)n;
+  }
+}
+static int sb_sock_write(void* ctx, const unsigned char* buf, size_t len) {
+  for (;;) {
+    ssize_t n = write(*(int*)ctx, buf, len);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) return -1;
+    return (int)n;
+  }
+}
+
+static char* sb_https(const char* host, int port, const char* path, const char* method,
+                      const char* headers, const char* body) {
+  int fd = sb_tcp_connect(host, port);
+  if (fd < 0) return sb_error_json("could not connect to ", host);
+
+  br_ssl_client_context* sc = (br_ssl_client_context*)malloc(sizeof(br_ssl_client_context));
+  br_x509_minimal_context* xc = (br_x509_minimal_context*)malloc(sizeof(br_x509_minimal_context));
+  unsigned char* iobuf = (unsigned char*)malloc(BR_SSL_BUFSIZE_BIDI);
+  if (!sc || !xc || !iobuf) {
+    free(sc); free(xc); free(iobuf); close(fd);
+    return sb_error_json("out of memory setting up TLS for ", host);
+  }
+  br_sslio_context ioc;
+  br_ssl_client_init_full(sc, xc, sb_trust_anchors, sb_trust_anchor_count);
+  br_ssl_engine_set_buffer(&sc->eng, iobuf, BR_SSL_BUFSIZE_BIDI, 1);
+  br_ssl_client_reset(sc, host, 0);
+  br_sslio_init(&ioc, &sc->eng, sb_sock_read, &fd, sb_sock_write, &fd);
+
+  sb_buf req = { 0, 0, 0 };
+  sb_build_request(&req, host, path, method, headers, body);
+  int wrote = br_sslio_write_all(&ioc, req.p, req.len);
+  free(req.p);
+  if (wrote != 0) {
+    char detail[96];
+    snprintf(detail, sizeof(detail), "%s (tls error %d)", host, br_ssl_engine_last_error(&sc->eng));
+    free(sc); free(xc); free(iobuf); close(fd);
+    return sb_error_json("TLS handshake failed for ", detail);
+  }
+  br_sslio_flush(&ioc);
+
+  sb_buf raw = { 0, 0, 0 };
+  char chunk[8192];
+  int rc;
+  while ((rc = br_sslio_read(&ioc, chunk, sizeof(chunk))) > 0) sb_put(&raw, chunk, (size_t)rc);
+  int err = br_ssl_engine_last_error(&sc->eng);
+  free(sc); free(xc); free(iobuf);
+  close(fd);
+
+  // BR_ERR_IO here means the peer closed without close_notify, which is what
+  // most servers do on Connection: close. It is indistinguishable from a
+  // truncation attack on its own, so the reply carries "complete" (whether the
+  // body satisfied Content-Length) and the JS side decides.
+  char* out = sb_parse_response(&raw);
+  free(raw.p);
+  if (err != 0 && err != BR_ERR_IO) {
+    free(out);
+    char detail[64];
+    snprintf(detail, sizeof(detail), "tls error %d", err);
+    return sb_error_json("", detail);
+  }
+  if (err == BR_ERR_IO) {
+    // Mark it so JS can refuse a body that was cut short.
+    char* marked = (char*)malloc(strlen(out) + 32);
+    if (marked) {
+      size_t n = strlen(out);
+      memcpy(marked, out, n - 1);
+      memcpy(marked + n - 1, ",\"unclean\":true}", 17);
+      free(out);
+      return marked;
+    }
+  }
+  return out;
+}
+
+static char* sb_http_request(const char* host, int port, const char* path, const char* method,
+                             const char* headers, const char* body, int tls) {
+  return tls ? sb_https(host, port, path, method, headers, body)
+             : sb_http_plain(host, port, path, method, headers, body);
 }
 `;
 
@@ -434,10 +545,11 @@ function __sbSqlScriptRaw(path, sql) {
   return res;
 }
 
-// Outbound HTTP. Six string params so C can read each directly; the JS side has
-// already split the URL and enforced the allowlist.
+// Outbound HTTP. String params so C can read each directly; the JS side has
+// already split the URL and enforced the allowlist. `tlsFlag` is "1" or "0" —
+// a string like the rest, so the marshalling stays uniform.
 // oxlint-disable-next-line no-unused-vars -- read inside the RawC block below, not by JS.
-function __sbHttpRaw(host, portStr, path, method, headersText, body) {
+function __sbHttpRaw(host, portStr, path, method, headersText, body, tlsFlag) {
   let res = "";
   // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
   Porffor.c`
@@ -472,7 +584,12 @@ function __sbHttpRaw(host, portStr, path, method, headersText, body) {
     char* __body = (char*)malloc(__bl + 1); memcpy(__body, __b, __bl); __body[__bl] = 0;
     if (__bo) free(__bo);
 
-    char* __out = sb_http_request(__host, atoi(__portbuf), __path, __method, __hdrs, __body);
+    const char* __t; size_t __tl; char* __to = 0;
+    porf_native_fetch_read_value(tlsFlag, &__t, &__tl, &__to);
+    int __tls = (__tl > 0 && __t[0] == '1') ? 1 : 0;
+    if (__to) free(__to);
+
+    char* __out = sb_http_request(__host, atoi(__portbuf), __path, __method, __hdrs, __body, __tls);
     free(__host); free(__path); free(__method); free(__hdrs); free(__body);
     if (__out) {
       res = porf_box((f64)porf_native_fetch_alloc_bytestring(__out, strlen(__out)), 195);
@@ -669,13 +786,8 @@ function __sbEmbeddedDispatch(msg) {
 
   if (op === "fetch") {
     const url = new URL(String(msg.url));
-    if (url.protocol === "https:") {
-      // Honest failure rather than a silent one: TLS is a certificate store and
-      // a crypto stack, which is not in this binary. http:// works, which covers
-      // a service on the LAN, on localhost, or behind a local proxy.
-      throw new Error("https is not available in a standalone binary yet; use http:// or route through a local proxy");
-    }
-    if (url.protocol !== "http:") throw new Error("unsupported protocol: " + url.protocol);
+    const tls = url.protocol === "https:";
+    if (!tls && url.protocol !== "http:") throw new Error("unsupported protocol: " + url.protocol);
     const allow = bindingsOutbound();
     if (allow.indexOf(url.host) === -1) throw new Error("host not in outbound allowlist: " + url.host);
     let headerText = "";
@@ -686,7 +798,7 @@ function __sbEmbeddedDispatch(msg) {
       if (key === "host" || key === "connection" || key === "content-length") continue;
       headerText += pairs[i][0] + ": " + pairs[i][1] + "\r\n";
     }
-    const port = url.port ? url.port : "80";
+    const port = url.port ? url.port : tls ? "443" : "80";
     const reply = JSON.parse(
       __sbHttpRaw(
         url.hostname,
@@ -695,9 +807,16 @@ function __sbEmbeddedDispatch(msg) {
         String(msg.method || "GET").toUpperCase(),
         headerText,
         msg.body == null ? "" : String(msg.body),
+        tls ? "1" : "0",
       ),
     );
     if (reply.ok === false) throw new Error(reply.error);
+    // A TLS peer that closed without close_notify is normal on Connection:
+    // close, and also what a truncation attack looks like. Accept it only when
+    // Content-Length says the body arrived whole.
+    if (reply.unclean && !reply.complete) {
+      throw new Error("connection closed before the response was complete");
+    }
     return { ok: true, status: reply.status, headers: reply.headers, body: reply.body };
   }
 

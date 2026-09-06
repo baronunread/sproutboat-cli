@@ -5,7 +5,7 @@ bindings. No control plane, no edge, no Bun on the target: copy the file to a
 machine and run it.
 
 ```sh
-sproutboat build --standalone            # ~2 MB, SQLite compiled in
+sproutboat build --standalone            # ~2 MB: SQLite and TLS compiled in
 PORT=3000 ./dist/hello                   # serves on $PORT (default 8080)
 ```
 
@@ -51,9 +51,10 @@ something.
 
 ## What differs from a deployed sprout
 
-- **Outbound `fetch()` speaks `http://` only.** TLS
-  needs a certificate store plus a crypto stack; an https call says so instead
-  of failing obscurely.
+- **Outbound `fetch()` speaks `http://` only.** TLS needs a certificate store
+  plus a crypto stack; an https call says so instead of failing obscurely. See
+  "Talking to https services" below — a local proxy covers this, which is why
+  a TLS stack in the binary is not on the roadmap.
 - **Service bindings do not exist.** They call another deployment through an
   edge, which a standalone binary lacks.
 - **Triggers stay internal.** Cron ticks, queue batches and DO alarms run on
@@ -63,6 +64,38 @@ something.
   `scheduled()`.
 - **Assets compile in**, capped at 8 MB. Past that, serve them from R2 or put a
   web server in front.
+
+## TLS, in both directions
+
+**Inbound is not this binary's job.** It serves plain HTTP on `$PORT`; put
+Caddy, nginx or a tunnel in front and let that terminate. celld draws the same
+line — it does not terminate TLS either.
+
+```caddyfile
+notes.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+**Outbound happens in the binary.** `fetch("https://...")` verifies the
+server against curl's Mozilla-derived root set, compiled in via BearSSL. That
+follows workerd (BoringSSL under KJ) and celld (a bundled Mozilla root store):
+a runtime that lets handlers call the internet needs its own TLS client, and a
+proxy in front of the app does nothing for requests the app makes.
+
+Routing egress through a local proxy would work, but it would change the URL a
+handler writes — `http://127.0.0.1:9001/v1/charges` instead of
+`https://api.stripe.com/v1/charges` — and "the same handler source deploys to
+the edge unchanged" is the point of a standalone build.
+
+Two behaviours worth knowing:
+
+- `SB_CA_BUNDLE` points at a different PEM bundle, for a private or corporate
+  CA. It adds trust; nothing disables verification.
+- A server that closes without `close_notify` is normal on `Connection: close`,
+  and BearSSL reports it as an I/O error. The binary accepts that case only when
+  `Content-Length` says the body arrived whole; otherwise it fails the call
+  instead of handing a handler a truncated response.
 
 ## Checking a build
 

@@ -50,8 +50,10 @@ export type CompileInput = {
   appName?: string;
   /** #15 — assets baked into the module (embedded builds have no files on disk). */
   assets?: { manifest: unknown; files: Record<string, string> };
-  /** #15 — objects to add to the native-fetch link line (the SQLite amalgamation). */
+  /** #15 — objects to add to the native-fetch link line (SQLite, BearSSL). */
   extraLink?: string[];
+  /** #15 — flags for the compile step, so inline C can include BearSSL's header. */
+  extraCflags?: string[];
   /** Cross-compiler for `linux-x86_64`. Not needed, and not used, for `host`. */
   zigBin?: string;
   /**
@@ -80,9 +82,10 @@ export async function loadPrelude(transport: Transport = "broker"): Promise<stri
 
 /** Child env for the Porffor run. `SB_EXTRA_LINK` is read by the patched link
  *  step (#15) and is absent entirely for a normal build. */
-function compileEnv(path: string, extraLink?: string[]) {
+function compileEnv(path: string, extraLink?: string[], extraCflags?: string[]) {
   const link = extraLink && extraLink.length > 0 ? extraLink.join(" ") : undefined;
-  return { ...process.env, PATH: path, SB_EXTRA_LINK: link };
+  const cflags = extraCflags && extraCflags.length > 0 ? extraCflags.join(" ") : undefined;
+  return { ...process.env, PATH: path, SB_EXTRA_LINK: link, SB_EXTRA_CFLAGS: cflags };
 }
 
 /** Compile `sourcePath` to a native binary at `outPath` (mode 0555). */
@@ -158,7 +161,7 @@ export async function compileSprout(input: CompileInput): Promise<void> {
       cwd: outDir,
       stdout: "pipe",
       stderr: "pipe",
-      env: compileEnv(path, input.extraLink),
+      env: compileEnv(path, input.extraLink, input.extraCflags),
     },
   );
   let timedOut = false;
