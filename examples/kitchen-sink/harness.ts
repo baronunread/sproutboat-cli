@@ -71,6 +71,7 @@ const bindings: Bindings = {
   queues: c.queues ?? [],
   analytics: c.analytics_engine_datasets ?? [],
   do: Object.entries(c.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
+  services: c.services ?? [],
   crons: c.triggers?.crons ?? [],
   assets: c.assets?.binding ?? "",
 };
@@ -117,6 +118,15 @@ const broker = createBroker({
   secrets: { ADMIN_TOKEN: "s3cr3t-admin" },
   sproutUrl: `http://127.0.0.1:${sproutPort}/`,
   assetsDir,
+  // #48 — on a node the control plane resolves a service name to a hostname and
+  // the edge routes it. There is no edge here, so point the broker at the
+  // sprout directly: the path under test is shim -> broker -> Host header.
+  // A service binding must reach a *different* deployment: one sprout serves
+  // one turn at a time, so pointing it at this app would deadlock. The stub
+  // upstream stands in for the peer; the path under test is the same
+  // shim -> broker -> Host exchange either way.
+  services: { PEER: "quote-service.local" },
+  edgeUrl: `http://${upstreamHost}/`,
 });
 const brokerServer = listen(broker, "127.0.0.1", 0);
 cleanup.push(() => {

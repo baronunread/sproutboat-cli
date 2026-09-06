@@ -50,6 +50,10 @@ const upstream = Bun.serve({ port: 0, fetch: () => Response.json(QUOTES[0]) });
 cleanup.push(() => upstream.stop(true));
 const upstreamHost = `127.0.0.1:${upstream.port}`;
 config.outbound = [upstreamHost];
+// #48 — service bindings need an edge, which a standalone binary has none of;
+// buildStandalone refuses them outright. Drop them here rather than keep a
+// second example: the deployed path is covered by harness.ts.
+delete config.services;
 config.vars = { ...config.vars, QUOTE_URL: `http://${upstreamHost}/random` };
 
 buildWebUi();
@@ -98,7 +102,7 @@ if (!up) die(`standalone binary never listened on ${port}:\n${await new Response
 console.log("bindings (standalone):");
 // The binary drives its own cron and queue timers and refuses external
 // triggers, so the suite's HTTP-delivered ones do not apply here.
-await runConformance(base, TOKEN, check, { skipTriggers: true });
+await runConformance(base, TOKEN, check, { skipTriggers: true, skipServices: true });
 
 console.log(`\n${passed} checks passed — same suite as harness.ts, one binary.`);
 for (const c of cleanup.reverse())

@@ -32,6 +32,11 @@ export type ConformanceOptions = {
    * way.
    */
   skipTriggers?: boolean;
+  /**
+   * Skip the service-binding check. A standalone binary has no edge to route a
+   * worker-to-worker call through, so the build refuses the binding outright.
+   */
+  skipServices?: boolean;
 };
 
 export async function runConformance(
@@ -138,6 +143,17 @@ export async function runConformance(
     Number(obj(allowed.body).analytics_points) > 0 && Array.isArray(obj(allowed.body).analytics_recent),
     allowed.body,
   );
+
+  // service binding (#48): env.PEER.fetch() reaches a second deployment through
+  // the edge, so a 200 here means the shim -> broker -> Host path works.
+  if (!options.skipServices) {
+    const peer = await jget("/peer");
+    check(
+      "service binding: env.PEER.fetch reaches another deployment",
+      peer.status === 200 && Number(obj(peer.body).status) === 200 && String(obj(peer.body).body).includes("author"),
+      peer.body,
+    );
+  }
 
   // DO alarms (#125): viewing a note debounces an alarm a second out, whose
   // handler rolls the count up into D1. Poll, because the whole point is that

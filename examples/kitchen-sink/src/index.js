@@ -171,6 +171,15 @@ export default {
       });
     }
 
+    // GET /peer -> env.PEER.fetch(): a service binding calling another
+    // deployment through the edge (#48). Standalone binaries have no edge, so
+    // the binding is absent there and this route says so.
+    if (path === "/peer") {
+      if (!env.PEER) return json({ error: "no service binding in this build" }, 501);
+      const res = env.PEER.fetch(new Request("https://peer/random"));
+      return json({ status: res.status, body: res.text ? res.text() : "" });
+    }
+
     // GET /async -> the one promise-returning route. Everything else here is
     // sync (http-sync-v0), but a handler may return a promise and the prelude
     // has to hand it straight back — Porffor's server resolves the handler's
