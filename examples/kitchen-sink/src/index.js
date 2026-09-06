@@ -122,7 +122,7 @@ export default {
       // default) before this handler runs, so raising the demo's own guard only
       // helps when that variable is raised too. Whole-object R2 either way:
       // chunked put and streaming get are baronunread/sproutboat#56.
-      const cap = Number(env.MAX_UPLOAD_BYTES) || 900 * 1024;
+      const cap = Number(env.MAX_UPLOAD_BYTES) || 64 * 1024;
       if (body.length > cap)
         return json({ error: "file too large — this build accepts " + Math.floor(cap / 1024) + " KB" }, 413);
       const key = "note-" + id + "-" + Date.now() + ".txt";

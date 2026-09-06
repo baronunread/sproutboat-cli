@@ -114,7 +114,10 @@ async function openNote(li: HTMLElement, id: number): Promise<void> {
   li.append(d);
 }
 
-const MAX_UPLOAD = 900 * 1024; // native-fetch server caps an inbound body at 1 MiB (issue #56)
+// Small on purpose. The runtime refuses an inbound body over 1 MiB, and an R2
+// object costs about 4x its size in a standalone binary and 23x through a
+// broker, so the demo stays well clear of both (issue #56).
+const MAX_UPLOAD = 64 * 1024;
 
 const newNoteForm = $<HTMLFormElement>("#new-note");
 newNoteForm.addEventListener("submit", async (ev) => {
@@ -126,7 +129,10 @@ newNoteForm.addEventListener("submit", async (ev) => {
   const fileInput = $<HTMLInputElement>("#new-file");
   const file = fileInput.files?.[0];
   if (file && file.size > MAX_UPLOAD) {
-    err.textContent = `file is ${(file.size / 1024).toFixed(0)} KB — the demo caps R2 uploads at ~900 KB (large-object R2 is tracked in issue #56)`;
+    err.textContent =
+      `file is ${(file.size / 1024).toFixed(0)} KB — this demo accepts ${(MAX_UPLOAD / 1024).toFixed(0)} KB. ` +
+      "An R2 object is held whole in memory: about 4× its size in a standalone binary and 23× through a broker " +
+      "(measured, see issue #56), so the demo keeps objects small on purpose.";
     return;
   }
   try {

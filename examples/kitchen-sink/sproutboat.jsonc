@@ -8,9 +8,10 @@
   "vars": {
     "SITE_NAME": "Sproutboat Notes",
     "QUOTE_URL": "https://api.quotable.local/random",
-    // Kept in step with SB_REQUEST_BODY_MAX at run time; the runtime refuses a
-    // larger body before the handler sees it.
-    "MAX_UPLOAD_BYTES": "8388608",
+    // Deliberately small: an R2 object is held whole in memory, about 4x its
+    // size standalone and 23x through a broker (#56). The runtime also refuses
+    // an inbound body over SB_REQUEST_BODY_MAX, 1 MiB by default.
+    "MAX_UPLOAD_BYTES": "65536",
   },
   "secrets": ["ADMIN_TOKEN"],
   "kv_namespaces": ["SESSIONS"],
