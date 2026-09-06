@@ -10,6 +10,25 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-06
+### Added
+- `compatibility_date` now reaches the artifact instead of being validated and
+  dropped. It is recorded in `manifest.json` as `compatibilityDate` and baked
+  into the binary as `__sbCompat`, so a future runtime change can be gated on
+  `__sbCompat >= "YYYY-MM-DD"` and old binaries keep the semantics they were
+  compiled with. The manifest field is optional and `schemaVersion` stays at 2,
+  so artifacts built before this release remain deployable and rollback keeps
+  working.
+- A version-skew warning. Control planes advertise `x-sproutboat-control` and
+  `x-sproutboat-min-cli` on every `/api/` response; when this CLI is below the
+  advertised minimum it says so once per run, instead of leaving the user with
+  an unexplained 400. A control plane that predates the handshake sends no
+  headers and nothing changes.
+- `CONTRACTS.md`, generated from source in the same style as `SURFACE.md`: the
+  broker ops, storage tables, manifest fields and config keys that a release may
+  not break, plus golden fixtures for the manifest and the storage format so a
+  regression fails a test rather than a user's deployment.
+
 ## [0.6.1] — 2026-09-06
 ### Fixed
 - `sproutboat queues` help (and the generated `SURFACE.md`) claimed queue
