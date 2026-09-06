@@ -103,7 +103,8 @@ type D1Result = {
 };
 type R2Row = {
   key: string;
-  body: string;
+  /** TEXT from a v0 write, BLOB from a v1 one; sqlite hands each back as-is. */
+  body: string | Uint8Array;
   size: number;
   etag: string;
   uploaded: string;
@@ -127,8 +128,42 @@ export type Broker = {
   dispatch(msg: Frame): Promise<Frame>;
   /** Verify the token line and dispatch a raw "<token>\n<json>" payload. */
   handlePayload(payload: string): Promise<Frame>;
+  /**
+   * #63 — one wire frame in, one out, binary included.
+   *
+   * v0 payloads are `"<token>\n<json>"` and stay exactly as they were: a
+   * deployment built before this existed keeps working against a newer broker.
+   * v1 starts with a 0x01 marker and carries `[u32 LE json length][json][bytes]`,
+   * so an object body never has to be escaped into the JSON. A token's first
+   * character is never 0x01, which is what makes the two tellable apart without
+   * negotiation.
+   */
+  handleFrame(payload: Buffer): Promise<Buffer>;
   close(): void;
 };
+
+/** First byte of a v1 payload. */
+export const FRAME_V1 = 1;
+
+/** Wrap a payload in the [u32 LE length] header every frame carries. */
+export function frameOf(payload: Buffer): Buffer {
+  const out = Buffer.allocUnsafe(4 + payload.length);
+  out.writeUInt32LE(payload.length, 0);
+  payload.copy(out, 4);
+  return out;
+}
+
+/** Build a v1 payload: marker, json length, json, then the bytes. */
+export function encodeV1(json: Frame, binary?: Uint8Array): Buffer {
+  const body = Buffer.from(JSON.stringify(json), "utf8");
+  const bin = binary ?? new Uint8Array(0);
+  const out = Buffer.allocUnsafe(1 + 4 + body.length + bin.length);
+  out.writeUInt8(FRAME_V1, 0);
+  out.writeUInt32LE(body.length, 1);
+  body.copy(out, 5);
+  if (bin.length) Buffer.from(bin.buffer, bin.byteOffset, bin.length).copy(out, 5 + body.length);
+  return out;
+}
 
 export function createBroker(opts: BrokerOptions = {}): Broker {
   const bindings: Bindings = {
@@ -328,6 +363,16 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       },
     };
   };
+
+  /** An object body as bytes, whichever storage class it came back in. */
+  const r2Bytes = (body: string | Uint8Array): Uint8Array =>
+    body instanceof Uint8Array ? body : new TextEncoder().encode(body);
+
+  /** An object body as text, for the v0 reply shape that carries it in JSON.
+   *  A binary object stored by a v1 client cannot survive this, which is why
+   *  v1 exists — but returning a decoded string beats returning `{"0":...}`. */
+  const r2Text = (body: string | Uint8Array): string =>
+    body instanceof Uint8Array ? new TextDecoder().decode(body) : body;
 
   const r2Row = (r: R2Row) => ({
     key: r.key,
@@ -529,7 +574,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
           .query<R2Row, [string, string]>("SELECT * FROM r2 WHERE bucket = ? AND key = ?")
           .get(bucket, str(msg.key));
         if (!row) return { ok: true, found: false };
-        return { ok: true, found: true, object: r2Row(row), body: msg.op === "r2.get" ? row.body : undefined };
+        return { ok: true, found: true, object: r2Row(row), body: msg.op === "r2.get" ? r2Text(row.body) : undefined };
       }
       case "r2.delete": {
         const { store, part: bucket } = storeFor("r2", requireR2(msg.bucket));
@@ -687,6 +732,67 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     }
   }
 
+  /**
+   * #63 — the ops that carry bytes rather than escaping them into the frame.
+   * Everything else goes through `dispatch` untouched.
+   */
+  async function dispatchBinary(msg: Frame, binary: Uint8Array): Promise<{ reply: Frame; bytes?: Uint8Array }> {
+    if (msg.op === "r2.put") {
+      // The body arrived as bytes; store it as a blob rather than a string, so
+      // a put costs one copy instead of an escape, a parse and a re-encode.
+      const { store, part: bucket } = storeFor("r2", requireR2(msg.bucket));
+      const etag = createHash("sha256").update(binary).digest("hex");
+      const uploaded = new Date().toISOString();
+      store
+        .query(
+          "INSERT INTO r2 (bucket, key, body, size, etag, uploaded, http_json, custom_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) " +
+            "ON CONFLICT (bucket, key) DO UPDATE SET body=?3, size=?4, etag=?5, uploaded=?6, http_json=?7, custom_json=?8",
+        )
+        .run(
+          bucket,
+          str(msg.key),
+          binary,
+          binary.byteLength,
+          etag,
+          uploaded,
+          JSON.stringify(msg.httpMetadata ?? {}),
+          JSON.stringify(msg.customMetadata ?? {}),
+        );
+      return {
+        reply: { ok: true, object: { key: str(msg.key), size: binary.byteLength, etag, uploaded } },
+      };
+    }
+
+    if (msg.op === "r2.get") {
+      const { store, part: bucket } = storeFor("r2", requireR2(msg.bucket));
+      const row = store
+        .query<R2Row, [string, string]>("SELECT * FROM r2 WHERE bucket = ? AND key = ?")
+        .get(bucket, str(msg.key));
+      if (!row) return { reply: { ok: true, found: false } };
+      return { reply: { ok: true, found: true, object: r2Row(row) }, bytes: r2Bytes(row.body) };
+    }
+
+    return { reply: await dispatch(msg) };
+  }
+
+  /** One wire frame in, one out. See `handleFrame` on the Broker type. */
+  async function handleFrame(payload: Buffer): Promise<Buffer> {
+    if (payload.length === 0 || payload[0] !== FRAME_V1) {
+      return encodeFrame(await handlePayload(payload.toString("utf8")));
+    }
+    try {
+      const jsonLen = payload.readUInt32LE(1);
+      const msg = jsonObject(parseJsonValue(payload.subarray(5, 5 + jsonLen).toString("utf8")));
+      if (!msg) throw new Error("request frame was not a JSON object");
+      if (token && str(msg.token) !== token) return frameOf(encodeV1({ ok: false, error: "unauthorized" }));
+      const binary = new Uint8Array(payload.subarray(5 + jsonLen));
+      const { reply, bytes } = await dispatchBinary(msg, binary);
+      return frameOf(encodeV1(reply, bytes));
+    } catch (e) {
+      return frameOf(encodeV1({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+
   async function handlePayload(payload: string): Promise<Frame> {
     const nl = payload.indexOf("\n");
     const gotToken = nl === -1 ? "" : payload.slice(0, nl);
@@ -827,6 +933,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   return {
     dispatch,
     handlePayload,
+    handleFrame,
     close: () => {
       for (const t of timers) clearInterval(t);
       for (const conn of d1Conns.values()) conn.close();
@@ -875,28 +982,41 @@ export type BrokerServer = { port: number; stop(): void };
 
 /** Start the TCP listener. Returns the bound port. */
 export function listen(broker: Broker, hostname: string, port: number): BrokerServer {
-  const server = Bun.listen<{ buf: Buffer }>({
+  // Chunks are held in a list and joined once, when a whole frame has arrived.
+  // Concatenating on every chunk copies the accumulated buffer each time, which
+  // is quadratic in the body size: an 8 MB object arriving in 64 KB pieces
+  // copied hundreds of megabytes before anything was parsed.
+  const server = Bun.listen<{ chunks: Buffer[]; size: number }>({
     hostname,
     port,
     socket: {
       open(socket) {
-        socket.data = { buf: Buffer.alloc(0) };
+        socket.data = { chunks: [], size: 0 };
       },
       async data(socket, chunk) {
         const state = socket.data;
-        state.buf = state.buf.length ? Buffer.concat([state.buf, chunk]) : chunk;
+        state.chunks.push(chunk);
+        state.size += chunk.length;
         for (;;) {
-          if (state.buf.length < 4) return;
-          const len = state.buf.readUInt32LE(0);
+          if (state.size < 4) return;
+          if (state.chunks.length > 1) {
+            state.chunks = [Buffer.concat(state.chunks, state.size)];
+          }
+          const buf = state.chunks[0];
+          const len = buf.readUInt32LE(0);
           if (len > MAX_FRAME) {
             socket.write(encodeFrame({ ok: false, error: "frame too large" }));
             socket.end();
             return;
           }
-          if (state.buf.length < 4 + len) return;
-          const payload = Buffer.from(state.buf.subarray(4, 4 + len)).toString("utf8");
-          state.buf = Buffer.from(state.buf.subarray(4 + len));
-          socket.write(encodeFrame(await broker.handlePayload(payload)));
+          if (state.size < 4 + len) return;
+          // Kept as bytes: a v1 frame carries binary after its JSON, and
+          // decoding the whole payload as utf8 would corrupt it.
+          const payload = buf.subarray(4, 4 + len);
+          const rest = buf.subarray(4 + len);
+          state.chunks = rest.length ? [Buffer.from(rest)] : [];
+          state.size = rest.length;
+          socket.write(await broker.handleFrame(payload));
         }
       },
     },

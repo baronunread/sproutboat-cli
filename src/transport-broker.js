@@ -57,21 +57,18 @@ static int sb_broker_connect(void) {
 }
 
 // Send one framed request, read one framed reply, on the persistent fd.
-static int sb_broker_exchange(const char* req, size_t req_len, char** resp_out, size_t* resp_len_out) {
-  const char* tok = getenv("SB_BROKER_TOKEN");
-  size_t tok_len = tok ? strlen(tok) : 0;
-
-  // frame body: token "\n" json
-  size_t body_len = tok_len + 1 + req_len;
+// Send one payload verbatim and read one reply. The caller owns the payload's
+// shape: a v0 exchange prepends the token line, a v1 one carries the token in
+// its JSON and must reach the broker byte for byte — prefixing it would leave
+// the marker in the wrong place and the frame would read as v0.
+static int sb_broker_exchange_raw(const char* body, size_t body_len, char** resp_out, size_t* resp_len_out) {
   unsigned char* frame = (unsigned char*)malloc(4 + body_len);
   if (!frame) return -5;
   frame[0] = (unsigned char)(body_len & 0xff);
   frame[1] = (unsigned char)((body_len >> 8) & 0xff);
   frame[2] = (unsigned char)((body_len >> 16) & 0xff);
   frame[3] = (unsigned char)((body_len >> 24) & 0xff);
-  if (tok_len) memcpy(frame + 4, tok, tok_len);
-  frame[4 + tok_len] = '\n';
-  if (req_len) memcpy(frame + 4 + tok_len + 1, req, req_len);
+  if (body_len) memcpy(frame + 4, body, body_len);
   int wr = sb_io_all(sb_broker_fd, frame, 4 + body_len, 1);
   free(frame);
   if (wr != 0) return -3;
@@ -87,6 +84,27 @@ static int sb_broker_exchange(const char* req, size_t req_len, char** resp_out, 
   *resp_out = buf;
   *resp_len_out = rlen;
   return 0;
+}
+
+// #63 — the binary reply from the last v1 exchange, handed to JS on request.
+// Stashed rather than returned inline so an 8 MB object body is one allocation
+// in the Porffor heap, not a substring of a bigger one.
+static char* sb_bin_reply = 0;
+static size_t sb_bin_reply_len = 0;
+
+// v0: token line, then the JSON.
+static int sb_broker_exchange(const char* req, size_t req_len, char** resp_out, size_t* resp_len_out) {
+  const char* tok = getenv("SB_BROKER_TOKEN");
+  size_t tok_len = tok ? strlen(tok) : 0;
+  size_t body_len = tok_len + 1 + req_len;
+  char* body = (char*)malloc(body_len);
+  if (!body) return -5;
+  if (tok_len) memcpy(body, tok, tok_len);
+  body[tok_len] = '\n';
+  if (req_len) memcpy(body + tok_len + 1, req, req_len);
+  int rc = sb_broker_exchange_raw(body, body_len, resp_out, resp_len_out);
+  free(body);
+  return rc;
 }
 
 static int sb_broker_roundtrip(const char* req, size_t req_len, char** resp_out, size_t* resp_len_out) {
@@ -105,6 +123,61 @@ static int sb_broker_roundtrip(const char* req, size_t req_len, char** resp_out,
     sb_broker_fd = -1;
   }
   return -3;
+}
+
+// A v1 exchange: marker, json length, json, then the body bytes. The reply is
+// split the same way, its JSON returned and its bytes stashed for __sbTakeBin.
+static int sb_broker_roundtrip_v1(const char* json, size_t json_len, const char* body, size_t body_len,
+                                  char** resp_out, size_t* resp_len_out) {
+  size_t req_len = 1 + 4 + json_len + body_len;
+  char* req = (char*)malloc(req_len);
+  if (!req) return -4;
+  req[0] = 1;
+  unsigned int jl = (unsigned int)json_len;
+  memcpy(req + 1, &jl, 4);
+  memcpy(req + 5, json, json_len);
+  if (body_len) memcpy(req + 5 + json_len, body, body_len);
+
+  char* resp = 0; size_t resp_len = 0;
+  int rc = -3;
+  for (int attempt = 0; attempt < 2; attempt++) {
+    if (sb_broker_fd < 0) {
+      int c = sb_broker_connect();
+      if (c != 0) { free(req); return c; }
+    }
+    rc = sb_broker_exchange_raw(req, req_len, &resp, &resp_len);
+    if (rc == 0) break;
+    close(sb_broker_fd);
+    sb_broker_fd = -1;
+  }
+  free(req);
+  if (rc != 0) return rc;
+
+  if (sb_bin_reply) { free(sb_bin_reply); sb_bin_reply = 0; sb_bin_reply_len = 0; }
+  if (resp_len >= 5 && (unsigned char)resp[0] == 1) {
+    unsigned int rjl = 0;
+    memcpy(&rjl, resp + 1, 4);
+    if (5 + (size_t)rjl <= resp_len) {
+      size_t bin_len = resp_len - 5 - rjl;
+      if (bin_len) {
+        sb_bin_reply = (char*)malloc(bin_len);
+        if (sb_bin_reply) { memcpy(sb_bin_reply, resp + 5 + rjl, bin_len); sb_bin_reply_len = bin_len; }
+      }
+      char* json_only = (char*)malloc(rjl + 1);
+      if (!json_only) { free(resp); return -4; }
+      memcpy(json_only, resp + 5, rjl);
+      json_only[rjl] = 0;
+      free(resp);
+      *resp_out = json_only;
+      *resp_len_out = rjl;
+      return 0;
+    }
+  }
+  // A broker that answered v0 to a v1 request predates this: pass its reply
+  // through so the error it wrote is what the handler sees.
+  *resp_out = resp;
+  *resp_len_out = resp_len;
+  return 0;
 }
 `;
 
@@ -139,16 +212,63 @@ function __sbCall(reqJson) {
  */
 globalThis.__sbStartLocalTriggers = function () {};
 
-/**
- * R2 object bodies (#56). The broker frame carries them inline, so these are
- * thin wrappers — the shim calls the same two names on either transport, and
- * only the embedded one takes the body out of the frame.
- */
+// #63 — a v1 exchange carrying a body. Returns the reply JSON; any bytes in the
+// reply wait in __sbTakeBin.
+// oxlint-disable-next-line no-unused-vars -- read inside the RawC block below, not by JS.
+function __sbCallBin(reqJson, body) {
+  let res = "";
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
+  Porffor.c`
+    const char* __j; size_t __jl; char* __jo = 0;
+    porf_native_fetch_read_value(reqJson, &__j, &__jl, &__jo);
+    const char* __b; size_t __bl; char* __bo = 0;
+    porf_native_fetch_read_value(body, &__b, &__bl, &__bo);
+    char* __resp = 0; size_t __resplen = 0;
+    int __rc = sb_broker_roundtrip_v1(__j, __jl, __b, __bl, &__resp, &__resplen);
+    if (__jo) free(__jo);
+    if (__bo) free(__bo);
+    if (__rc == 0) {
+      res = porf_box((f64)porf_native_fetch_alloc_bytestring(__resp, __resplen), 195);
+      free(__resp);
+    } else {
+      char __e[40];
+      int __n = snprintf(__e, sizeof(__e), "{\"ok\":false,\"error\":\"broker rc %d\"}", __rc);
+      res = porf_box((f64)porf_native_fetch_alloc_bytestring(__e, (size_t)__n), 195);
+    }
+  `;
+  return res;
+}
+
+/** The bytes from the last v1 reply, if it carried any. Clears the stash. */
+function __sbTakeBin() {
+  let out = "";
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
+  Porffor.c`
+    if (sb_bin_reply && sb_bin_reply_len) {
+      out = porf_box((f64)porf_native_fetch_alloc_bytestring(sb_bin_reply, sb_bin_reply_len), 195);
+    }
+    if (sb_bin_reply) { free(sb_bin_reply); sb_bin_reply = 0; sb_bin_reply_len = 0; }
+  `;
+  return out;
+}
+
+/** #63 — R2 bodies as bytes rather than escaped into the frame. */
 globalThis.__sbR2Put = function (bucket, key, body, httpMetadata, customMetadata) {
-  return __sbRpc("r2.put", { bucket, key, body, httpMetadata, customMetadata });
+  const token = __sbEnv("SB_BROKER_TOKEN");
+  const reply = JSON.parse(
+    __sbCallBin(
+      JSON.stringify({ v: 1, token, op: "r2.put", bucket, key, httpMetadata, customMetadata }),
+      body == null ? "" : String(body),
+    ),
+  );
+  if (reply.ok === false) throw new Error("sproutboat r2.put: " + (reply.error || "failed"));
+  return reply;
 };
 
 globalThis.__sbR2Get = function (bucket, key) {
-  const r = __sbRpc("r2.get", { bucket, key });
-  return r.found ? { found: true, object: r.object, body: r.body == null ? "" : r.body } : { found: false };
+  const token = __sbEnv("SB_BROKER_TOKEN");
+  const reply = JSON.parse(__sbCallBin(JSON.stringify({ v: 1, token, op: "r2.get", bucket, key }), ""));
+  if (reply.ok === false) throw new Error("sproutboat r2.get: " + (reply.error || "failed"));
+  if (!reply.found) return { found: false };
+  return { found: true, object: reply.object, body: __sbTakeBin() };
 };

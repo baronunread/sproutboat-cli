@@ -56,7 +56,11 @@ export default {
     if (p === "/r2/upload") {
       const body = request.body || "";
       const key = "u" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
-      env.UP.put(key, body);
+      try {
+        env.UP.put(key, body);
+      } catch (e) {
+        return new Response("put threw: " + (e && e.message), { status: 500 });
+      }
       return new Response("stored " + body.length);
     }
     if (p === "/r2/list") return new Response(String((env.UP.list({ prefix: "" }).objects || []).length));

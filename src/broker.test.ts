@@ -2,7 +2,17 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createBroker, cronMatches, encodeFrame, listen, type Broker, type FetchLike } from "./broker";
+import {
+  createBroker,
+  cronMatches,
+  encodeFrame,
+  encodeV1,
+  listen,
+  type Broker,
+  type Frame,
+  type FetchLike,
+} from "./broker";
+import { createHash } from "node:crypto";
 import { walkAssets, type AssetManifest } from "./assets";
 import { jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "./json";
 
@@ -496,4 +506,81 @@ test("service: a call is not subject to the outbound allowlist", async () => {
   await expect(b.dispatch({ op: "fetch", url: "https://auth-api.andrea.example.com/" })).rejects.toThrow(
     /outbound allowlist/,
   );
+});
+
+// --- v1 frames (#63) --------------------------------------------------------
+
+/** Send one v1 frame over a real socket and return the decoded reply. */
+async function v1(
+  server: { port: number },
+  json: Frame,
+  binary?: Uint8Array,
+): Promise<{ json: JsonObject; bytes: Uint8Array }> {
+  const payload = encodeV1(json, binary);
+  const frame = new Uint8Array(4 + payload.length);
+  new DataView(frame.buffer).setUint32(0, payload.length, true);
+  frame.set(payload, 4);
+  const chunks: Uint8Array[] = [];
+  const socket = await Bun.connect({
+    hostname: "127.0.0.1",
+    port: server.port,
+    socket: { data: (_s, d) => void chunks.push(new Uint8Array(d)) },
+  });
+  socket.write(frame);
+  for (let i = 0; i < 200 && chunks.length === 0; i++) await Bun.sleep(5);
+  await Bun.sleep(20);
+  socket.end();
+  const all = Buffer.concat(chunks);
+  const jsonLen = all.readUInt32LE(5);
+  return {
+    json: obj(parseJsonValue(all.subarray(9, 9 + jsonLen).toString("utf8"))),
+    bytes: new Uint8Array(all.subarray(9 + jsonLen)),
+  };
+}
+
+test("v1: an object body round-trips as bytes, not as escaped JSON", async () => {
+  const b = make({ bindings: { r2: ["UP"] }, token: "tok" });
+  const server = listen(b, "127.0.0.1", 0);
+  // Every byte value, including the ones JSON escapes and the ones that are not
+  // valid UTF-8 — the whole point of carrying them outside the JSON.
+  const body = new Uint8Array(1024);
+  for (let i = 0; i < body.length; i++) body[i] = i % 256;
+
+  const put = await v1(server, { v: 1, token: "tok", op: "r2.put", bucket: "UP", key: "k" }, body);
+  expect(put.json.ok).toBe(true);
+  expect(obj(put.json.object).size).toBe(1024);
+
+  const got = await v1(server, { v: 1, token: "tok", op: "r2.get", bucket: "UP", key: "k" });
+  expect(got.json.found).toBe(true);
+  expect(got.bytes.length).toBe(1024);
+  expect(Buffer.from(got.bytes).equals(Buffer.from(body))).toBe(true);
+  server.stop();
+});
+
+test("v1: the etag is sha256 of the bytes, matching the v0 path", async () => {
+  const b = make({ bindings: { r2: ["UP"] }, token: "tok" });
+  const server = listen(b, "127.0.0.1", 0);
+  const body = new TextEncoder().encode("the file contents");
+  const put = await v1(server, { v: 1, token: "tok", op: "r2.put", bucket: "UP", key: "k" }, body);
+  expect(obj(put.json.object).etag).toBe(createHash("sha256").update(body).digest("hex"));
+  server.stop();
+});
+
+test("v1: a wrong token is refused before the op runs", async () => {
+  const b = make({ bindings: { r2: ["UP"] }, token: "tok" });
+  const server = listen(b, "127.0.0.1", 0);
+  const reply = await v1(server, { v: 1, token: "nope", op: "r2.put", bucket: "UP", key: "k" }, new Uint8Array(4));
+  expect(reply.json.ok).toBe(false);
+  expect(reply.json.error).toBe("unauthorized");
+  server.stop();
+});
+
+test("v0 frames still work, so an older artifact keeps running", async () => {
+  // The compatibility that matters: rollback can reactivate a sprout built
+  // before v1 existed, and it will speak the token-line format forever.
+  const b = make({ bindings: { kv: ["CACHE"] }, token: "tok" });
+  const reply = await b.handleFrame(Buffer.from('tok\n{"op":"kv.put","ns":"CACHE","key":"k","value":"v"}', "utf8"));
+  const len = reply.readUInt32LE(0);
+  expect(reply[4]).not.toBe(1); // a v0 request gets a v0 reply
+  expect(obj(parseJsonValue(reply.subarray(4, 4 + len).toString("utf8"))).ok).toBe(true);
 });
