@@ -54,6 +54,9 @@ extern const char* sqlite3_errmsg(sqlite3*);
 #define SB_SQLITE_ROW 100
 #define SB_SQLITE_DONE 101
 #define SB_SQLITE_TRANSIENT ((void*)-1)
+// SQLITE_STATIC: "this buffer is yours to read and outlives the statement".
+// Worth using for an object body — the alternative is sqlite copying it.
+#define SB_SQLITE_STATIC ((void*)0)
 #define SB_MAX_DB 16
 
 static sqlite3* sb_dbs[SB_MAX_DB];
@@ -86,7 +89,15 @@ static int sb_db_for(const char* path) {
   sqlite3* db = 0;
   sb_mkdirs(path);
   if (sqlite3_open(path, &db) != 0) return -1;
-  sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", 0, 0, 0);
+  // No mmap_size on purpose: mapping the database makes every page a read
+  // touches count toward RSS, and measured on Linux that cost more than the
+  // copy it saves once the file holds a few large objects. The page cache is
+  // capped instead, and journal_size_limit stops the WAL staying huge after one
+  // big write.
+  sqlite3_exec(db,
+    "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;"
+    "PRAGMA cache_size=-2000; PRAGMA journal_size_limit=16777216;",
+    0, 0, 0);
   sb_dbs[sb_db_count] = db;
   snprintf(sb_db_names[sb_db_count], 256, "%s", path);
   return sb_db_count++;
@@ -241,7 +252,7 @@ static char* sb_r2_put_c(const char* path, const char* bucket, const char* key, 
   }
   sqlite3_bind_text(st, 1, bucket, -1, SB_SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 2, key, -1, SB_SQLITE_TRANSIENT);
-  sqlite3_bind_blob(st, 3, body, (int)bodylen, SB_SQLITE_TRANSIENT);
+  sqlite3_bind_blob(st, 3, body, (int)bodylen, SB_SQLITE_STATIC);
   sqlite3_bind_int64(st, 4, (int64_t)bodylen);
   sqlite3_bind_text(st, 5, etag, -1, SB_SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 6, uploaded, -1, SB_SQLITE_TRANSIENT);
@@ -257,29 +268,28 @@ static char* sb_r2_put_c(const char* path, const char* bucket, const char* key, 
   return out.p;
 }
 
-// Body bytes out, with their length. Caller frees *out. Returns 0 when found.
-static int sb_r2_get_c(const char* path, const char* bucket, const char* key, char** out, size_t* out_len) {
-  *out = 0; *out_len = 0;
+// Body bytes straight into a Porffor bytestring.
+//
+// The allocation happens while the statement is still open, so sqlite's own
+// buffer is the source and there is no intermediate copy: one 8 MB object means
+// one 8 MB allocation, not two. Returns the bytestring pointer, or 0.
+static u32 sb_r2_get_c(const char* path, const char* bucket, const char* key, int* found) {
+  *found = 0;
   int idx = sb_db_for(path);
-  if (idx < 0) return -1;
+  if (idx < 0) return 0;
   sqlite3_stmt* st = 0;
-  if (sqlite3_prepare_v2(sb_dbs[idx], "SELECT body FROM r2 WHERE bucket = ? AND key = ?", -1, &st, 0) != 0 || !st) return -1;
+  if (sqlite3_prepare_v2(sb_dbs[idx], "SELECT body FROM r2 WHERE bucket = ? AND key = ?", -1, &st, 0) != 0 || !st) return 0;
   sqlite3_bind_text(st, 1, bucket, -1, SB_SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 2, key, -1, SB_SQLITE_TRANSIENT);
-  int rc = sqlite3_step(st), found = -1;
-  if (rc == SB_SQLITE_ROW) {
+  u32 out = 0;
+  if (sqlite3_step(st) == SB_SQLITE_ROW) {
     int n = sqlite3_column_bytes(st, 0);
     const void* blob = sqlite3_column_blob(st, 0);
-    char* copy = (char*)malloc((size_t)n ? (size_t)n : 1);
-    if (copy) {
-      if (n) memcpy(copy, blob, (size_t)n);
-      *out = copy;
-      *out_len = (size_t)n;
-      found = 0;
-    }
+    out = porf_native_fetch_alloc_bytestring((const char*)(blob ? blob : ""), (size_t)(n > 0 ? n : 0));
+    *found = 1;
   }
   sqlite3_finalize(st);
-  return found;
+  return out;
 }
 
 // Run a script: one or more statements separated by semicolons. sqlite3_exec
@@ -826,13 +836,10 @@ function __sbR2GetRaw(path, bucket, key) {
     char* __key = (char*)malloc(__kl + 1); memcpy(__key, __k, __kl); __key[__kl] = 0;
     if (__ko) free(__ko);
 
-    char* __body = 0; size_t __blen = 0;
-    int __found = sb_r2_get_c(__path, __bucket, __key, &__body, &__blen);
+    int __found = 0;
+    u32 __bs = sb_r2_get_c(__path, __bucket, __key, &__found);
     free(__path); free(__bucket); free(__key);
-    if (__found == 0 && __body) {
-      res = porf_box((f64)porf_native_fetch_alloc_bytestring(__body, __blen), 195);
-      free(__body);
-    }
+    if (__found) res = porf_box((f64)__bs, 195);
   `;
   return res;
 }
