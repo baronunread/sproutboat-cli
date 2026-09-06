@@ -54,6 +54,8 @@ usage: sproutboat <init [name] | check [project-dir] | dev [project-dir] [--port
 | `SB_DATA_DIR` | Where a standalone binary keeps store.sqlite and d1/ (#15). Read by the sprout itself in an embedded build; defaults to ./<name>.data. |
 | `SPROUTBOAT_DATA` | Data directory for a standalone binary, after --data and SB_DATA_DIR, before the ./<name>.data default (#15). |
 | `SB_CA_BUNDLE` | PEM bundle of extra certificate authorities a standalone binary should trust, on top of the compiled-in Mozilla root set (#15). Adds trust; nothing disables verification. |
+| `SB_FETCH_MAX_BYTES` | Largest outbound `fetch()` response body a sprout will read, in bytes (default 33554432). The size is the remote host's choice and the body is held whole, so this is the ceiling that stops one upstream exhausting memory. |
+| `SB_REQUEST_BODY_MAX` | Largest inbound request body the runtime accepts, in bytes (default 1048576). Anything larger is refused with 413 before the handler runs. |
 | `SB_EXTRA_CFLAGS` | Flags added to Porffor's native-fetch compile step, set by the build so inline C can include BearSSL's header (#15). |
 | `SB_EXTRA_LINK` | Objects to add to Porffor's native-fetch link line, set by the build so a standalone binary links SQLite and BearSSL (#15). |
 

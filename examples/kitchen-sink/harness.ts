@@ -21,6 +21,20 @@ import { createBroker, listen } from "../../src/broker";
 import { walkAssets, type AssetManifest } from "../../src/assets";
 import type { JsonValue } from "../../src/json";
 
+/**
+ * A port nothing is listening on.
+ *
+ * Both harnesses used to pick 8000 + random, which collides often enough to
+ * produce a conformance failure that looks like a real one: the suite talks to
+ * whatever else answered. Bind to 0, let the OS choose, and release it.
+ */
+function freePort(): number {
+  const probe = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+  const chosen = probe.port;
+  probe.stop(true);
+  return chosen;
+}
+
 const HERE = import.meta.dir;
 const CLI = join(HERE, "../..");
 const PORF = join(CLI, "node_modules/porffor/runtime/index.js");
@@ -109,7 +123,7 @@ if (compile.exitCode !== 0) die("porffor compile failed:\n" + compile.stderr.toS
 
 // --- broker (in-process) --------------------------------------------
 const TOKEN = "harness-token";
-const sproutPort = 8000 + Math.floor(Math.random() * 900);
+const sproutPort = freePort();
 const broker = createBroker({
   db: join(workdir, "state.sqlite"),
   dataDir: join(workdir, "d1"),

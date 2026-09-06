@@ -338,6 +338,36 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     customMetadata: parseJsonValue(r.custom_json),
   });
 
+  /**
+   * An outbound response body, refused past a cap.
+   *
+   * The size is the remote host's choice, and the body is held whole: measured
+   * on a standalone binary, a 100 MB response took resident memory from 43 MB
+   * to 321 MB. One allowlisted upstream having a bad day should not be able to
+   * end the process. 32 MiB by default, and the same variable the embedded
+   * transport reads so both backends agree.
+   */
+  async function readCapped(response: Response, host: string): Promise<string> {
+    const cap = Number(process.env.SB_FETCH_MAX_BYTES) || 32 * 1024 * 1024;
+    const declared = Number(response.headers.get("content-length") || 0);
+    if (declared > cap) throw new Error(`response exceeds SB_FETCH_MAX_BYTES from ${host}`);
+    const reader = response.body?.getReader();
+    if (!reader) return "";
+    const parts: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > cap) {
+        await reader.cancel();
+        throw new Error(`response exceeds SB_FETCH_MAX_BYTES from ${host}`);
+      }
+      parts.push(value);
+    }
+    return new TextDecoder().decode(Buffer.concat(parts));
+  }
+
   async function proxyFetch(msg: Frame): Promise<Frame> {
     let url: URL;
     try {
@@ -363,7 +393,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     });
     const outHeaders: Array<[string, string]> = [];
     res.headers.forEach((v, k) => outHeaders.push([k, v]));
-    return { ok: true, status: res.status, headers: outHeaders, body: await res.text() };
+    return { ok: true, status: res.status, headers: outHeaders, body: await readCapped(res, url.host) };
   }
 
   /**
@@ -409,7 +439,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     });
     const outHeaders: Array<[string, string]> = [];
     res.headers.forEach((v, k) => outHeaders.push([k, v]));
-    return { ok: true, status: res.status, headers: outHeaders, body: await res.text() };
+    return { ok: true, status: res.status, headers: outHeaders, body: await readCapped(res, host) };
   }
 
   async function dispatch(msg: Frame): Promise<Frame> {

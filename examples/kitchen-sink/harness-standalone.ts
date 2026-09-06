@@ -20,6 +20,20 @@ import { bundleHandler } from "../../src/bundle";
 import { parseConfig } from "../../src/config";
 import type { JsonValue } from "../../src/json";
 
+/**
+ * A port nothing is listening on.
+ *
+ * Both harnesses used to pick 8000 + random, which collides often enough to
+ * produce a conformance failure that looks like a real one: the suite talks to
+ * whatever else answered. Bind to 0, let the OS choose, and release it.
+ */
+function freePort(): number {
+  const probe = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+  const chosen = probe.port;
+  probe.stop(true);
+  return chosen;
+}
+
 const HERE = import.meta.dir;
 const workdir = mkdtempSync(join(tmpdir(), "sb-standalone-"));
 const cleanup: Array<() => void> = [() => rmSync(workdir, { recursive: true, force: true })];
@@ -74,7 +88,7 @@ console.log(`  ${(built.bytes / 1_000_000).toFixed(1)} MB\n`);
 // Unused by the binary (it accepts no external triggers); the suite still wants
 // a value for the checks it skips.
 const TOKEN = "harness-token";
-const port = 8000 + Math.floor(Math.random() * 1000);
+const port = freePort();
 const dataDir = join(workdir, "data");
 // Environment only: a native-fetch binary never sees argv (Porffor's runtime
 // init calls porf_init(0, NULL)), so PORT and SB_DATA_DIR are the whole surface.

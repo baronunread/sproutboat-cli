@@ -244,6 +244,16 @@ export const ENV_VARS: readonly EnvVar[] = [
       "PEM bundle of extra certificate authorities a standalone binary should trust, on top of the compiled-in Mozilla root set (#15). Adds trust; nothing disables verification.",
   },
   {
+    name: "SB_FETCH_MAX_BYTES",
+    purpose:
+      "Largest outbound `fetch()` response body a sprout will read, in bytes (default 33554432). The size is the remote host's choice and the body is held whole, so this is the ceiling that stops one upstream exhausting memory.",
+  },
+  {
+    name: "SB_REQUEST_BODY_MAX",
+    purpose:
+      "Largest inbound request body the runtime accepts, in bytes (default 1048576). Anything larger is refused with 413 before the handler runs.",
+  },
+  {
     name: "SB_EXTRA_CFLAGS",
     purpose:
       "Flags added to Porffor's native-fetch compile step, set by the build so inline C can include BearSSL's header (#15).",

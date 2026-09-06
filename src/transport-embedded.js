@@ -379,6 +379,20 @@ static char* sb_sql_run(const char* path, const char* sql, const char* params) {
 // in (see src/bearssl.ts). Both directions share the request builder and the
 // response parser: the only thing that differs is how bytes move.
 
+// #56 — an outbound response is held whole in memory, and its size is chosen by
+// the remote host, not by us. Without a cap one allowlisted upstream can drive a
+// sprout out of memory: a 100 MB body measured at 321 MB resident. 32 MiB by
+// default, raisable for a deployment that knowingly fetches something bigger.
+static size_t sb_fetch_max(void) {
+  static size_t cached = 0;
+  if (cached == 0) {
+    const char* raw = getenv("SB_FETCH_MAX_BYTES");
+    long parsed = raw && *raw ? atol(raw) : 0;
+    cached = parsed > 0 ? (size_t)parsed : 32u * 1024u * 1024u;
+  }
+  return cached;
+}
+
 static int sb_tcp_connect(const char* host, int port) {
   struct addrinfo hints, *res = 0, *it;
   memset(&hints, 0, sizeof(hints));
@@ -529,13 +543,19 @@ static char* sb_http_plain(const char* host, int port, const char* path, const c
 
   sb_buf raw = { 0, 0, 0 };
   char chunk[8192];
+  int too_big = 0;
   while (1) {
     long n = read(fd, chunk, sizeof(chunk));
-    if (n > 0) { sb_put(&raw, chunk, (size_t)n); continue; }
+    if (n > 0) {
+      if (raw.len + (size_t)n > sb_fetch_max()) { too_big = 1; break; }
+      sb_put(&raw, chunk, (size_t)n);
+      continue;
+    }
     if (n < 0 && errno == EINTR) continue;
     break;
   }
   close(fd);
+  if (too_big) { free(raw.p); return sb_error_json("response exceeds SB_FETCH_MAX_BYTES from ", host); }
   char* out = sb_parse_response(&raw);
   free(raw.p);
   return out;
@@ -729,11 +749,15 @@ static char* sb_https(const char* host, int port, const char* path, const char* 
 
   sb_buf raw = { 0, 0, 0 };
   char chunk[8192];
-  int rc;
-  while ((rc = br_sslio_read(&ioc, chunk, sizeof(chunk))) > 0) sb_put(&raw, chunk, (size_t)rc);
+  int rc, too_big = 0;
+  while ((rc = br_sslio_read(&ioc, chunk, sizeof(chunk))) > 0) {
+    if (raw.len + (size_t)rc > sb_fetch_max()) { too_big = 1; break; }
+    sb_put(&raw, chunk, (size_t)rc);
+  }
   int err = br_ssl_engine_last_error(&sc->eng);
   free(sc); free(xc); free(iobuf);
   close(fd);
+  if (too_big) { free(raw.p); return sb_error_json("response exceeds SB_FETCH_MAX_BYTES from ", host); }
 
   // BR_ERR_IO here means the peer closed without close_notify, which is what
   // most servers do on Connection: close. It is indistinguishable from a
@@ -1287,8 +1311,10 @@ function __sbEmbeddedDispatch(msg) {
   if (op === "do.storage.list") {
     const r = __sbSql(
       store,
-      "SELECT key, value FROM do_storage WHERE cls = ? AND id = ? AND key LIKE ? || '%' ORDER BY key",
-      [msg.cls, msg.id, msg.prefix || ""],
+      // Same clamp as the broker: an unbounded list builds the whole result in
+      // memory before the caller sees any of it.
+      "SELECT key, value FROM do_storage WHERE cls = ? AND id = ? AND key LIKE ? || '%' ORDER BY key LIMIT ?",
+      [msg.cls, msg.id, msg.prefix || "", Math.min(Math.max(Number(msg.limit) || 1000, 1), 10000)],
     );
     const entries = [];
     for (let i = 0; i < r.rows.length; i++) entries.push([r.rows[i][0], r.rows[i][1]]);
