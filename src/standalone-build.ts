@@ -11,7 +11,7 @@
  * the conformance suite a second backend to run against; Phase 1 replaces the
  * bundled broker with an embedded dispatch and the size problem goes away.
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { AssetManifest } from "./assets";
 import { buildArtifact, type BuildInput } from "./build";
@@ -83,7 +83,8 @@ async function embedAssets(artifactDir: string): Promise<StandaloneManifest["ass
 }
 
 export async function buildStandalone(input: StandaloneBuildInput): Promise<StandaloneBuildResult> {
-  const artifact = await buildArtifact(input);
+  const backend = input.backend ?? "bundled";
+  const artifact = await buildArtifact({ ...input, transport: backend === "embedded" ? "embedded" : "broker" });
   const bindingsPath = resolve(artifact.artifactDir, "bindings.json");
   let bindings: StandaloneManifest["bindings"] = {};
   try {
@@ -94,9 +95,22 @@ export async function buildStandalone(input: StandaloneBuildInput): Promise<Stan
     bindings = {}; // a project with no bindings at all
   }
 
-  const blocked = unsupportedBindings(bindings, input.backend ?? "bundled");
+  const blocked = unsupportedBindings(bindings, backend);
   if (blocked.length > 0) {
     throw new Error(`cannot build a standalone binary for this project:\n  - ${blocked.join("\n  - ")}`);
+  }
+
+  const outPath = input.outPath ?? resolve(input.projectDir, "dist", input.config.name);
+  await mkdir(resolve(outPath, ".."), { recursive: true });
+
+  // #15 phase 1 — the sprout *is* the binary: SQLite is compiled in, so there
+  // is no broker to bundle and no launcher to run one. Everything the phase-0
+  // launcher did at startup is either compiled in (bindings) or an environment
+  // variable the caller sets (SB_DATA_DIR, PORT).
+  if (backend === "embedded") {
+    await cp(resolve(artifact.artifactDir, "sprout"), outPath);
+    await chmod(outPath, 0o755);
+    return { outPath, bytes: Bun.file(outPath).size };
   }
 
   const manifest: StandaloneManifest = {
@@ -129,8 +143,6 @@ export async function buildStandalone(input: StandaloneBuildInput): Promise<Stan
     ].join("\n"),
   );
 
-  const outPath = input.outPath ?? resolve(input.projectDir, "dist", input.config.name);
-  await mkdir(resolve(outPath, ".."), { recursive: true });
   const compile = Bun.spawn(["bun", "build", "--compile", entryPath, "--outfile", outPath], {
     stdout: "pipe",
     stderr: "pipe",

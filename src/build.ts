@@ -3,7 +3,8 @@ import { cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { walkAssets, type AssetManifest } from "./assets";
 import { resourceRefs, type SproutboatConfig } from "./config";
-import { compileSprout } from "./compile";
+import { ensureSqliteObject } from "./sqlite";
+import { compileSprout, type Transport } from "./compile";
 import {
   ARTIFACT_SCHEMA_VERSION,
   CAPABILITY_PROFILE,
@@ -30,6 +31,9 @@ export type BuildInput = {
    * the real target, which is what stops the result being deployed.
    */
   target?: "linux-x86_64" | "host";
+  /** #15 — `embedded` compiles SQLite into the sprout instead of a broker
+   *  transport. Defaults to the broker transport. */
+  transport?: Transport;
 };
 
 export type BuildOutput = {
@@ -92,6 +96,12 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   // for it — that download is the slowest part of a first local build.
   const host = input.target === "host";
   const zigBin = host ? undefined : await ensureZig();
+  // #15 — an embedded-backend sprout carries SQLite instead of talking to a
+  // broker, so the amalgamation is compiled once and added to the link line.
+  const extraLink =
+    input.transport === "embedded"
+      ? [await ensureSqliteObject({ target: input.target ?? "linux-x86_64", zigBin })]
+      : [];
   await compileSprout({
     sourcePath: input.sourcePath,
     source: input.source,
@@ -101,6 +111,9 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     zigBin,
     target: input.target,
     compatibilityDate: input.config.compatibility_date,
+    transport: input.transport,
+    appName: input.config.name,
+    extraLink,
   });
 
   const sprout = await readFile(sproutPath);

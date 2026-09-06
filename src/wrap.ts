@@ -13,6 +13,23 @@
  *  imported — callers do `readFile(preludePath, "utf8")`. */
 export const preludePath = new URL("./native-fetch-prelude.js", import.meta.url);
 
+/**
+ * #15 — the two transports the prelude can be built with.
+ *
+ * Both define `__sbCall(reqJson) -> replyJson` and nothing else; every binding
+ * shim above that line is identical, which is what lets one conformance suite
+ * hold both honest. `broker` talks to the per-deployment broker over loopback
+ * (deployed, dev, phase-0 standalone); `embedded` compiles SQLite into the
+ * sprout and needs no second process at all.
+ */
+export type Transport = "broker" | "embedded";
+export const transportPath = (transport: Transport): URL =>
+  new URL(transport === "embedded" ? "./transport-embedded.js" : "./transport-broker.js", import.meta.url);
+
+/** Where the prelude expects its transport spliced in. */
+export const TRANSPORT_MARKER =
+  "// TRANSPORT: wrap.ts splices one of transport-broker.js / transport-embedded.js here.";
+
 // The server honours $PORT at runtime (patches/porffor-render.patch); this baked
 // value is only a fallback for a directly-run binary.
 const DEFAULT_PORT = 8080;
@@ -147,6 +164,7 @@ export function wrapNativeFetchHandler(
   bindings: Bindings = EMPTY_BINDINGS,
   port: number = DEFAULT_PORT,
   compatibilityDate: string = BASELINE_COMPATIBILITY_DATE,
+  appName: string = "app",
 ): string {
   const neutralised = neutraliseExports(source);
   if (neutralised === null || !/\bfetch\s*\(/.test(source)) {
@@ -156,7 +174,10 @@ export function wrapNativeFetchHandler(
   const env = `const env = ${JSON.stringify(vars)};\nglobalThis.env = env;\n`;
   // Baked, not a binding: the date belongs to the artifact, and a handler must
   // not be able to change the semantics it was compiled against at runtime.
-  const compat = `globalThis.__sbCompat = ${JSON.stringify(compatibilityDate)};\n`;
+  const compat =
+    `globalThis.__sbCompat = ${JSON.stringify(compatibilityDate)};\n` +
+    // #15 — the embedded transport derives its default data directory from this.
+    `globalThis.__sbAppName = ${JSON.stringify(appName)};\n`;
   const wire = hasBindings(bindings) ? `__sbInstallBindings(env, ${JSON.stringify(bindings)});\n` : "";
   const registerDO = bindings.do.length
     ? `__sbRegisterDO({ ${bindings.do.map((d) => `${d.className}: ${d.className}`).join(", ")} });\n`

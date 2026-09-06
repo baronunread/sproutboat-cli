@@ -23,10 +23,41 @@ const INJECT =
   "  if (__sb_port && *__sb_port) { long __sb_v = strtol(__sb_port, NULL, 10); if (__sb_v > 0 && __sb_v < 65536) return (f64)__sb_v; }\n";
 const MARKER = 'getenv("PORT")';
 
+/**
+ * #15 — let the build add objects to the native-fetch link line.
+ *
+ * Porffor builds `linkArgs` as a fixed array, so an embedded backend that needs
+ * SQLite compiled into the sprout has nowhere to put it. `CXX` is not a way in:
+ * a musl (deploy) build overrides it outright. This splices one spread of
+ * `SB_EXTRA_LINK` before `-lm`, which is inert unless the variable is set.
+ *
+ * Same shape as the $PORT patch above, and tracked in the same place — an
+ * upstream hook for extra link arguments would remove it.
+ */
+const LINK_ANCHOR = "          uSocketsArchive,\n          '-lm'\n";
+const LINK_INJECT =
+  "          ...(process.env.SB_EXTRA_LINK ? process.env.SB_EXTRA_LINK.split(' ').filter(Boolean) : []),\n";
+const LINK_MARKER = "SB_EXTRA_LINK";
+
 let done = false;
+
+async function patchLinkArgs(): Promise<void> {
+  const file = resolve(porfforRoot(), "compiler/index.js");
+  const src = await readFile(file, "utf8");
+  if (src.includes(LINK_MARKER)) return;
+  const at = src.indexOf(LINK_ANCHOR);
+  if (at === -1) {
+    throw new Error(
+      `could not patch Porffor for extra link args: anchor not found in ${file}. ` +
+        "Porffor's native-fetch link step changed — check patches/UPSTREAM.md.",
+    );
+  }
+  await writeFile(file, src.slice(0, at) + LINK_INJECT + src.slice(at));
+}
 
 export async function ensurePorfforPatched(): Promise<void> {
   if (done) return;
+  await patchLinkArgs();
   const file = resolve(porfforRoot(), "compiler/render.js");
   const src = await readFile(file, "utf8");
   if (src.includes(MARKER)) {
