@@ -44,6 +44,9 @@ extern const char* sqlite3_column_name(sqlite3_stmt*, int);
 extern int sqlite3_bind_null(sqlite3_stmt*, int);
 extern int sqlite3_bind_double(sqlite3_stmt*, int, double);
 extern int sqlite3_bind_text(sqlite3_stmt*, int, const char*, int, void*);
+extern int sqlite3_bind_blob(sqlite3_stmt*, int, const void*, int, void*);
+extern int sqlite3_bind_int64(sqlite3_stmt*, int, int64_t);
+extern const void* sqlite3_column_blob(sqlite3_stmt*, int);
 extern int sqlite3_changes(sqlite3*);
 extern int64_t sqlite3_last_insert_rowid(sqlite3*);
 extern const char* sqlite3_errmsg(sqlite3*);
@@ -181,6 +184,102 @@ static int sb_bind_params(sqlite3_stmt* st, const char* json) {
     }
   }
   return 0;
+}
+
+// --- R2 bodies, without the JSON detour -------------------------------------
+// An object's bytes never enter a JSON frame: they arrive as their own string
+// parameter and go straight into a BLOB column. That matters for size as much
+// as correctness — escaping a binary body inflates it several times over, and
+// the arena grows to fit the biggest thing it ever had to hold.
+
+static void sb_hex32(const unsigned char* in, char* out) {
+  static const char* d = "0123456789abcdef";
+  for (int i = 0; i < 32; i++) { out[i * 2] = d[in[i] >> 4]; out[i * 2 + 1] = d[in[i] & 15]; }
+  out[64] = 0;
+}
+
+// sha256 of the body, matching what the broker records as the etag.
+static void sb_sha256_hex(const char* data, size_t len, char* out65) {
+  br_sha256_context ctx;
+  br_sha256_init(&ctx);
+  br_sha256_update(&ctx, data, len);
+  unsigned char digest[32];
+  br_sha256_out(&ctx, digest);
+  sb_hex32(digest, out65);
+}
+
+static void sb_iso_now(char* out, size_t cap) {
+  time_t now = time(0);
+  struct tm g;
+  gmtime_r(&now, &g);
+  strftime(out, cap, "%Y-%m-%dT%H:%M:%S.000Z", &g);
+}
+
+// Returns malloc'd JSON metadata; the body itself is never serialised.
+static char* sb_r2_put_c(const char* path, const char* bucket, const char* key, const char* body, size_t bodylen,
+                         const char* http_json, const char* custom_json) {
+  sb_buf out = { 0, 0, 0 };
+  int idx = sb_db_for(path);
+  if (idx < 0) { sb_puts(&out, "{\"ok\":false,\"error\":\"cannot open database\"}"); return out.p; }
+  sqlite3* db = sb_dbs[idx];
+
+  char etag[65];
+  sb_sha256_hex(body, bodylen, etag);
+  char uploaded[40];
+  sb_iso_now(uploaded, sizeof(uploaded));
+
+  sqlite3_stmt* st = 0;
+  const char* sql =
+    "INSERT INTO r2 (bucket, key, body, size, etag, uploaded, http_json, custom_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) "
+    "ON CONFLICT (bucket, key) DO UPDATE SET body=?3, size=?4, etag=?5, uploaded=?6, http_json=?7, custom_json=?8";
+  if (sqlite3_prepare_v2(db, sql, -1, &st, 0) != 0 || !st) {
+    sb_puts(&out, "{\"ok\":false,\"error\":");
+    const char* m = sqlite3_errmsg(db);
+    sb_putjson(&out, m, strlen(m));
+    sb_puts(&out, "}");
+    return out.p;
+  }
+  sqlite3_bind_text(st, 1, bucket, -1, SB_SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, key, -1, SB_SQLITE_TRANSIENT);
+  sqlite3_bind_blob(st, 3, body, (int)bodylen, SB_SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, (int64_t)bodylen);
+  sqlite3_bind_text(st, 5, etag, -1, SB_SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 6, uploaded, -1, SB_SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 7, http_json && *http_json ? http_json : "{}", -1, SB_SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 8, custom_json && *custom_json ? custom_json : "{}", -1, SB_SQLITE_TRANSIENT);
+  int rc = sqlite3_step(st);
+  sqlite3_finalize(st);
+  if (rc != SB_SQLITE_DONE) { sb_puts(&out, "{\"ok\":false,\"error\":\"r2 put failed\"}"); return out.p; }
+
+  char head[256];
+  int k = snprintf(head, sizeof(head), "{\"ok\":true,\"etag\":\"%s\",\"size\":%zu,\"uploaded\":\"%s\"}", etag, bodylen, uploaded);
+  sb_put(&out, head, (size_t)k);
+  return out.p;
+}
+
+// Body bytes out, with their length. Caller frees *out. Returns 0 when found.
+static int sb_r2_get_c(const char* path, const char* bucket, const char* key, char** out, size_t* out_len) {
+  *out = 0; *out_len = 0;
+  int idx = sb_db_for(path);
+  if (idx < 0) return -1;
+  sqlite3_stmt* st = 0;
+  if (sqlite3_prepare_v2(sb_dbs[idx], "SELECT body FROM r2 WHERE bucket = ? AND key = ?", -1, &st, 0) != 0 || !st) return -1;
+  sqlite3_bind_text(st, 1, bucket, -1, SB_SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, key, -1, SB_SQLITE_TRANSIENT);
+  int rc = sqlite3_step(st), found = -1;
+  if (rc == SB_SQLITE_ROW) {
+    int n = sqlite3_column_bytes(st, 0);
+    const void* blob = sqlite3_column_blob(st, 0);
+    char* copy = (char*)malloc((size_t)n ? (size_t)n : 1);
+    if (copy) {
+      if (n) memcpy(copy, blob, (size_t)n);
+      *out = copy;
+      *out_len = (size_t)n;
+      found = 0;
+    }
+  }
+  sqlite3_finalize(st);
+  return found;
 }
 
 // Run a script: one or more statements separated by semicolons. sqlite3_exec
@@ -659,6 +758,85 @@ static char* sb_http_request(const char* host, int port, const char* path, const
 }
 `;
 
+// R2 put: the body is its own parameter, so it never gets escaped.
+// oxlint-disable-next-line no-unused-vars -- read inside the RawC block below, not by JS.
+function __sbR2PutRaw(path, bucket, key, body, httpJson, customJson) {
+  let res = "";
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
+  Porffor.c`
+    const char* __p; size_t __pl; char* __po = 0;
+    porf_native_fetch_read_value(path, &__p, &__pl, &__po);
+    char* __path = (char*)malloc(__pl + 1); memcpy(__path, __p, __pl); __path[__pl] = 0;
+    if (__po) free(__po);
+
+    const char* __bk; size_t __bkl; char* __bko = 0;
+    porf_native_fetch_read_value(bucket, &__bk, &__bkl, &__bko);
+    char* __bucket = (char*)malloc(__bkl + 1); memcpy(__bucket, __bk, __bkl); __bucket[__bkl] = 0;
+    if (__bko) free(__bko);
+
+    const char* __k; size_t __kl; char* __ko = 0;
+    porf_native_fetch_read_value(key, &__k, &__kl, &__ko);
+    char* __key = (char*)malloc(__kl + 1); memcpy(__key, __k, __kl); __key[__kl] = 0;
+    if (__ko) free(__ko);
+
+    const char* __h; size_t __hl; char* __ho = 0;
+    porf_native_fetch_read_value(httpJson, &__h, &__hl, &__ho);
+    char* __http = (char*)malloc(__hl + 1); memcpy(__http, __h, __hl); __http[__hl] = 0;
+    if (__ho) free(__ho);
+
+    const char* __c; size_t __cl; char* __co = 0;
+    porf_native_fetch_read_value(customJson, &__c, &__cl, &__co);
+    char* __custom = (char*)malloc(__cl + 1); memcpy(__custom, __c, __cl); __custom[__cl] = 0;
+    if (__co) free(__co);
+
+    // The body is read in place and handed straight to sqlite3_bind_blob: no
+    // copy beyond what the binding needs, and no escaping at all.
+    const char* __b; size_t __bl; char* __bo = 0;
+    porf_native_fetch_read_value(body, &__b, &__bl, &__bo);
+    char* __out = sb_r2_put_c(__path, __bucket, __key, __b, __bl, __http, __custom);
+    if (__bo) free(__bo);
+
+    free(__path); free(__bucket); free(__key); free(__http); free(__custom);
+    if (__out) {
+      res = porf_box((f64)porf_native_fetch_alloc_bytestring(__out, strlen(__out)), 195);
+      free(__out);
+    }
+  `;
+  return res;
+}
+
+// R2 get: the bytes come back as a bytestring, not inside a reply frame.
+// oxlint-disable-next-line no-unused-vars -- read inside the RawC block below, not by JS.
+function __sbR2GetRaw(path, bucket, key) {
+  let res = "";
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
+  Porffor.c`
+    const char* __p; size_t __pl; char* __po = 0;
+    porf_native_fetch_read_value(path, &__p, &__pl, &__po);
+    char* __path = (char*)malloc(__pl + 1); memcpy(__path, __p, __pl); __path[__pl] = 0;
+    if (__po) free(__po);
+
+    const char* __bk; size_t __bkl; char* __bko = 0;
+    porf_native_fetch_read_value(bucket, &__bk, &__bkl, &__bko);
+    char* __bucket = (char*)malloc(__bkl + 1); memcpy(__bucket, __bk, __bkl); __bucket[__bkl] = 0;
+    if (__bko) free(__bko);
+
+    const char* __k; size_t __kl; char* __ko = 0;
+    porf_native_fetch_read_value(key, &__k, &__kl, &__ko);
+    char* __key = (char*)malloc(__kl + 1); memcpy(__key, __k, __kl); __key[__kl] = 0;
+    if (__ko) free(__ko);
+
+    char* __body = 0; size_t __blen = 0;
+    int __found = sb_r2_get_c(__path, __bucket, __key, &__body, &__blen);
+    free(__path); free(__bucket); free(__key);
+    if (__found == 0 && __body) {
+      res = porf_box((f64)porf_native_fetch_alloc_bytestring(__body, __blen), 195);
+      free(__body);
+    }
+  `;
+  return res;
+}
+
 // Multi-statement exec. Same string-param pattern as __sbSqlRaw.
 // oxlint-disable-next-line no-unused-vars -- read inside the RawC block below, not by JS.
 function __sbSqlScriptRaw(path, sql) {
@@ -1011,9 +1189,14 @@ function __sbEmbeddedDispatch(msg) {
     };
   }
   if (op === "r2.get" || op === "r2.head") {
+    // head must not select `body`: reading an 8 MB blob only to drop it costs
+    // the read, the text conversion, and a full JSON escape of the row.
+    const wantsBody = op === "r2.get";
     const r = __sbSql(
       store,
-      "SELECT body, size, etag, uploaded, http_json, custom_json FROM r2 WHERE bucket = ? AND key = ?",
+      wantsBody
+        ? "SELECT body, size, etag, uploaded, http_json, custom_json FROM r2 WHERE bucket = ? AND key = ?"
+        : "SELECT '', size, etag, uploaded, http_json, custom_json FROM r2 WHERE bucket = ? AND key = ?",
       [msg.bucket, msg.key],
     );
     if (!r.rows.length) return { ok: true, found: false };
@@ -1030,7 +1213,7 @@ function __sbEmbeddedDispatch(msg) {
         httpMetadata: JSON.parse(row[4] || "{}"),
         customMetadata: JSON.parse(row[5] || "{}"),
       },
-      body: op === "r2.get" ? row[0] : undefined,
+      body: wantsBody ? row[0] : undefined,
     };
   }
   if (op === "r2.delete") {
@@ -1166,6 +1349,36 @@ function __sbD1Run(path, sql, params) {
   }
   return { results, meta: { changes: r.changes, last_row_id: r.rowid, rows_read: r.rows.length } };
 }
+
+/**
+ * R2 object bodies, out of band (#56).
+ *
+ * The core shim calls these instead of putting an object body in a frame. The
+ * broker transport defines the same two names in terms of __sbRpc, so the shim
+ * itself does not know which backend it is on.
+ */
+globalThis.__sbR2Put = function (bucket, key, body, httpMetadata, customMetadata) {
+  __sbEnsureSchema();
+  const reply = JSON.parse(
+    __sbR2PutRaw(
+      __sbStore(),
+      String(bucket),
+      String(key),
+      body == null ? "" : String(body),
+      JSON.stringify(httpMetadata || {}),
+      JSON.stringify(customMetadata || {}),
+    ),
+  );
+  if (reply.ok === false) throw new Error("sproutboat r2.put: " + reply.error);
+  return { object: { key: String(key), size: reply.size, etag: reply.etag, uploaded: reply.uploaded } };
+};
+
+globalThis.__sbR2Get = function (bucket, key) {
+  // Metadata through the normal path (small), bytes through their own.
+  const meta = __sbEmbeddedDispatch({ op: "r2.head", bucket, key });
+  if (!meta.found) return { found: false };
+  return { found: true, object: meta.object, body: __sbR2GetRaw(__sbStore(), String(bucket), String(key)) };
+};
 
 /** The transport contract: one request string in, one reply string out. */
 function __sbCall(reqJson) {

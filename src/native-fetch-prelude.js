@@ -494,16 +494,19 @@ globalThis.__sbInstallBindings = function (target, bindings) {
     target[name] = {
       put(key, value, options) {
         const o = options || {};
-        return __sbRpc("r2.put", {
-          bucket: name,
-          key: String(key),
-          body: value == null ? "" : String(value),
-          httpMetadata: o.httpMetadata || {},
-          customMetadata: o.customMetadata || {},
-        }).object;
+        // #56 — the body goes out of band where the transport allows it.
+        return __sbR2Put(
+          name,
+          String(key),
+          value == null ? "" : String(value),
+          o.httpMetadata || {},
+          o.customMetadata || {},
+        ).object;
       },
       get(key) {
-        const r = __sbRpc("r2.get", { bucket: name, key: String(key) });
+        // #56 — bytes come back out of band on a transport that supports it, so
+        // an object body is never JSON-escaped into a frame.
+        const r = __sbR2Get(name, String(key));
         return r.found ? __sbR2Object(r.object, r.body == null ? "" : r.body) : null;
       },
       head(key) {

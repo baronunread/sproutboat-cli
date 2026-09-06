@@ -138,3 +138,17 @@ function __sbCall(reqJson) {
  * real one, so the generated module can call this unconditionally.
  */
 globalThis.__sbStartLocalTriggers = function () {};
+
+/**
+ * R2 object bodies (#56). The broker frame carries them inline, so these are
+ * thin wrappers — the shim calls the same two names on either transport, and
+ * only the embedded one takes the body out of the frame.
+ */
+globalThis.__sbR2Put = function (bucket, key, body, httpMetadata, customMetadata) {
+  return __sbRpc("r2.put", { bucket, key, body, httpMetadata, customMetadata });
+};
+
+globalThis.__sbR2Get = function (bucket, key) {
+  const r = __sbRpc("r2.get", { bucket, key });
+  return r.found ? { found: true, object: r.object, body: r.body == null ? "" : r.body } : { found: false };
+};
