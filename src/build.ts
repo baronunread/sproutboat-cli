@@ -3,7 +3,9 @@ import { cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { walkAssets, type AssetManifest } from "./assets";
 import { resourceRefs, type SproutboatConfig } from "./config";
-import { compileSprout } from "./compile";
+import { ensureSqliteObject } from "./sqlite";
+import { ensureBearssl } from "./bearssl";
+import { compileSprout, type Transport } from "./compile";
 import {
   ARTIFACT_SCHEMA_VERSION,
   CAPABILITY_PROFILE,
@@ -30,12 +32,19 @@ export type BuildInput = {
    * the real target, which is what stops the result being deployed.
    */
   target?: "linux-x86_64" | "host";
+  /** #15 — `embedded` compiles SQLite into the sprout instead of a broker
+   *  transport. Defaults to the broker transport. */
+  transport?: Transport;
 };
 
 export type BuildOutput = {
   artifactDir: string;
   manifest: ArtifactManifest;
 };
+
+/** Baking megabytes of assets into the module makes the Porffor compile crawl;
+ *  past this it is the wrong tool and the error says what to do instead. */
+const MAX_BAKED_ASSET_BYTES = 8_000_000;
 
 function digest(value: Uint8Array | string): `sha256:${string}` {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -77,6 +86,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     queues: refsByKind.queue.map((ref) => ref.binding),
     analytics: input.config.analytics_engine_datasets ?? [],
     do: Object.entries(input.config.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
+    services: input.config.services ?? [],
     crons: input.config.triggers?.crons ?? [],
     assets: input.config.assets?.binding ?? "",
     // Baked plain values, read as env.NAME. The broker never serves these (they
@@ -91,6 +101,43 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   // for it — that download is the slowest part of a first local build.
   const host = input.target === "host";
   const zigBin = host ? undefined : await ensureZig();
+  // #15 — an embedded sprout carries its own storage and TLS instead of talking
+  // to a broker: SQLite and BearSSL are compiled once per target and added to
+  // the link line, and BearSSL's header to the compile line.
+  const embedded = input.transport === "embedded";
+  const target = input.target ?? "linux-x86_64";
+  const sqliteObject = embedded ? await ensureSqliteObject({ target, zigBin }) : null;
+  const tls = embedded ? await ensureBearssl({ target, zigBin }) : null;
+  const extraLink = [...(sqliteObject ? [sqliteObject] : []), ...(tls ? tls.objects : [])];
+  const extraCflags = tls ? ["-I", tls.includeDir] : [];
+  // #15 — an embedded binary has no files beside it, so assets are baked into
+  // the module. Read them from the source directory: the artifact copy happens
+  // after the compile, and the compile is what needs them. Bytes travel as a
+  // latin1 string, one char per byte, which is what the asset shim hands back.
+  let bakedAssets: { manifest: AssetManifest; files: Record<string, string> } | undefined;
+  if (input.transport === "embedded" && input.config.assets) {
+    const dir = resolve(input.projectDir, input.config.assets.directory);
+    const manifest: AssetManifest = {
+      notFound: input.config.assets.not_found_handling ?? "none",
+      runSproutFirst: input.config.assets.run_sprout_first ?? false,
+      files: walkAssets(dir),
+    };
+    const files: Record<string, string> = {};
+    let total = 0;
+    for (const key of Object.keys(manifest.files)) {
+      const bytes = await readFile(resolve(dir, `.${key}`));
+      total += bytes.byteLength;
+      if (total > MAX_BAKED_ASSET_BYTES) {
+        throw new Error(
+          `assets are too large to compile into a standalone binary (over ${MAX_BAKED_ASSET_BYTES / 1_000_000} MB). ` +
+            "Serve them from R2, or drop the assets binding and put a web server in front.",
+        );
+      }
+      files[key] = bytes.toString("latin1");
+    }
+    bakedAssets = { manifest, files };
+  }
+
   await compileSprout({
     sourcePath: input.sourcePath,
     source: input.source,
@@ -100,6 +147,11 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     zigBin,
     target: input.target,
     compatibilityDate: input.config.compatibility_date,
+    transport: input.transport,
+    appName: input.config.name,
+    assets: bakedAssets,
+    extraLink,
+    extraCflags,
   });
 
   const sprout = await readFile(sproutPath);

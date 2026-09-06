@@ -13,6 +13,23 @@
  *  imported — callers do `readFile(preludePath, "utf8")`. */
 export const preludePath = new URL("./native-fetch-prelude.js", import.meta.url);
 
+/**
+ * #15 — the two transports the prelude can be built with.
+ *
+ * Both define `__sbCall(reqJson) -> replyJson` and nothing else; every binding
+ * shim above that line is identical, which is what lets one conformance suite
+ * hold both honest. `broker` talks to the per-deployment broker over loopback
+ * (deployed, dev, phase-0 standalone); `embedded` compiles SQLite into the
+ * sprout and needs no second process at all.
+ */
+export type Transport = "broker" | "embedded";
+export const transportPath = (transport: Transport): URL =>
+  new URL(transport === "embedded" ? "./transport-embedded.js" : "./transport-broker.js", import.meta.url);
+
+/** Where the prelude expects its transport spliced in. */
+export const TRANSPORT_MARKER =
+  "// TRANSPORT: wrap.ts splices one of transport-broker.js / transport-embedded.js here.";
+
 // The server honours $PORT at runtime (patches/porffor-render.patch); this baked
 // value is only a fallback for a directly-run binary.
 const DEFAULT_PORT = 8080;
@@ -44,6 +61,9 @@ export type Bindings = {
   queues: string[];
   analytics: string[];
   do: Array<{ binding: string; className: string }>;
+  /** #48 — worker-to-worker: binding name -> the project it calls. The hostname
+   *  it resolves to is a runtime input, not part of the artifact. */
+  services: Array<{ binding: string; service: string }>;
   crons: string[];
   /** Static-asset binding name for `env.<NAME>.fetch(request)`; `""` when assets are edge-only. */
   assets: string;
@@ -58,6 +78,7 @@ export const EMPTY_BINDINGS: Bindings = {
   queues: [],
   analytics: [],
   do: [],
+  services: [],
   crons: [],
   assets: "",
 };
@@ -72,6 +93,7 @@ function hasBindings(b: Bindings): boolean {
     b.queues.length > 0 ||
     b.analytics.length > 0 ||
     b.do.length > 0 ||
+    b.services.length > 0 ||
     b.assets !== ""
   );
 }
@@ -142,6 +164,9 @@ export function wrapNativeFetchHandler(
   bindings: Bindings = EMPTY_BINDINGS,
   port: number = DEFAULT_PORT,
   compatibilityDate: string = BASELINE_COMPATIBILITY_DATE,
+  appName: string = "app",
+  /** #15 — assets baked into the module for a binary that has no files beside it. */
+  assets?: { manifest: unknown; files: Record<string, string> },
 ): string {
   const neutralised = neutraliseExports(source);
   if (neutralised === null || !/\bfetch\s*\(/.test(source)) {
@@ -151,16 +176,26 @@ export function wrapNativeFetchHandler(
   const env = `const env = ${JSON.stringify(vars)};\nglobalThis.env = env;\n`;
   // Baked, not a binding: the date belongs to the artifact, and a handler must
   // not be able to change the semantics it was compiled against at runtime.
-  const compat = `globalThis.__sbCompat = ${JSON.stringify(compatibilityDate)};\n`;
+  const compat =
+    `globalThis.__sbCompat = ${JSON.stringify(compatibilityDate)};\n` +
+    // #15 — the embedded transport derives its default data directory from this.
+    `globalThis.__sbAppName = ${JSON.stringify(appName)};\n` +
+    // #15 — and enforces the outbound allowlist itself, with no broker to do it.
+    `globalThis.__sbOutbound = ${JSON.stringify(bindings.outbound)};\n` +
+    (assets ? `globalThis.__sbAssets = ${JSON.stringify(assets)};\n` : "");
   const wire = hasBindings(bindings) ? `__sbInstallBindings(env, ${JSON.stringify(bindings)});\n` : "";
   const registerDO = bindings.do.length
     ? `__sbRegisterDO({ ${bindings.do.map((d) => `${d.className}: ${d.className}`).join(", ")} });\n`
     : "";
+  // Cron / queue / alarm timers, for a transport that has no broker to deliver
+  // them. The broker transport defines this as a no-op, so the emitted module
+  // is the same either way.
+  const triggers = hasBindings(bindings) ? `__sbStartLocalTriggers(__sbHandlers, ${JSON.stringify(bindings)});\n` : "";
 
   return (
     `${prelude}\n${compat}${env}${wire}` +
     `${neutralised}\n` +
-    `${registerDO}` +
+    `${registerDO}${triggers}` +
     `export default {\n  port: ${port},\n  fetch(request) { return __sbEntry(__sbHandlers, request); }\n};\n`
   );
 }
@@ -200,6 +235,14 @@ export function readBindingsFromEnv(): Bindings {
   const parsed: VarsJson = JSON.parse(raw);
   if (!isVarsObject(parsed)) throw new Error("SPROUTBOAT_BINDINGS_JSON must be a JSON object");
   const strings = (v: VarsJson): string[] => (Array.isArray(v) ? v.filter(isVarsString) : []);
+  const services: Array<{ binding: string; service: string }> = [];
+  if (Array.isArray(parsed.services)) {
+    for (const entry of parsed.services) {
+      if (isVarsObject(entry) && isVarsString(entry.binding) && isVarsString(entry.service)) {
+        services.push({ binding: entry.binding, service: entry.service });
+      }
+    }
+  }
   const dos: Array<{ binding: string; className: string }> = [];
   if (Array.isArray(parsed.do)) {
     for (const entry of parsed.do) {
@@ -217,6 +260,7 @@ export function readBindingsFromEnv(): Bindings {
     queues: strings(parsed.queues),
     analytics: strings(parsed.analytics),
     do: dos,
+    services,
     crons: strings(parsed.crons),
     assets: isVarsString(parsed.assets) ? parsed.assets : "",
   };

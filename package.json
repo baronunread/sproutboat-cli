@@ -49,7 +49,9 @@
     "surface": "UPDATE_SURFACE=1 bun test src/surface.test.ts",
     "version": "bun run surface && git add SURFACE.md",
     "prepublishOnly": "bun run typecheck && bun test",
-    "style": "bunx style-doctor@latest --quiet"
+    "style": "bunx style-doctor@latest --quiet",
+    "kitchen-sink": "bun examples/kitchen-sink/harness.ts",
+    "kitchen-sink:standalone": "bun examples/kitchen-sink/harness-standalone.ts"
   },
   "dependencies": {
     "esbuild": "^0.28.2",

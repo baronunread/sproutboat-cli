@@ -58,6 +58,9 @@ export type SproutboatConfig = {
   analytics_engine_datasets?: string[];
   /** Durable Object bindings: `{ BINDING_NAME: "ClassName" }`. The class is defined in the handler module. */
   durable_objects?: Record<string, string>;
+  /** #48 — worker-to-worker calls: `env.<BINDING>.fetch(request)` reaches another
+   *  project on this control plane, resolved to its hostname at activation. */
+  services?: Array<{ binding: string; service: string }>;
   /** Scheduled triggers, e.g. `{ "crons": ["0 3 * * *"] }` — a `scheduled(event)` handler runs on each tick. */
   triggers?: { crons?: string[] };
   /** Static assets: a directory served edge-first (like Cloudflare), optionally bound as `env.<BINDING>.fetch(request)`. */
@@ -114,6 +117,7 @@ function validateConfig(value: ConfigInput): ConfigValidation {
     "queues",
     "analytics_engine_datasets",
     "durable_objects",
+    "services",
     "triggers",
     "assets",
   ]);
@@ -233,6 +237,25 @@ function validateConfig(value: ConfigInput): ConfigValidation {
     }
   }
 
+  let services: Array<{ binding: string; service: string }> | undefined;
+  if (value.services !== undefined) {
+    if (!Array.isArray(value.services)) {
+      errors.push('services must be an array of { binding: "NAME", service: "project-name" }');
+    } else {
+      services = [];
+      for (const entry of value.services) {
+        const row = isRecord(entry) ? entry : null;
+        const binding = row && isString(row.binding) ? row.binding : "";
+        const service = row && isString(row.service) ? row.service : "";
+        if (!bindingName.test(binding) || !isProjectSlug(service)) {
+          errors.push('services entries must be { binding: "UPPER_SNAKE", service: "project-name" }');
+        } else if (services.some((s) => s.binding === binding)) {
+          errors.push(`services: duplicate binding ${binding}`);
+        } else services.push({ binding, service });
+      }
+    }
+  }
+
   let triggers: { crons?: string[] } | undefined;
   if (value.triggers !== undefined) {
     if (!isRecord(value.triggers)) {
@@ -301,6 +324,7 @@ function validateConfig(value: ConfigInput): ConfigValidation {
     ...resourceNames(queues),
     ...(analytics_engine_datasets ?? []),
     ...Object.keys(durable_objects ?? {}),
+    ...(services ?? []).map((entry) => entry.binding),
     ...Object.keys(vars ?? {}),
     ...(assets?.binding ? [assets.binding] : []),
   ];
@@ -319,6 +343,7 @@ function validateConfig(value: ConfigInput): ConfigValidation {
   if ("queues" in value) config.queues = queues;
   if ("analytics_engine_datasets" in value) config.analytics_engine_datasets = analytics_engine_datasets;
   if ("durable_objects" in value) config.durable_objects = durable_objects;
+  if ("services" in value) config.services = services;
   if ("triggers" in value) config.triggers = triggers;
   if ("assets" in value) config.assets = assets;
   return { ok: true, value: config };

@@ -8,6 +8,10 @@
   "vars": {
     "SITE_NAME": "Sproutboat Notes",
     "QUOTE_URL": "https://api.quotable.local/random",
+    // Deliberately small: an R2 object is held whole in memory, about 4x its
+    // size standalone and 23x through a broker (#56). The runtime also refuses
+    // an inbound body over SB_REQUEST_BODY_MAX, 1 MiB by default.
+    "MAX_UPLOAD_BYTES": "65536",
   },
   "secrets": ["ADMIN_TOKEN"],
   "kv_namespaces": ["SESSIONS"],
@@ -17,6 +21,10 @@
   "analytics_engine_datasets": ["METRICS"],
   "durable_objects": { "VIEWS": "ViewCounter" },
   "outbound": ["api.quotable.local"],
+  // #48 — worker-to-worker. The target must be a *different* deployment: one
+  // sprout serves one turn at a time, so a binding pointing back at its own
+  // project deadlocks until the request times out.
+  "services": [{ "binding": "PEER", "service": "quote-service" }],
   "triggers": { "crons": ["*/1 * * * *"] },
   "assets": {
     // built by Astro — run `bun --cwd web run build` (harness.ts / serve.ts do this for you)

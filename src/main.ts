@@ -8,6 +8,7 @@ import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
 import { bundleHandler, BundleError, type BundleResult } from "./bundle";
 import { runDev } from "./dev";
+import { buildStandalone } from "./standalone-build";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
@@ -249,6 +250,32 @@ async function build(directory?: string, target: "linux-x86_64" | "host" = "linu
     console.log(dim("  host build — runs here, not deployable; drop --target host to build for a box"));
   console.log(artifact.artifactDir);
   return { project, artifact };
+}
+
+/**
+ * #15 — one executable carrying the sprout, its assets and its bindings.
+ *
+ * Defaults to a host build: the point is a binary you can run right here. Pass
+ * `--target linux-x86_64` for a box, but note the Bun launcher is compiled for
+ * *this* machine either way in phase 0 — cross-compiling both halves comes with
+ * the embedded backend, which removes the launcher entirely.
+ */
+async function buildStandaloneBinary(directory: string | undefined, target: "linux-x86_64" | "host") {
+  const project = await readProject(directory);
+  console.log(dim(`Building a standalone ${project.config.name} (${target})…`));
+  try {
+    const result = await buildStandalone({
+      projectDir: project.directory,
+      config: project.config,
+      sourcePath: project.sourcePath,
+      source: project.bundle.code,
+      target,
+    });
+    console.log(ok(`built ${result.outPath} (${(result.bytes / 1_000_000).toFixed(1)} MB)`));
+    console.log(dim(`  run it: ${result.outPath}   ·   state lands in ./${project.config.name}.data`));
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
 }
 
 /** #62 — build for this machine, run it against a real broker, rebuild on save. */
@@ -941,10 +968,9 @@ switch (command) {
     break;
   case "build": {
     const hostBuild = args.includes("--target") && args[args.indexOf("--target") + 1] === "host";
-    await build(
-      args.find((arg) => !arg.startsWith("--") && arg !== "host"),
-      hostBuild ? "host" : "linux-x86_64",
-    );
+    const directory = args.find((arg) => !arg.startsWith("--") && arg !== "host");
+    if (args.includes("--standalone")) await buildStandaloneBinary(directory, hostBuild ? "host" : "linux-x86_64");
+    else await build(directory, hostBuild ? "host" : "linux-x86_64");
     break;
   }
   case "login":

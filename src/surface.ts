@@ -89,10 +89,10 @@ export const COMMANDS: readonly Command[] = [
     name: "build",
     group: "Develop",
     emoji: "🔨",
-    args: "[project-dir] [--target host]",
+    args: "[project-dir] [--target host] [--standalone]",
     brief: "[project-dir]",
     summary:
-      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable.",
+      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process.",
   },
 
   {
@@ -227,6 +227,41 @@ export const ENV_VARS: readonly EnvVar[] = [
     name: "SB_SPROUT_URL",
     purpose:
       "http://127.0.0.1:<PORT> of the sprout; when set, `src/broker.ts` runs the cron scheduler and queue consumer and delivers triggers to it.",
+  },
+  {
+    name: "SB_DATA_DIR",
+    purpose:
+      "Where a standalone binary keeps store.sqlite and d1/ (#15). Read by the sprout itself in an embedded build; defaults to ./<name>.data.",
+  },
+  {
+    name: "SPROUTBOAT_DATA",
+    purpose:
+      "Data directory for a standalone binary, after --data and SB_DATA_DIR, before the ./<name>.data default (#15).",
+  },
+  {
+    name: "SB_CA_BUNDLE",
+    purpose:
+      "PEM bundle of extra certificate authorities a standalone binary should trust, on top of the compiled-in Mozilla root set (#15). Adds trust; nothing disables verification.",
+  },
+  {
+    name: "SB_FETCH_MAX_BYTES",
+    purpose:
+      "Largest outbound `fetch()` response body a sprout will read, in bytes (default 33554432). The size is the remote host's choice and the body is held whole, so this is the ceiling that stops one upstream exhausting memory.",
+  },
+  {
+    name: "SB_REQUEST_BODY_MAX",
+    purpose:
+      "Largest inbound request body the runtime accepts, in bytes (default 1048576). Anything larger is refused with 413 before the handler runs.",
+  },
+  {
+    name: "SB_EXTRA_CFLAGS",
+    purpose:
+      "Flags added to Porffor's native-fetch compile step, set by the build so inline C can include BearSSL's header (#15).",
+  },
+  {
+    name: "SB_EXTRA_LINK",
+    purpose:
+      "Objects to add to Porffor's native-fetch link line, set by the build so a standalone binary links SQLite and BearSSL (#15).",
   },
 ];
 

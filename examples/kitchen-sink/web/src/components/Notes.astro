@@ -19,8 +19,12 @@
     <textarea name="body" placeholder="Write a note…"></textarea>
     <div class="row">
       <button type="submit">Add note</button>
-      <input type="file" id="new-file" />
-      <span class="muted" style="font-size:12px">optional file — attaches to the new note (R2, &le; 900&nbsp;KB in the demo)</span>
+      <input type="file" id="new-file" disabled />
+      <span class="muted" style="font-size:12px">
+        uploads are off in this demo — an R2 object is held whole in memory, and
+        through a broker one costs about 23× its size
+        (<a href="https://github.com/baronunread/sproutboat/issues/56">#56</a>)
+      </span>
     </div>
   </form>
   <p class="ok" id="notes-ok"></p>

@@ -76,3 +76,22 @@ A 2-line patch to `compiler/render.js` adding exactly that `getenv("PORT")`
 branch. Happy to send it as a PR if the env-var shape is acceptable.
 
 > Draft prepared with Claude (Claude Code); to be rewritten before filing.
+
+
+---
+
+## Second finding: a native-fetch binary cannot see its own argv
+
+`porf_native_fetch_runtime_init()` calls `porf_init(0, NULL)`, so `porf_argc` /
+`porf_argv` are empty for every native-fetch build. The regular native entry
+point passes the real `argc`/`argv` from `main`, so the two paths disagree.
+
+The effect is that a compiled `export default { fetch }` server can take no
+command-line arguments at all — not a port, not a config path. Sproutboat works
+around it by reading the environment (`PORT`, `SB_DATA_DIR`), which is fine for
+systemd and docker but surprising for a binary someone runs by hand.
+
+Worth raising alongside the `$PORT` ask above: both are the same shape of
+problem, a compiled server with no way to be told anything at startup. Passing
+the shim's `argc`/`argv` through to `porf_init` would solve both, without a
+`PORT` special case.

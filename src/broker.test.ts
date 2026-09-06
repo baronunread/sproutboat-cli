@@ -2,7 +2,17 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createBroker, cronMatches, encodeFrame, listen, type Broker, type FetchLike } from "./broker";
+import {
+  createBroker,
+  cronMatches,
+  encodeFrame,
+  encodeV1,
+  listen,
+  type Broker,
+  type Frame,
+  type FetchLike,
+} from "./broker";
+import { createHash } from "node:crypto";
 import { walkAssets, type AssetManifest } from "./assets";
 import { jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "./json";
 
@@ -351,4 +361,259 @@ test("listen(): framed request/reply over a real socket, delivered split", async
   } finally {
     server.stop();
   }
+});
+
+// --- Durable Object alarms (#125) -------------------------------------------
+
+const doBindings = { do: [{ binding: "COUNTER", className: "Counter" }] };
+
+test("alarm: set, read back, and delete", async () => {
+  const b = make({ bindings: doBindings });
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" })).at).toBeNull();
+
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: 1_800_000_000_000 });
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" })).at).toBe(1_800_000_000_000);
+
+  // Workers keeps at most one pending alarm per object: a later set replaces.
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: 1_900_000_000_000 });
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" })).at).toBe(1_900_000_000_000);
+
+  expect((await b.dispatch({ op: "do.alarm.delete", cls: "Counter", id: "a" })).deleted).toBe(true);
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" })).at).toBeNull();
+});
+
+test("alarm: one object's alarm is not another's", async () => {
+  const b = make({ bindings: doBindings });
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: 1_800_000_000_000 });
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "b" })).at).toBeNull();
+});
+
+test("alarm: a class that is not bound is refused", async () => {
+  const b = make({ bindings: doBindings });
+  await expect(b.dispatch({ op: "do.alarm.set", cls: "Ghost", id: "a", at: 1 })).rejects.toThrow(/not bound/);
+});
+
+test("alarm: a due alarm is delivered once, and a self-rescheduling handler survives", async () => {
+  const delivered: JsonObject[] = [];
+  let b: Broker | undefined;
+  const fetchImpl: FetchLike = async (_url, init) => {
+    const body = obj(parseJsonValue(String(init?.body)));
+    delivered.push(body);
+    // What a self-rescheduling alarm() does: set the next one *during*
+    // delivery. Deleting the claimed row after this would erase it.
+    await b!.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: Date.now() + 60_000 });
+    return new Response("", { status: 204 });
+  };
+
+  b = make({ bindings: doBindings, sproutUrl: "http://127.0.0.1:1/", fetchImpl });
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: Date.now() - 1 });
+
+  await Bun.sleep(900);
+  expect(delivered.length).toBe(1);
+  expect(obj(delivered[0]).cls).toBe("Counter");
+  expect(obj(delivered[0]).id).toBe("a");
+
+  // the alarm the handler scheduled is still pending, not clobbered by the claim
+  const pending = await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" });
+  expect(pending.at).not.toBeNull();
+  expect(Number(pending.at)).toBeGreaterThan(Date.now());
+});
+
+test("alarm: a failed delivery is retried, not lost", async () => {
+  let attempts = 0;
+  const fetchImpl: FetchLike = async () => {
+    attempts += 1;
+    return new Response("boom", { status: 500 });
+  };
+  const b = make({ bindings: doBindings, sproutUrl: "http://127.0.0.1:1/", fetchImpl });
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: Date.now() - 1 });
+
+  await Bun.sleep(900);
+  expect(attempts).toBeGreaterThan(0);
+  // re-armed for a later retry rather than dropped on the floor
+  const pending = await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" });
+  expect(pending.at).not.toBeNull();
+});
+
+// --- service bindings (#48) --------------------------------------------------
+
+const svcBindings = { services: [{ binding: "AUTH", service: "auth-api" }] };
+
+test("service: forwards through the edge with the target's Host header", async () => {
+  const seen: Array<{ url: string; host: string | null; method: string; body: string | null }> = [];
+  const fetchImpl: FetchLike = async (url, init) => {
+    const headers = new Headers(init?.headers);
+    seen.push({
+      url: String(url),
+      host: headers.get("host"),
+      method: String(init?.method),
+      body: init?.body == null ? null : String(init.body),
+    });
+    return new Response("pong", { status: 200, headers: { "content-type": "text/plain" } });
+  };
+  const b = make({
+    bindings: svcBindings,
+    services: { AUTH: "auth-api.andrea.example.com" },
+    edgeUrl: "http://127.0.0.1:8080/",
+    fetchImpl,
+  });
+
+  const reply = await b.dispatch({
+    op: "service.fetch",
+    binding: "AUTH",
+    url: "https://service/verify?token=abc",
+    method: "POST",
+    headers: [["content-type", "application/json"]],
+    body: '{"t":1}',
+  });
+
+  expect(reply.status).toBe(200);
+  expect(reply.body).toBe("pong");
+  // The path and query survive; the destination is the edge, and the Host
+  // header is what actually routes it to the target deployment.
+  expect(seen[0].url).toBe("http://127.0.0.1:8080/verify?token=abc");
+  expect(seen[0].host).toBe("auth-api.andrea.example.com");
+  expect(seen[0].method).toBe("POST");
+  expect(seen[0].body).toBe('{"t":1}');
+});
+
+test("service: a binding the artifact never declared is refused", async () => {
+  const b = make({ bindings: svcBindings, services: { AUTH: "a.example.com" }, edgeUrl: "http://127.0.0.1:8080/" });
+  await expect(b.dispatch({ op: "service.fetch", binding: "GHOST", url: "https://service/" })).rejects.toThrow(
+    /service not bound: GHOST/,
+  );
+});
+
+test("service: declared but not deployed says so, instead of a bare 502", async () => {
+  const b = make({ bindings: svcBindings, services: {}, edgeUrl: "http://127.0.0.1:8080/" });
+  await expect(b.dispatch({ op: "service.fetch", binding: "AUTH", url: "https://service/" })).rejects.toThrow(
+    /"auth-api" is not deployed/,
+  );
+});
+
+test("service: a call is not subject to the outbound allowlist", async () => {
+  // The target is reached internally through the edge, so a project with no
+  // `outbound` hosts can still call a service binding.
+  const fetchImpl: FetchLike = async () => new Response("ok", { status: 200 });
+  const b = make({
+    bindings: { ...svcBindings, outbound: [] },
+    services: { AUTH: "auth-api.andrea.example.com" },
+    edgeUrl: "http://127.0.0.1:8080/",
+    fetchImpl,
+  });
+  expect((await b.dispatch({ op: "service.fetch", binding: "AUTH", url: "https://service/" })).status).toBe(200);
+  // ...while real egress to the same host is still refused.
+  await expect(b.dispatch({ op: "fetch", url: "https://auth-api.andrea.example.com/" })).rejects.toThrow(
+    /outbound allowlist/,
+  );
+});
+
+// --- v1 frames (#63) --------------------------------------------------------
+
+/** Send one v1 frame over a real socket and return the decoded reply. */
+async function v1(
+  server: { port: number },
+  json: Frame,
+  binary?: Uint8Array,
+): Promise<{ json: JsonObject; bytes: Uint8Array }> {
+  const payload = encodeV1(json, binary);
+  const frame = new Uint8Array(4 + payload.length);
+  new DataView(frame.buffer).setUint32(0, payload.length, true);
+  frame.set(payload, 4);
+  const chunks: Uint8Array[] = [];
+  const socket = await Bun.connect({
+    hostname: "127.0.0.1",
+    port: server.port,
+    socket: { data: (_s, d) => void chunks.push(new Uint8Array(d)) },
+  });
+  socket.write(frame);
+  for (let i = 0; i < 200 && chunks.length === 0; i++) await Bun.sleep(5);
+  await Bun.sleep(20);
+  socket.end();
+  const all = Buffer.concat(chunks);
+  const jsonLen = all.readUInt32LE(5);
+  return {
+    json: obj(parseJsonValue(all.subarray(9, 9 + jsonLen).toString("utf8"))),
+    bytes: new Uint8Array(all.subarray(9 + jsonLen)),
+  };
+}
+
+test("v1: an object body round-trips as bytes, not as escaped JSON", async () => {
+  const b = make({ bindings: { r2: ["UP"] }, token: "tok" });
+  const server = listen(b, "127.0.0.1", 0);
+  // Every byte value, including the ones JSON escapes and the ones that are not
+  // valid UTF-8 — the whole point of carrying them outside the JSON.
+  const body = new Uint8Array(1024);
+  for (let i = 0; i < body.length; i++) body[i] = i % 256;
+
+  const put = await v1(server, { v: 1, token: "tok", op: "r2.put", bucket: "UP", key: "k" }, body);
+  expect(put.json.ok).toBe(true);
+  expect(obj(put.json.object).size).toBe(1024);
+
+  const got = await v1(server, { v: 1, token: "tok", op: "r2.get", bucket: "UP", key: "k" });
+  expect(got.json.found).toBe(true);
+  expect(got.bytes.length).toBe(1024);
+  expect(Buffer.from(got.bytes).equals(Buffer.from(body))).toBe(true);
+  server.stop();
+});
+
+test("v1: the etag is sha256 of the bytes, matching the v0 path", async () => {
+  const b = make({ bindings: { r2: ["UP"] }, token: "tok" });
+  const server = listen(b, "127.0.0.1", 0);
+  const body = new TextEncoder().encode("the file contents");
+  const put = await v1(server, { v: 1, token: "tok", op: "r2.put", bucket: "UP", key: "k" }, body);
+  expect(obj(put.json.object).etag).toBe(createHash("sha256").update(body).digest("hex"));
+  server.stop();
+});
+
+test("v1: a wrong token is refused before the op runs", async () => {
+  const b = make({ bindings: { r2: ["UP"] }, token: "tok" });
+  const server = listen(b, "127.0.0.1", 0);
+  const reply = await v1(server, { v: 1, token: "nope", op: "r2.put", bucket: "UP", key: "k" }, new Uint8Array(4));
+  expect(reply.json.ok).toBe(false);
+  expect(reply.json.error).toBe("unauthorized");
+  server.stop();
+});
+
+test("v0 frames still work, so an older artifact keeps running", async () => {
+  // The compatibility that matters: rollback can reactivate a sprout built
+  // before v1 existed, and it will speak the token-line format forever.
+  const b = make({ bindings: { kv: ["CACHE"] }, token: "tok" });
+  const reply = await b.handleFrame(Buffer.from('tok\n{"op":"kv.put","ns":"CACHE","key":"k","value":"v"}', "utf8"));
+  const len = reply.readUInt32LE(0);
+  expect(reply[4]).not.toBe(1); // a v0 request gets a v0 reply
+  expect(obj(parseJsonValue(reply.subarray(4, 4 + len).toString("utf8"))).ok).toBe(true);
+});
+
+test("a resent request is applied once, not twice (#63 §3)", async () => {
+  const b = make({ bindings: { d1: ["DB"] } });
+  const frame = (msg: Frame) => Buffer.from(`\n${JSON.stringify(msg)}`, "utf8");
+  await b.handleFrame(frame({ v: 1, id: 1, op: "d1.exec", db: "DB", sql: "CREATE TABLE t (v TEXT)" }));
+
+  // The same id three times is what a reconnect produces: the transport retries
+  // the exact bytes, having no way to know whether the first attempt landed.
+  const insert = { v: 1, id: 42, op: "d1.query", db: "DB", sql: "INSERT INTO t (v) VALUES ('x')" };
+  await b.handleFrame(frame(insert));
+  await b.handleFrame(frame(insert));
+  await b.handleFrame(frame(insert));
+
+  const counted = await b.dispatch({ op: "d1.query", db: "DB", sql: "SELECT count(*) AS n FROM t" });
+  expect(obj(arr(counted.results)[0]).n).toBe(1);
+
+  // A different id is a different request and does apply.
+  await b.handleFrame(frame({ ...insert, id: 43 }));
+  const after = await b.dispatch({ op: "d1.query", db: "DB", sql: "SELECT count(*) AS n FROM t" });
+  expect(obj(arr(after.results)[0]).n).toBe(2);
+});
+
+test("replaying a read is allowed, since it changes nothing", async () => {
+  const b = make({ bindings: { kv: ["CACHE"] } });
+  await b.handleFrame(
+    Buffer.from(`\n${JSON.stringify({ v: 1, id: 1, op: "kv.put", ns: "CACHE", key: "k", value: "v" })}`, "utf8"),
+  );
+  const read = async () =>
+    b.handleFrame(Buffer.from(`\n${JSON.stringify({ v: 1, id: 2, op: "kv.get", ns: "CACHE", key: "k" })}`, "utf8"));
+  const a = await read();
+  const c = await read();
+  expect(a.subarray(4).toString()).toBe(c.subarray(4).toString());
 });

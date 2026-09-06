@@ -13,7 +13,16 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
 import { ensureUWebSockets, porfforRoot, UwsUnavailableError } from "./toolchain";
-import { EMPTY_BINDINGS, preludePath, wrapNativeFetchHandler, type Bindings } from "./wrap";
+import {
+  EMPTY_BINDINGS,
+  preludePath,
+  transportPath,
+  wrapNativeFetchHandler,
+  TRANSPORT_MARKER,
+  type Bindings,
+  type Transport,
+} from "./wrap";
+export type { Transport } from "./wrap";
 
 export {
   BASELINE_COMPATIBILITY_DATE,
@@ -35,6 +44,16 @@ export type CompileInput = {
   /** The project's `compatibility_date`, baked in so the runtime can gate a
    *  behaviour change on it. Defaults to the baseline when absent. */
   compatibilityDate?: string;
+  /** #15 — which `__sbCall` to compile in. Defaults to the broker transport. */
+  transport?: Transport;
+  /** #15 — the project name, baked so an embedded build can default its data dir. */
+  appName?: string;
+  /** #15 — assets baked into the module (embedded builds have no files on disk). */
+  assets?: { manifest: unknown; files: Record<string, string> };
+  /** #15 — objects to add to the native-fetch link line (SQLite, BearSSL). */
+  extraLink?: string[];
+  /** #15 — flags for the compile step, so inline C can include BearSSL's header. */
+  extraCflags?: string[];
   /** Cross-compiler for `linux-x86_64`. Not needed, and not used, for `host`. */
   zigBin?: string;
   /**
@@ -45,6 +64,29 @@ export type CompileInput = {
    */
   target?: "linux-x86_64" | "host";
 };
+
+/**
+ * The prelude with a transport spliced in — the exact text the compiler sees.
+ *
+ * Exported because more than one caller composes a sprout: the build, and the
+ * kitchen-sink harness that compiles one itself. Reading
+ * `native-fetch-prelude.js` alone yields a module with no `__sbCall` at all.
+ */
+export async function loadPrelude(transport: Transport = "broker"): Promise<string> {
+  const [core, chosen] = await Promise.all([readFile(preludePath, "utf8"), readFile(transportPath(transport), "utf8")]);
+  if (!core.includes(TRANSPORT_MARKER)) {
+    throw new Error("prelude is missing its transport marker — src/native-fetch-prelude.js changed shape");
+  }
+  return core.replace(TRANSPORT_MARKER, chosen);
+}
+
+/** Child env for the Porffor run. `SB_EXTRA_LINK` is read by the patched link
+ *  step (#15) and is absent entirely for a normal build. */
+function compileEnv(path: string, extraLink?: string[], extraCflags?: string[]) {
+  const link = extraLink && extraLink.length > 0 ? extraLink.join(" ") : undefined;
+  const cflags = extraCflags && extraCflags.length > 0 ? extraCflags.join(" ") : undefined;
+  return { ...process.env, PATH: path, SB_EXTRA_LINK: link, SB_EXTRA_CFLAGS: cflags };
+}
 
 /** Compile `sourcePath` to a native binary at `outPath` (mode 0555). */
 export async function compileSprout(input: CompileInput): Promise<void> {
@@ -83,7 +125,7 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   const generatedPath = resolve(outDir, "sprout.generated.js");
   const [source, prelude] = await Promise.all([
     input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),
-    readFile(preludePath, "utf8"),
+    loadPrelude(input.transport ?? "broker"),
   ]);
   await writeFile(
     generatedPath,
@@ -94,6 +136,8 @@ export async function compileSprout(input: CompileInput): Promise<void> {
       input.bindings ?? EMPTY_BINDINGS,
       undefined,
       input.compatibilityDate,
+      input.appName,
+      input.assets,
     ),
   );
 
@@ -113,7 +157,12 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   const crossFlags = input.target === "host" ? [] : ["--musl"];
   const child = Bun.spawn(
     [process.execPath, launcher, "native", generatedPath, "-o", input.outPath, ...crossFlags, "-s"],
-    { cwd: outDir, stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: path } },
+    {
+      cwd: outDir,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: compileEnv(path, input.extraLink, input.extraCflags),
+    },
   );
   let timedOut = false;
   const timer = setTimeout(() => {

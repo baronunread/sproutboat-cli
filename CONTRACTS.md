@@ -55,6 +55,9 @@ Ops:
 - `d1.batch`
 - `d1.exec`
 - `d1.query`
+- `do.alarm.delete`
+- `do.alarm.get`
+- `do.alarm.set`
 - `do.storage.delete`
 - `do.storage.delete_all`
 - `do.storage.get`
@@ -74,12 +77,14 @@ Ops:
 - `r2.list`
 - `r2.put`
 - `secret.get`
+- `service.fetch`
 
 ## Storage
 
 Tables in a resource file, which outlives every redeploy:
 
 - `ae`
+- `do_alarm`
 - `do_storage`
 - `kv`
 - `mq`
@@ -97,6 +102,7 @@ Tables in a resource file, which outlives every redeploy:
 - `queues`
 - `r2`
 - `secrets`
+- `services`
 
 ## Project config
 
@@ -117,6 +123,7 @@ still a compatibility event.
 - `queues`
 - `analytics_engine_datasets`
 - `durable_objects`
+- `services`
 - `triggers`
 - `assets`
 
