@@ -10,6 +10,64 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-09-07
+### Added
+- `sproutboat build --standalone`: one executable that carries its own bindings.
+  SQLite is compiled into the sprout, so a ~2 MB file serves KV, D1, R2, queues,
+  Durable Objects, alarms, analytics and assets with nothing beside it on disk —
+  no Bun, no broker, no control plane. State lives in `<name>.data/store.sqlite`
+  plus `d1/<binding>.sqlite`, the same layout `sproutboat dev` writes, which is
+  what lets one conformance suite hold both backends to the same behaviour.
+  Secrets come from the environment (then `<data>/secrets.json`) and a missing
+  one refuses the boot, listing every name at once, rather than throwing on the
+  first request that needs it. Cron ticks, queue batches and DO alarms run on
+  in-process timers; assets are baked in, capped at 8 MB.
+- Outbound TLS from a standalone binary. `fetch("https://…")` verifies against
+  curl's Mozilla-derived root set via BearSSL, linked in beside SQLite
+  (1.86 → 2.02 MB). `SB_CA_BUNDLE` adds a private or corporate CA to that set;
+  it only ever adds trust, and nothing disables verification.
+- Durable Object alarms: `setAlarm` / `getAlarm` / `deleteAlarm` and the
+  `alarm()` handler. At most one alarm is pending per object and a later
+  `setAlarm` replaces it, matching Workers. Delivery claims before running, so
+  an `alarm()` that schedules its own next run is not erased by the delivery
+  that invoked it.
+- Service bindings: `env.<BINDING>.fetch()` reaches another deployment on the
+  same node through the edge on loopback. This is the CLI half; a binding that
+  resolves to nothing reports the target as undeployed rather than failing as a
+  502.
+- Binary values in the binding frame. An R2 object body now travels beside the
+  JSON rather than encoded inside it.
+- `SB_FETCH_MAX_BYTES` (32 MiB default) caps an outbound response body. An
+  unbounded upstream could previously drive a sprout's memory to whatever it
+  chose to send.
+
+### Fixed
+- `d1.exec` ran only the first statement of a multi-statement script, so a
+  schema built in one `exec()` call silently created only its first table.
+- `r2.get` / `head` / `put` / `list` returned flat fields where the shim reads
+  `r.object`, and `ae.query` omitted the `count` its caller reads.
+- Trigger authentication accepted *any* caller when no token was configured.
+  The hole predates this release; a standalone binary listening on a public
+  interface is what made it reachable.
+- Binary R2 values were corrupted in transit — `0x08` and `0x0c` arrived as
+  `b` and `f`.
+- A retried binding call could apply a write twice. Every request now carries an
+  id and the broker replays the cached reply for a repeat of a mutating op
+  instead of performing it again.
+
+### Changed
+- A dropped broker connection is retried four times with 0/5/25/100 ms backoff
+  instead of failing after one attempt, which covers a broker restart mid-call.
+- The bundled (Bun) standalone backend is gone. The embedded one passes the same
+  suite at 1.9 MB against 63 MB, and TLS removed its last real advantage.
+- A native-fetch binary cannot see `argv` — Porffor's runtime init calls
+  `porf_init(0, NULL)` — so a standalone binary is configured through `PORT`,
+  `SB_DATA_DIR` / `SPROUTBOAT_DATA` and the environment only, never flags.
+
+### Performance
+- An 8 MB R2 put through the broker went from 255 MB to 149 MB peak RSS.
+- The broker's frame reader no longer re-concatenates its buffer per chunk.
+
 ## [0.7.0] — 2026-09-06
 ### Added
 - `compatibility_date` now reaches the artifact instead of being validated and
@@ -202,7 +260,9 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.4.11...v0.5.0
