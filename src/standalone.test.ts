@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { resolveStorePaths } from "./standalone";
+import { missingSecretsMessage, resolveSecrets, resolveStorePaths } from "./standalone";
 
 test("defaults to <name>.data in the working directory", () => {
   const paths = resolveStorePaths("hello", { cwd: "/srv/apps" });
@@ -31,4 +31,40 @@ test("D1 is a directory beside the store, never inside it", () => {
   const paths = resolveStorePaths("hello", { cwd: "/srv" });
   expect(paths.d1Dir.startsWith(paths.dataDir)).toBe(true);
   expect(paths.d1Dir).not.toBe(paths.storePath);
+});
+
+test("secrets: the environment wins, the file fills the gaps", () => {
+  const result = resolveSecrets(["A", "B"], { env: { A: "from-env" }, file: { A: "ignored", B: "from-file" } });
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.values).toEqual({ A: "from-env", B: "from-file" });
+    expect(result.sources).toEqual({ A: "env", B: "file" });
+  }
+});
+
+test("secrets: an empty value counts as absent", () => {
+  // `FOO=$UNSET` in a shell script arrives as "": starting with a silently
+  // empty API key is worse than refusing to start.
+  const result = resolveSecrets(["A"], { env: { A: "" }, file: {} });
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.missing).toEqual(["A"]);
+});
+
+test("secrets: every missing name is reported at once, not one per restart", () => {
+  const result = resolveSecrets(["A", "B", "C"], { env: { B: "x" }, file: {} });
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(result.missing).toEqual(["A", "C"]);
+    const message = missingSecretsMessage(result.missing, "/srv/hello.data");
+    expect(message).toContain("A, C");
+    expect(message).toContain("/srv/hello.data/secrets.json");
+  }
+});
+
+test("secrets: a non-string in the file is not a value", () => {
+  expect(resolveSecrets(["A"], { env: {}, file: { A: 42 } }).ok).toBe(false);
+});
+
+test("secrets: declaring none resolves trivially", () => {
+  expect(resolveSecrets([], {})).toEqual({ ok: true, values: {}, sources: {} });
 });
