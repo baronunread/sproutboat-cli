@@ -118,11 +118,13 @@ export default {
     if (attachMatch && request.method === "POST") {
       const id = attachMatch[1];
       const body = request.body || "";
-      // The native-fetch server caps an inbound request body at 1 MiB, so that —
-      // not the broker frame — is the real upload ceiling. Large-object R2
-      // (chunked put / streaming get) is tracked in baronunread/sproutboat#56.
-      if (body.length > 900 * 1024)
-        return json({ error: "file too large — demo R2 upload cap is ~900 KB (see issue #56)" }, 413);
+      // The runtime refuses an inbound body over SB_REQUEST_BODY_MAX (1 MiB by
+      // default) before this handler runs, so raising the demo's own guard only
+      // helps when that variable is raised too. Whole-object R2 either way:
+      // chunked put and streaming get are baronunread/sproutboat#56.
+      const cap = Number(env.MAX_UPLOAD_BYTES) || 900 * 1024;
+      if (body.length > cap)
+        return json({ error: "file too large — this build accepts " + Math.floor(cap / 1024) + " KB" }, 413);
       const key = "note-" + id + "-" + Date.now() + ".txt";
       try {
         env.UPLOADS.put(key, body, { customMetadata: { noteId: id } });

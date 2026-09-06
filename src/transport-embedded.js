@@ -145,6 +145,12 @@ static int sb_bind_params(sqlite3_stmt* st, const char* json) {
           if (c == 'n') out[n++] = '\n';
           else if (c == 't') out[n++] = '\t';
           else if (c == 'r') out[n++] = '\r';
+          // \b and \f are the two escapes JSON.stringify emits that are easy to
+          // forget. Without them the fallthrough below writes the letter, so a
+          // stored byte 0x08 came back as 'b' and 0x0c as 'f' — the only two
+          // values in 0..255 that R2 could not round-trip.
+          else if (c == 'b') out[n++] = 8;
+          else if (c == 'f') out[n++] = 12;
           else if (c == 'u') {
             unsigned int cp = 0;
             for (int k = 0; k < 4 && *p; k++) {

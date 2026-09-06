@@ -56,7 +56,44 @@ const CFLAGS_INJECT =
   "          ...(process.env.SB_EXTRA_CFLAGS ? process.env.SB_EXTRA_CFLAGS.split(' ').filter(Boolean) : []),\n";
 const CFLAGS_MARKER = "SB_EXTRA_CFLAGS";
 
+/**
+ * #56 — make the inbound request-body limit configurable.
+ *
+ * Porffor's uWebSockets shim hardcodes 1 MiB and answers anything larger with a
+ * bare `413 request body too large` before the handler runs, so a project can
+ * neither accept a bigger upload nor say anything useful about the refusal.
+ *
+ * The default stays 1 MiB: a larger body is held in memory whole, so raising it
+ * is a decision about this deployment's memory, not something to inherit.
+ */
+const BODY_ANCHOR = "static const size_t REQUEST_BODY_MAX_BYTES = 1024u * 1024u;";
+const BODY_INJECT = `static size_t sb_request_body_max(void) {
+  static size_t cached = 0;
+  if (cached == 0) {
+    const char* raw = getenv("SB_REQUEST_BODY_MAX");
+    long parsed = raw && *raw ? atol(raw) : 0;
+    cached = parsed > 0 ? (size_t)parsed : 1024u * 1024u;
+  }
+  return cached;
+}
+#define REQUEST_BODY_MAX_BYTES sb_request_body_max()`;
+const BODY_MARKER = "sb_request_body_max";
+
 let done = false;
+
+/** The uWebSockets shim source, which is where the body limit lives. */
+async function patchBodyLimit(): Promise<void> {
+  const file = resolve(porfforRoot(), "compiler/uwebsockets.js");
+  const src = await readFile(file, "utf8");
+  if (src.includes(BODY_MARKER)) return;
+  if (!src.includes(BODY_ANCHOR)) {
+    throw new Error(
+      `could not patch Porffor's request body limit: anchor not found in ${file}. ` +
+        "Porffor's uWebSockets shim changed — check patches/UPSTREAM.md.",
+    );
+  }
+  await writeFile(file, src.replace(BODY_ANCHOR, BODY_INJECT));
+}
 
 async function patchCompilerArgs(): Promise<void> {
   const file = resolve(porfforRoot(), "compiler/index.js");
@@ -88,6 +125,7 @@ async function patchCompilerArgs(): Promise<void> {
 export async function ensurePorfforPatched(): Promise<void> {
   if (done) return;
   await patchCompilerArgs();
+  await patchBodyLimit();
   const file = resolve(porfforRoot(), "compiler/render.js");
   const src = await readFile(file, "utf8");
   if (src.includes(ENV_MARKER)) {

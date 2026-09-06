@@ -8,6 +8,9 @@
   "vars": {
     "SITE_NAME": "Sproutboat Notes",
     "QUOTE_URL": "https://api.quotable.local/random",
+    // Kept in step with SB_REQUEST_BODY_MAX at run time; the runtime refuses a
+    // larger body before the handler sees it.
+    "MAX_UPLOAD_BYTES": "8388608",
   },
   "secrets": ["ADMIN_TOKEN"],
   "kv_namespaces": ["SESSIONS"],
