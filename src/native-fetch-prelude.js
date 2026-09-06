@@ -858,6 +858,19 @@ function __sbDOStorage(cls, id) {
     deleteAll() {
       __sbRpc("do.storage.delete_all", { cls, id });
     },
+    // #125 — alarms. Cloudflare takes a Date or epoch ms; at most one is
+    // pending per object, so setting one replaces any earlier alarm.
+    setAlarm(when) {
+      const at = when instanceof Date ? when.getTime() : Number(when);
+      __sbRpc("do.alarm.set", { cls, id, at: at });
+    },
+    getAlarm() {
+      const r = __sbRpc("do.alarm.get", { cls, id });
+      return r.at == null ? null : r.at;
+    },
+    deleteAlarm() {
+      __sbRpc("do.alarm.delete", { cls, id });
+    },
     list(options) {
       const o = options || {};
       const r = __sbRpc("do.storage.list", {
@@ -970,6 +983,14 @@ globalThis.__sbEntry = function (handlers, request) {
     return new Response(JSON.stringify({ ack: acked, retry: retried }), {
       headers: { "content-type": "application/json" },
     });
+  }
+
+  if (trigger === "alarm") {
+    const body = __sbReadJson(request);
+    const inst = __sbGetDOInstance(String(body.cls || ""), String(body.id || ""));
+    if (!__sbIsFn(inst.alarm)) return new Response("no alarm handler", { status: 404 });
+    inst.alarm();
+    return new Response("", { status: 204 });
   }
 
   return new Response("unknown trigger", { status: 400 });

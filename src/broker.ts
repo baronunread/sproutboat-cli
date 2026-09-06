@@ -193,6 +193,12 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     "CREATE TABLE IF NOT EXISTS ae (dataset TEXT NOT NULL, ts INTEGER NOT NULL, indexes_json TEXT NOT NULL, " +
       "blobs_json TEXT NOT NULL, doubles_json TEXT NOT NULL)",
   );
+  // #125 — at most one pending alarm per object, which is the Workers rule: a
+  // later setAlarm replaces the earlier one rather than queueing beside it.
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS do_alarm (cls TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, " +
+      "attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cls, id))",
+  );
 
   // #74 — one SQLite file per account-level resource id, opened on first use.
   const resourceDbs = new Map<string, Database>();
@@ -540,6 +546,25 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         return { ok: true, entries: rows.map((r) => [r.key, r.value]) };
       }
 
+      // #125 — alarms. `at` is epoch ms; setting one replaces any pending alarm
+      // for that object, and attempts resets because this is a fresh schedule.
+      case "do.alarm.set":
+        db.query(
+          "INSERT INTO do_alarm (cls, id, at, attempts) VALUES (?1,?2,?3,0) " +
+            "ON CONFLICT (cls, id) DO UPDATE SET at = ?3, attempts = 0",
+        ).run(requireDoClass(msg.cls), str(msg.id), Math.trunc(Number(msg.at) || 0));
+        return { ok: true };
+      case "do.alarm.get": {
+        const row = db
+          .query<{ at: number }, [string, string]>("SELECT at FROM do_alarm WHERE cls = ? AND id = ?")
+          .get(requireDoClass(msg.cls), str(msg.id));
+        return { ok: true, at: row ? row.at : null };
+      }
+      case "do.alarm.delete": {
+        const r = db.query("DELETE FROM do_alarm WHERE cls = ? AND id = ?").run(requireDoClass(msg.cls), str(msg.id));
+        return { ok: true, deleted: r.changes > 0 };
+      }
+
       case "assets.get": {
         if (!bindings.assets) throw new Error("assets not bound");
         const reqPath = str(msg.path) || "/";
@@ -583,7 +608,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   const QUEUE_BATCH = 10;
   const QUEUE_MAX_ATTEMPTS = 5;
 
-  async function deliverTrigger(kind: "scheduled" | "queue", body: JsonObject): Promise<Response | null> {
+  async function deliverTrigger(kind: "scheduled" | "queue" | "alarm", body: JsonObject): Promise<Response | null> {
     if (!opts.sproutUrl) return null;
     try {
       return await doFetch(opts.sproutUrl, {
@@ -643,8 +668,48 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     }
   }
 
+  const ALARM_MAX_ATTEMPTS = 5;
+
+  /**
+   * #125 — fire alarms that are due.
+   *
+   * Claim-then-deliver, not deliver-then-delete: `alarm()` is allowed to call
+   * `setAlarm()` for its next run, and that write lands *during* delivery. If
+   * we deleted afterwards we would erase the alarm the handler just scheduled,
+   * which is how a self-rescheduling object silently stops. Deleting first
+   * means the handler's row is a fresh insert nothing else touches.
+   *
+   * A failed delivery re-arms with the queue consumer's policy — 5s apart, five
+   * attempts — and `DO NOTHING` so a re-arm never overwrites an alarm the
+   * handler set itself.
+   */
+  function fireAlarmsOnce(): void {
+    if (!opts.sproutUrl || bindings.do.length === 0) return;
+    const now = Date.now();
+    const due = db
+      .query<{ cls: string; id: string; at: number; attempts: number }, [number]>(
+        "SELECT cls, id, at, attempts FROM do_alarm WHERE at <= ? ORDER BY at LIMIT 10",
+      )
+      .all(now);
+    if (due.length === 0) return;
+    const claim = db.query("DELETE FROM do_alarm WHERE cls = ? AND id = ?");
+    const rearm = db.query(
+      "INSERT INTO do_alarm (cls, id, at, attempts) VALUES (?1,?2,?3,?4) ON CONFLICT (cls, id) DO NOTHING",
+    );
+    for (const row of due) {
+      claim.run(row.cls, row.id);
+      void deliverTrigger("alarm", { cls: row.cls, id: row.id, scheduledTime: row.at }).then((res) => {
+        if (res && res.ok) return;
+        const attempts = row.attempts + 1;
+        if (attempts >= ALARM_MAX_ATTEMPTS) return; // give up rather than spin forever
+        rearm.run(row.cls, row.id, Date.now() + 5_000, attempts);
+      });
+    }
+  }
+
   if (opts.sproutUrl) {
     if (bindings.queues.length > 0) timers.push(setInterval(drainQueuesOnce, 500));
+    if (bindings.do.length > 0) timers.push(setInterval(fireAlarmsOnce, 500));
     if (bindings.crons.length > 0) {
       let lastTick = "";
       timers.push(

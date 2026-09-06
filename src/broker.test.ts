@@ -352,3 +352,75 @@ test("listen(): framed request/reply over a real socket, delivered split", async
     server.stop();
   }
 });
+
+// --- Durable Object alarms (#125) -------------------------------------------
+
+const doBindings = { do: [{ binding: "COUNTER", className: "Counter" }] };
+
+test("alarm: set, read back, and delete", async () => {
+  const b = make({ bindings: doBindings });
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" })).at).toBeNull();
+
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: 1_800_000_000_000 });
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" })).at).toBe(1_800_000_000_000);
+
+  // Workers keeps at most one pending alarm per object: a later set replaces.
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: 1_900_000_000_000 });
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" })).at).toBe(1_900_000_000_000);
+
+  expect((await b.dispatch({ op: "do.alarm.delete", cls: "Counter", id: "a" })).deleted).toBe(true);
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" })).at).toBeNull();
+});
+
+test("alarm: one object's alarm is not another's", async () => {
+  const b = make({ bindings: doBindings });
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: 1_800_000_000_000 });
+  expect((await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "b" })).at).toBeNull();
+});
+
+test("alarm: a class that is not bound is refused", async () => {
+  const b = make({ bindings: doBindings });
+  await expect(b.dispatch({ op: "do.alarm.set", cls: "Ghost", id: "a", at: 1 })).rejects.toThrow(/not bound/);
+});
+
+test("alarm: a due alarm is delivered once, and a self-rescheduling handler survives", async () => {
+  const delivered: JsonObject[] = [];
+  let b: Broker | undefined;
+  const fetchImpl: FetchLike = async (_url, init) => {
+    const body = obj(parseJsonValue(String(init?.body)));
+    delivered.push(body);
+    // What a self-rescheduling alarm() does: set the next one *during*
+    // delivery. Deleting the claimed row after this would erase it.
+    await b!.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: Date.now() + 60_000 });
+    return new Response("", { status: 204 });
+  };
+
+  b = make({ bindings: doBindings, sproutUrl: "http://127.0.0.1:1/", fetchImpl });
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: Date.now() - 1 });
+
+  await Bun.sleep(900);
+  expect(delivered.length).toBe(1);
+  expect(obj(delivered[0]).cls).toBe("Counter");
+  expect(obj(delivered[0]).id).toBe("a");
+
+  // the alarm the handler scheduled is still pending, not clobbered by the claim
+  const pending = await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" });
+  expect(pending.at).not.toBeNull();
+  expect(Number(pending.at)).toBeGreaterThan(Date.now());
+});
+
+test("alarm: a failed delivery is retried, not lost", async () => {
+  let attempts = 0;
+  const fetchImpl: FetchLike = async () => {
+    attempts += 1;
+    return new Response("boom", { status: 500 });
+  };
+  const b = make({ bindings: doBindings, sproutUrl: "http://127.0.0.1:1/", fetchImpl });
+  await b.dispatch({ op: "do.alarm.set", cls: "Counter", id: "a", at: Date.now() - 1 });
+
+  await Bun.sleep(900);
+  expect(attempts).toBeGreaterThan(0);
+  // re-armed for a later retry rather than dropped on the floor
+  const pending = await b.dispatch({ op: "do.alarm.get", cls: "Counter", id: "a" });
+  expect(pending.at).not.toBeNull();
+});

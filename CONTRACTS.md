@@ -55,6 +55,9 @@ Ops:
 - `d1.batch`
 - `d1.exec`
 - `d1.query`
+- `do.alarm.delete`
+- `do.alarm.get`
+- `do.alarm.set`
 - `do.storage.delete`
 - `do.storage.delete_all`
 - `do.storage.get`
@@ -80,6 +83,7 @@ Ops:
 Tables in a resource file, which outlives every redeploy:
 
 - `ae`
+- `do_alarm`
 - `do_storage`
 - `kv`
 - `mq`
