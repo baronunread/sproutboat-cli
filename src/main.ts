@@ -8,7 +8,7 @@ import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
 import { bundleHandler, BundleError, type BundleResult } from "./bundle";
 import { runDev } from "./dev";
-import { buildStandalone } from "./standalone-build";
+import { buildStandalone, type StandaloneBackend } from "./standalone-build";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
@@ -260,9 +260,13 @@ async function build(directory?: string, target: "linux-x86_64" | "host" = "linu
  * *this* machine either way in phase 0 — cross-compiling both halves comes with
  * the embedded backend, which removes the launcher entirely.
  */
-async function buildStandaloneBinary(directory: string | undefined, target: "linux-x86_64" | "host") {
+async function buildStandaloneBinary(
+  directory: string | undefined,
+  target: "linux-x86_64" | "host",
+  backend: StandaloneBackend,
+) {
   const project = await readProject(directory);
-  console.log(dim(`Building a standalone ${project.config.name} (${target})…`));
+  console.log(dim(`Building a standalone ${project.config.name} (${target}, ${backend})…`));
   const workDir = resolve(project.directory, ".sproutboat/standalone");
   try {
     const result = await buildStandalone({
@@ -272,9 +276,15 @@ async function buildStandaloneBinary(directory: string | undefined, target: "lin
       source: project.bundle.code,
       target,
       workDir,
+      backend,
     });
     console.log(ok(`built ${result.outPath} (${(result.bytes / 1_000_000).toFixed(1)} MB)`));
     console.log(dim(`  run it: ${result.outPath}   ·   state lands in ./${project.config.name}.data`));
+    if (backend === "embedded" && (project.config.outbound ?? []).length > 0) {
+      console.log(
+        amber("  ! outbound fetch() works over http:// only in an embedded binary; https needs --backend bundled"),
+      );
+    }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
@@ -971,8 +981,10 @@ switch (command) {
   case "build": {
     const hostBuild = args.includes("--target") && args[args.indexOf("--target") + 1] === "host";
     const directory = args.find((arg) => !arg.startsWith("--") && arg !== "host");
-    if (args.includes("--standalone")) await buildStandaloneBinary(directory, hostBuild ? "host" : "linux-x86_64");
-    else await build(directory, hostBuild ? "host" : "linux-x86_64");
+    if (args.includes("--standalone")) {
+      const bundled = args[args.indexOf("--backend") + 1] === "bundled" && args.includes("--backend");
+      await buildStandaloneBinary(directory, hostBuild ? "host" : "linux-x86_64", bundled ? "bundled" : "embedded");
+    } else await build(directory, hostBuild ? "host" : "linux-x86_64");
     break;
   }
   case "login":

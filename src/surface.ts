@@ -89,10 +89,10 @@ export const COMMANDS: readonly Command[] = [
     name: "build",
     group: "Develop",
     emoji: "🔨",
-    args: "[project-dir] [--target host]",
+    args: "[project-dir] [--target host] [--standalone [--backend bundled]]",
     brief: "[project-dir]",
     summary:
-      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable.",
+      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. `--standalone` emits one executable carrying its own bindings: SQLite compiled in (~2 MB), or `--backend bundled` to ship the Bun broker beside it (~60 MB) when a handler needs https from `fetch()`.",
   },
 
   {
