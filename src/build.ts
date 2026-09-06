@@ -99,6 +99,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     bindings,
     zigBin,
     target: input.target,
+    compatibilityDate: input.config.compatibility_date,
   });
 
   const sprout = await readFile(sproutPath);
@@ -111,6 +112,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     porfforVersion: porfforVersion(),
     esbuildVersion: esbuildVersion(),
     buildImage: toolchainStamp(),
+    compatibilityDate: input.config.compatibility_date,
     sourceHash,
     binaryHash: digest(sprout),
     binarySize: (await stat(sproutPath)).size,

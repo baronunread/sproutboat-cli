@@ -24,6 +24,16 @@ export type ArtifactManifest = {
   esbuildVersion: string;
   /** Build provenance, e.g. `zig-musl/0.16.0+porffor/a415d19+uws/360c276d`. */
   buildImage: string;
+  /**
+   * The project's `compatibility_date`, as `YYYY-MM-DD`. Optional: artifacts
+   * built before this field existed have none, and every reader must treat that
+   * as the baseline (see `BASELINE_COMPATIBILITY_DATE` in `wrap.ts`). This is
+   * how a runtime behaviour change ships without breaking deployed apps — new
+   * builds opt in by moving their date, old binaries keep the old semantics —
+   * so it is deliberately *not* part of `schemaVersion`, which stays frozen
+   * at 2.
+   */
+  compatibilityDate?: string;
   sourceHash: `sha256:${string}`;
   binaryHash: `sha256:${string}`;
   binarySize: number;
@@ -110,6 +120,15 @@ export function validateManifest(value: ManifestInput): ManifestValidation {
   if (binarySize === null) errors.push("binarySize must be a positive integer");
   const builtAt = isString(value.builtAt) && !Number.isNaN(Date.parse(value.builtAt)) ? value.builtAt : null;
   if (builtAt === null) errors.push("builtAt must be an ISO-8601 timestamp");
+  // Optional by design: an artifact from before the field existed is valid and
+  // must stay deployable, so "absent" is not an error — only "present and
+  // malformed" is.
+  let compatibilityDate: string | undefined;
+  if (value.compatibilityDate !== undefined) {
+    if (isString(value.compatibilityDate) && /^\d{4}-\d{2}-\d{2}$/.test(value.compatibilityDate))
+      compatibilityDate = value.compatibilityDate;
+    else errors.push("compatibilityDate must be YYYY-MM-DD");
+  }
   if (
     errors.length ||
     schemaVersion === null ||
@@ -142,6 +161,7 @@ export function validateManifest(value: ManifestInput): ManifestValidation {
       binaryHash,
       binarySize,
       builtAt,
+      compatibilityDate,
     },
   };
 }

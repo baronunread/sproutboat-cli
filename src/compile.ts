@@ -15,7 +15,13 @@ import { ensurePorfforPatched } from "./patch-porffor";
 import { ensureUWebSockets, porfforRoot, UwsUnavailableError } from "./toolchain";
 import { EMPTY_BINDINGS, preludePath, wrapNativeFetchHandler, type Bindings } from "./wrap";
 
-export { EMPTY_BINDINGS, preludePath, wrapNativeFetchHandler, type Bindings } from "./wrap";
+export {
+  BASELINE_COMPATIBILITY_DATE,
+  EMPTY_BINDINGS,
+  preludePath,
+  wrapNativeFetchHandler,
+  type Bindings,
+} from "./wrap";
 
 const COMPILE_TIMEOUT_MS = Number(process.env.SPROUTBOAT_COMPILE_TIMEOUT_MS || 600_000);
 
@@ -26,6 +32,9 @@ export type CompileInput = {
   outPath: string;
   vars: Record<string, string>;
   bindings?: Bindings;
+  /** The project's `compatibility_date`, baked in so the runtime can gate a
+   *  behaviour change on it. Defaults to the baseline when absent. */
+  compatibilityDate?: string;
   /** Cross-compiler for `linux-x86_64`. Not needed, and not used, for `host`. */
   zigBin?: string;
   /**
@@ -76,7 +85,17 @@ export async function compileSprout(input: CompileInput): Promise<void> {
     input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),
     readFile(preludePath, "utf8"),
   ]);
-  await writeFile(generatedPath, wrapNativeFetchHandler(source, prelude, input.vars, input.bindings ?? EMPTY_BINDINGS));
+  await writeFile(
+    generatedPath,
+    wrapNativeFetchHandler(
+      source,
+      prelude,
+      input.vars,
+      input.bindings ?? EMPTY_BINDINGS,
+      undefined,
+      input.compatibilityDate,
+    ),
+  );
 
   const porffor = porfforRoot();
   const launcher = resolve(porffor, "runtime/index.js");

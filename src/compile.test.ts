@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { wrapNativeFetchHandler } from "./compile";
+import { BASELINE_COMPATIBILITY_DATE, wrapNativeFetchHandler } from "./compile";
 import { DEPLOY_TARGET, hostTarget, validateManifest } from "./manifest";
 
 test("wrap: injects prelude + env, keeps the handler body verbatim", () => {
@@ -138,4 +138,43 @@ test("manifest: a host-target artifact is rejected as undeployable", () => {
 test("hostTarget names this machine, and is never the deploy target", () => {
   expect(hostTarget()).toBe(`${process.arch}-${process.platform}`);
   expect(hostTarget()).not.toBe(DEPLOY_TARGET);
+});
+
+test("wrap: bakes the compatibility date, defaulting to the baseline", () => {
+  const handler = `export default { fetch() { return new Response("x"); } };`;
+  const pinned = wrapNativeFetchHandler(handler, "", {}, undefined, undefined, "2026-11-02");
+  expect(pinned).toContain(`globalThis.__sbCompat = "2026-11-02";`);
+  // An artifact built without one keeps the semantics of the baseline day,
+  // which is what an old manifest with no compatibilityDate means.
+  expect(wrapNativeFetchHandler(handler, "")).toContain(`globalThis.__sbCompat = "${BASELINE_COMPATIBILITY_DATE}";`);
+});
+
+test("manifest: compatibilityDate is optional, and validated when present", () => {
+  const base = {
+    schemaVersion: 2,
+    project: "hello",
+    target: DEPLOY_TARGET,
+    runtime: "native-fetch",
+    capabilityProfile: "http-sync-v0",
+    porfforVersion: "alpha-4",
+    esbuildVersion: "0.28.2",
+    buildImage: "zig-musl/0.16.0",
+    sourceHash: `sha256:${"a".repeat(64)}`,
+    binaryHash: `sha256:${"b".repeat(64)}`,
+    binarySize: 420_000,
+    builtAt: new Date().toISOString(),
+  };
+  // An artifact from before the field existed stays deployable — this is the
+  // case that must never regress, or rollback stops working.
+  const old = validateManifest(base);
+  expect(old.ok).toBe(true);
+  if (old.ok) expect(old.value.compatibilityDate).toBeUndefined();
+
+  const dated = validateManifest({ ...base, compatibilityDate: "2026-11-02" });
+  expect(dated.ok).toBe(true);
+  if (dated.ok) expect(dated.value.compatibilityDate).toBe("2026-11-02");
+
+  const bad = validateManifest({ ...base, compatibilityDate: "Nov 2 2026" });
+  expect(bad.ok).toBe(false);
+  if (!bad.ok) expect(bad.errors).toContain("compatibilityDate must be YYYY-MM-DD");
 });

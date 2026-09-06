@@ -18,6 +18,20 @@ export const preludePath = new URL("./native-fetch-prelude.js", import.meta.url)
 const DEFAULT_PORT = 8080;
 
 /**
+ * What an artifact with no `compatibilityDate` means. Artifacts built before
+ * the field existed keep the semantics of that day forever, because the binary
+ * is immutable and `rollback` can reactivate it at any time.
+ *
+ * How to use it: when a runtime behaviour has to change in a way that would
+ * break a deployed handler, don't change it unconditionally — gate it in the
+ * prelude on `__sbCompat >= "YYYY-MM-DD"` (ISO dates compare correctly as
+ * strings) and document the flip date. Old binaries carry their old date and
+ * keep the old behaviour; a project opts in by moving `compatibility_date` in
+ * its `sproutboat.jsonc` and rebuilding.
+ */
+export const BASELINE_COMPATIBILITY_DATE = "2026-08-26";
+
+/**
  * Binding names a project declares. `do` maps a binding name to a Durable Object
  * class name; `crons` are schedule expressions with no name.
  */
@@ -127,6 +141,7 @@ export function wrapNativeFetchHandler(
   vars: Record<string, string> = {},
   bindings: Bindings = EMPTY_BINDINGS,
   port: number = DEFAULT_PORT,
+  compatibilityDate: string = BASELINE_COMPATIBILITY_DATE,
 ): string {
   const neutralised = neutraliseExports(source);
   if (neutralised === null || !/\bfetch\s*\(/.test(source)) {
@@ -134,13 +149,16 @@ export function wrapNativeFetchHandler(
   }
 
   const env = `const env = ${JSON.stringify(vars)};\nglobalThis.env = env;\n`;
+  // Baked, not a binding: the date belongs to the artifact, and a handler must
+  // not be able to change the semantics it was compiled against at runtime.
+  const compat = `globalThis.__sbCompat = ${JSON.stringify(compatibilityDate)};\n`;
   const wire = hasBindings(bindings) ? `__sbInstallBindings(env, ${JSON.stringify(bindings)});\n` : "";
   const registerDO = bindings.do.length
     ? `__sbRegisterDO({ ${bindings.do.map((d) => `${d.className}: ${d.className}`).join(", ")} });\n`
     : "";
 
   return (
-    `${prelude}\n${env}${wire}` +
+    `${prelude}\n${compat}${env}${wire}` +
     `${neutralised}\n` +
     `${registerDO}` +
     `export default {\n  port: ${port},\n  fetch(request) { return __sbEntry(__sbHandlers, request); }\n};\n`
