@@ -54,9 +54,9 @@ export function unsupportedBindings(
   if ((bindings.services ?? []).length > 0) {
     reasons.push("service bindings call another deployment through an edge, which a standalone binary has none of");
   }
-  if (backend === "embedded" && (bindings.outbound ?? []).length > 0) {
-    reasons.push("outbound fetch() needs an HTTP client and TLS compiled in (phase 3)");
-  }
+  // Outbound is supported on the embedded backend over http:// (phase 3); an
+  // https:// call reports at runtime that TLS is not compiled in, rather than
+  // blocking every project that only talks to something on its own network.
   return reasons;
 }
 

@@ -857,45 +857,8 @@ globalThis.__sbEntry = function (handlers, request) {
 
   if (trigger === "queue") {
     if (!__sbIsFn(handlers.queue)) return new Response("no queue handler", { status: 404 });
-    const body = __sbReadJson(request);
-    const acked = [];
-    const retried = [];
-    const raw = body.messages || [];
-    const messages = [];
-    for (let i = 0; i < raw.length; i++) {
-      const m = raw[i];
-      const msg = {
-        id: m.id,
-        timestamp: m.timestamp,
-        attempts: m.attempts || 1,
-        body: __sbTryParse(m.body),
-        ack() {
-          if (acked.indexOf(m.id) === -1) acked.push(m.id);
-        },
-        retry() {
-          if (retried.indexOf(m.id) === -1) retried.push(m.id);
-        },
-      };
-      messages.push(msg);
-    }
-    const batch = {
-      queue: body.queue || "",
-      messages,
-      ackAll() {
-        for (let i = 0; i < messages.length; i++) messages[i].ack();
-      },
-      retryAll() {
-        for (let i = 0; i < messages.length; i++) messages[i].retry();
-      },
-    };
-    handlers.queue(batch);
-    // default: any message neither acked nor retried is treated as acked
-    for (let i = 0; i < messages.length; i++) {
-      if (acked.indexOf(messages[i].id) === -1 && retried.indexOf(messages[i].id) === -1) acked.push(messages[i].id);
-    }
-    return new Response(JSON.stringify({ ack: acked, retry: retried }), {
-      headers: { "content-type": "application/json" },
-    });
+    const result = __sbRunQueueBatch(handlers, __sbReadJson(request));
+    return new Response(JSON.stringify(result), { headers: { "content-type": "application/json" } });
   }
 
   if (trigger === "alarm") {
@@ -908,6 +871,52 @@ globalThis.__sbEntry = function (handlers, request) {
 
   return new Response("unknown trigger", { status: 400 });
 };
+
+/**
+ * Run one queue batch through the handler and report what it acked.
+ *
+ * Shared so the two ways a batch can arrive agree: over HTTP from the broker
+ * (deployed, and the phase-0 standalone launcher), or straight from the local
+ * timer in an embedded binary that has no broker to be delivered from.
+ */
+function __sbRunQueueBatch(handlers, body) {
+  const acked = [];
+  const retried = [];
+  const raw = body.messages || [];
+  const messages = [];
+  for (let i = 0; i < raw.length; i++) {
+    const m = raw[i];
+    const msg = {
+      id: m.id,
+      timestamp: m.timestamp,
+      attempts: m.attempts || 1,
+      body: __sbTryParse(m.body),
+      ack() {
+        if (acked.indexOf(m.id) === -1) acked.push(m.id);
+      },
+      retry() {
+        if (retried.indexOf(m.id) === -1) retried.push(m.id);
+      },
+    };
+    messages.push(msg);
+  }
+  const batch = {
+    queue: body.queue || "",
+    messages,
+    ackAll() {
+      for (let i = 0; i < messages.length; i++) messages[i].ack();
+    },
+    retryAll() {
+      for (let i = 0; i < messages.length; i++) messages[i].retry();
+    },
+  };
+  handlers.queue(batch);
+  // default: any message neither acked nor retried is treated as acked
+  for (let i = 0; i < messages.length; i++) {
+    if (acked.indexOf(messages[i].id) === -1 && retried.indexOf(messages[i].id) === -1) acked.push(messages[i].id);
+  }
+  return { ack: acked, retry: retried };
+}
 
 function __sbReadJson(request) {
   try {

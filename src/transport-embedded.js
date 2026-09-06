@@ -19,6 +19,9 @@
 Porffor.c`
 #include <stdint.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <strings.h>
 
 // sqlite3 is linked in via SB_EXTRA_LINK (see patch-porffor.ts). Declared here
 // rather than including sqlite3.h so the build needs no include path.
@@ -234,7 +237,205 @@ static char* sb_sql_run(const char* path, const char* sql, const char* params) {
   }
   return b.p;
 }
+
+// --- outbound HTTP (phase 3) ------------------------------------------------
+// A plain HTTP/1.1 client, enough for a handler to call a service on the LAN or
+// on localhost — an Ollama endpoint, a printer, another mini app. TLS is not
+// here: a certificate store plus a TLS stack is a different order of
+// dependency, so https:// reports that plainly instead of pretending.
+static int sb_tcp_connect(const char* host, int port) {
+  struct addrinfo hints, *res = 0, *it;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  char portstr[16];
+  snprintf(portstr, sizeof(portstr), "%d", port);
+  if (getaddrinfo(host, portstr, &hints, &res) != 0 || !res) return -1;
+  int fd = -1;
+  for (it = res; it; it = it->ai_next) {
+    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+    if (fd < 0) continue;
+    struct timeval tv; tv.tv_sec = 30; tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) break;
+    close(fd);
+    fd = -1;
+  }
+  freeaddrinfo(res);
+  return fd;
+}
+
+// Returns malloc'd JSON: {"ok":true,"status":n,"headers":[[k,v],...],"body":"..."}
+static char* sb_http_request(const char* host, int port, const char* path, const char* method,
+                             const char* headers, const char* body) {
+  sb_buf out = { 0, 0, 0 };
+  int fd = sb_tcp_connect(host, port);
+  if (fd < 0) {
+    sb_puts(&out, "{\"ok\":false,\"error\":\"could not connect to ");
+    sb_puts(&out, host);
+    sb_puts(&out, "\"}");
+    return out.p;
+  }
+
+  sb_buf req = { 0, 0, 0 };
+  sb_puts(&req, method); sb_puts(&req, " "); sb_puts(&req, path); sb_puts(&req, " HTTP/1.1\r\n");
+  sb_puts(&req, "Host: "); sb_puts(&req, host); sb_puts(&req, "\r\n");
+  sb_puts(&req, "Connection: close\r\n");
+  sb_puts(&req, "Accept-Encoding: identity\r\n");
+  if (headers && *headers) sb_puts(&req, headers);
+  size_t blen = body ? strlen(body) : 0;
+  if (blen) {
+    char cl[64];
+    int k = snprintf(cl, sizeof(cl), "Content-Length: %zu\r\n", blen);
+    sb_put(&req, cl, (size_t)k);
+  }
+  sb_puts(&req, "\r\n");
+  if (blen) sb_put(&req, body, blen);
+
+  size_t sent = 0;
+  while (sent < req.len) {
+    long n = write(fd, req.p + sent, req.len - sent);
+    if (n <= 0) { if (n < 0 && errno == EINTR) continue; break; }
+    sent += (size_t)n;
+  }
+  free(req.p);
+
+  sb_buf raw = { 0, 0, 0 };
+  char chunk[8192];
+  while (1) {
+    long n = read(fd, chunk, sizeof(chunk));
+    if (n > 0) { sb_put(&raw, chunk, (size_t)n); continue; }
+    if (n < 0 && errno == EINTR) continue;
+    break;
+  }
+  close(fd);
+
+  const char* head_end = raw.p ? strstr(raw.p, "\r\n\r\n") : 0;
+  if (!head_end) {
+    free(raw.p);
+    sb_puts(&out, "{\"ok\":false,\"error\":\"malformed response\"}");
+    return out.p;
+  }
+  int status = 0;
+  {
+    const char* sp = strchr(raw.p, ' ');
+    if (sp) status = atoi(sp + 1);
+  }
+
+  // Headers, and whether the body is chunked.
+  int chunked = 0;
+  sb_buf hdrs = { 0, 0, 0 };
+  sb_puts(&hdrs, "[");
+  {
+    const char* line = strstr(raw.p, "\r\n");
+    int first = 1;
+    while (line && line + 2 < head_end) {
+      line += 2;
+      const char* eol = strstr(line, "\r\n");
+      if (!eol || eol > head_end) break;
+      const char* colon = memchr(line, ':', (size_t)(eol - line));
+      if (colon) {
+        const char* vs = colon + 1;
+        while (vs < eol && (*vs == ' ' || *vs == 9)) vs++;
+        if (!first) sb_puts(&hdrs, ",");
+        first = 0;
+        sb_puts(&hdrs, "[");
+        sb_putjson(&hdrs, line, (size_t)(colon - line));
+        sb_puts(&hdrs, ",");
+        sb_putjson(&hdrs, vs, (size_t)(eol - vs));
+        sb_puts(&hdrs, "]");
+        if ((size_t)(colon - line) == 17 && strncasecmp(line, "transfer-encoding", 17) == 0 &&
+            strncasecmp(vs, "chunked", 7) == 0) chunked = 1;
+      }
+      line = eol;
+    }
+  }
+  sb_puts(&hdrs, "]");
+
+  const char* bodyp = head_end + 4;
+  size_t bodylen = raw.len - (size_t)(bodyp - raw.p);
+
+  sb_buf decoded = { 0, 0, 0 };
+  if (chunked) {
+    const char* p = bodyp;
+    const char* end = bodyp + bodylen;
+    while (p < end) {
+      char* stop = 0;
+      long size = strtol(p, &stop, 16);
+      if (!stop || size <= 0) break;
+      p = strstr(stop, "\r\n");
+      if (!p) break;
+      p += 2;
+      if (p + size > end) break;
+      sb_put(&decoded, p, (size_t)size);
+      p += size + 2;
+    }
+    bodyp = decoded.p ? decoded.p : "";
+    bodylen = decoded.len;
+  }
+
+  char head[64];
+  int k = snprintf(head, sizeof(head), "{\"ok\":true,\"status\":%d,\"headers\":", status);
+  sb_put(&out, head, (size_t)k);
+  sb_put(&out, hdrs.p, hdrs.len);
+  sb_puts(&out, ",\"body\":");
+  sb_putjson(&out, bodyp, bodylen);
+  sb_puts(&out, "}");
+  free(hdrs.p);
+  free(decoded.p);
+  free(raw.p);
+  return out.p;
+}
 `;
+
+// Outbound HTTP. Six string params so C can read each directly; the JS side has
+// already split the URL and enforced the allowlist.
+// oxlint-disable-next-line no-unused-vars -- read inside the RawC block below, not by JS.
+function __sbHttpRaw(host, portStr, path, method, headersText, body) {
+  let res = "";
+  // oxlint-disable-next-line no-unused-expressions -- Porffor.c`...` is inline C the compiler consumes, not a JS expression.
+  Porffor.c`
+    const char* __h; size_t __hl; char* __ho = 0;
+    porf_native_fetch_read_value(host, &__h, &__hl, &__ho);
+    char* __host = (char*)malloc(__hl + 1); memcpy(__host, __h, __hl); __host[__hl] = 0;
+    if (__ho) free(__ho);
+
+    const char* __pt; size_t __ptl; char* __pto = 0;
+    porf_native_fetch_read_value(portStr, &__pt, &__ptl, &__pto);
+    char __portbuf[16]; size_t __ptk = __ptl < 15 ? __ptl : 15;
+    memcpy(__portbuf, __pt, __ptk); __portbuf[__ptk] = 0;
+    if (__pto) free(__pto);
+
+    const char* __pa; size_t __pal; char* __pao = 0;
+    porf_native_fetch_read_value(path, &__pa, &__pal, &__pao);
+    char* __path = (char*)malloc(__pal + 1); memcpy(__path, __pa, __pal); __path[__pal] = 0;
+    if (__pao) free(__pao);
+
+    const char* __m; size_t __ml; char* __mo = 0;
+    porf_native_fetch_read_value(method, &__m, &__ml, &__mo);
+    char* __method = (char*)malloc(__ml + 1); memcpy(__method, __m, __ml); __method[__ml] = 0;
+    if (__mo) free(__mo);
+
+    const char* __hd; size_t __hdl; char* __hdo = 0;
+    porf_native_fetch_read_value(headersText, &__hd, &__hdl, &__hdo);
+    char* __hdrs = (char*)malloc(__hdl + 1); memcpy(__hdrs, __hd, __hdl); __hdrs[__hdl] = 0;
+    if (__hdo) free(__hdo);
+
+    const char* __b; size_t __bl; char* __bo = 0;
+    porf_native_fetch_read_value(body, &__b, &__bl, &__bo);
+    char* __body = (char*)malloc(__bl + 1); memcpy(__body, __b, __bl); __body[__bl] = 0;
+    if (__bo) free(__bo);
+
+    char* __out = sb_http_request(__host, atoi(__portbuf), __path, __method, __hdrs, __body);
+    free(__host); free(__path); free(__method); free(__hdrs); free(__body);
+    if (__out) {
+      res = porf_box((f64)porf_native_fetch_alloc_bytestring(__out, strlen(__out)), 195);
+      free(__out);
+    }
+  `;
+  return res;
+}
 
 // One statement in, one JSON reply out. `path`, `sql` and `paramsJson` are
 // parameters so the generated C names them directly.
@@ -273,6 +474,12 @@ function __sbSqlRaw(path, sql, paramsJson) {
 // --- the op dispatch, in JS -------------------------------------------------
 // Deliberately the same SQL and the same partition keys as broker.ts. When one
 // changes the other has to, and the conformance suite is what says so.
+
+// The allowlist is baked into the module by wrap.ts; read it lazily so the
+// dispatch has no import-order dependency on __sbInstallBindings.
+function bindingsOutbound() {
+  return globalThis.__sbOutbound || [];
+}
 
 var __sbDataDir = "";
 function __sbDir() {
@@ -370,6 +577,40 @@ function __sbEmbeddedDispatch(msg) {
     const keys = [];
     for (let i = 0; i < r.rows.length; i++) keys.push(r.rows[i][0]);
     return { ok: true, keys };
+  }
+
+  if (op === "fetch") {
+    const url = new URL(String(msg.url));
+    if (url.protocol === "https:") {
+      // Honest failure rather than a silent one: TLS is a certificate store and
+      // a crypto stack, which is not in this binary. http:// works, which covers
+      // a service on the LAN, on localhost, or behind a local proxy.
+      throw new Error("https is not available in a standalone binary yet; use http:// or route through a local proxy");
+    }
+    if (url.protocol !== "http:") throw new Error("unsupported protocol: " + url.protocol);
+    const allow = bindingsOutbound();
+    if (allow.indexOf(url.host) === -1) throw new Error("host not in outbound allowlist: " + url.host);
+    let headerText = "";
+    const pairs = msg.headers || [];
+    for (let i = 0; i < pairs.length; i++) {
+      const key = String(pairs[i][0]).toLowerCase();
+      // Host, Connection and Content-Length are ours to set.
+      if (key === "host" || key === "connection" || key === "content-length") continue;
+      headerText += pairs[i][0] + ": " + pairs[i][1] + "\r\n";
+    }
+    const port = url.port ? url.port : "80";
+    const reply = JSON.parse(
+      __sbHttpRaw(
+        url.hostname,
+        port,
+        url.pathname + url.search,
+        String(msg.method || "GET").toUpperCase(),
+        headerText,
+        msg.body == null ? "" : String(msg.body),
+      ),
+    );
+    if (reply.ok === false) throw new Error(reply.error);
+    return { ok: true, status: reply.status, headers: reply.headers, body: reply.body };
   }
 
   if (op === "secret.get") {
@@ -567,3 +808,147 @@ function __sbCall(reqJson) {
     return JSON.stringify({ ok: false, error: String((err && err.message) || err) });
   }
 }
+
+// --- local triggers ---------------------------------------------------------
+// A deployed sprout is driven by the broker: it POSTs x-sb-trigger for cron
+// ticks, queue batches and DO alarms. An embedded binary has no broker, so the
+// same work runs on timers in this process and calls the handler directly.
+// Porffor's native-fetch runtime provides setInterval, so this needs no C.
+
+/** 5-field cron match (min hour dom month dow, UTC) — the same rules broker.ts applies. */
+function __sbCronMatches(expr, when) {
+  const parts = String(expr).trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+  const fields = [
+    when.getUTCMinutes(),
+    when.getUTCHours(),
+    when.getUTCDate(),
+    when.getUTCMonth() + 1,
+    when.getUTCDay(),
+  ];
+  for (let i = 0; i < 5; i++) {
+    const spec = parts[i];
+    const value = fields[i];
+    const tokens = spec.split(",");
+    let hit = false;
+    for (let t = 0; t < tokens.length; t++) {
+      const token = tokens[t];
+      if (token === "*") {
+        hit = true;
+        break;
+      }
+      if (token.indexOf("*/") === 0) {
+        const step = Number(token.slice(2));
+        if (step && value % step === 0) {
+          hit = true;
+          break;
+        }
+        continue;
+      }
+      const range = token.split("-");
+      if (range.length === 2) {
+        if (value >= Number(range[0]) && value <= Number(range[1])) {
+          hit = true;
+          break;
+        }
+        continue;
+      }
+      if (Number(token) === value) {
+        hit = true;
+        break;
+      }
+    }
+    if (!hit) return false;
+  }
+  return true;
+}
+
+var __sbLastCronTick = "";
+
+/**
+ * Start the timers an embedded binary needs. Called from the generated module
+ * once the handler object exists; the broker transport defines a no-op of the
+ * same name, so the generated code is identical either way.
+ */
+globalThis.__sbStartLocalTriggers = function (handlers, bindings) {
+  const crons = bindings.crons || [];
+  const queues = bindings.queues || [];
+  const dos = bindings.do || [];
+  const store = __sbStore();
+
+  if (crons.length > 0 && __sbIsFn(handlers.scheduled)) {
+    setInterval(function () {
+      const now = new Date();
+      const stamp =
+        now.getUTCFullYear() +
+        "-" +
+        now.getUTCMonth() +
+        "-" +
+        now.getUTCDate() +
+        "-" +
+        now.getUTCHours() +
+        "-" +
+        now.getUTCMinutes();
+      if (stamp === __sbLastCronTick) return; // once a minute, like the broker
+      __sbLastCronTick = stamp;
+      for (let i = 0; i < crons.length; i++) {
+        if (__sbCronMatches(crons[i], now)) {
+          handlers.scheduled({ cron: crons[i], scheduledTime: now.getTime(), noRetry() {} });
+        }
+      }
+    }, 15000);
+  }
+
+  if (queues.length > 0 && __sbIsFn(handlers.queue)) {
+    setInterval(function () {
+      __sbEnsureSchema();
+      const now = Date.now();
+      for (let q = 0; q < queues.length; q++) {
+        const name = queues[q];
+        const due = __sbSql(
+          store,
+          "SELECT id, body, attempts FROM mq WHERE queue = ? AND dead = 0 AND visible_at <= ? ORDER BY visible_at LIMIT 10",
+          [name, now],
+        );
+        if (due.rows.length === 0) continue;
+        // Hide the batch first, so a slow handler cannot have it delivered twice.
+        const messages = [];
+        for (let i = 0; i < due.rows.length; i++) {
+          const row = due.rows[i];
+          __sbSql(store, "UPDATE mq SET visible_at = ? WHERE id = ?", [now + 30000, row[0]]);
+          messages.push({ id: row[0], body: row[1], timestamp: now, attempts: Number(row[2]) + 1 });
+        }
+        const result = __sbRunQueueBatch(handlers, { queue: name, messages });
+        for (let i = 0; i < result.ack.length; i++) {
+          __sbSql(store, "DELETE FROM mq WHERE id = ?", [result.ack[i]]);
+        }
+        for (let i = 0; i < result.retry.length; i++) {
+          __sbSql(
+            store,
+            "UPDATE mq SET attempts = attempts + 1, visible_at = ?, dead = CASE WHEN attempts + 1 >= 5 THEN 1 ELSE 0 END WHERE id = ?",
+            [Date.now() + 5000, result.retry[i]],
+          );
+        }
+      }
+    }, 500);
+  }
+
+  if (dos.length > 0) {
+    setInterval(function () {
+      __sbEnsureSchema();
+      const now = Date.now();
+      const due = __sbSql(store, "SELECT cls, id, at, attempts FROM do_alarm WHERE at <= ? ORDER BY at LIMIT 10", [
+        now,
+      ]);
+      for (let i = 0; i < due.rows.length; i++) {
+        const cls = due.rows[i][0];
+        const id = due.rows[i][1];
+        // Claim before running: alarm() may schedule the next one, and deleting
+        // afterwards would erase it. Same rule as the broker (#125).
+        __sbSql(store, "DELETE FROM do_alarm WHERE cls = ? AND id = ?", [cls, id]);
+        const instance = __sbGetDOInstance(cls, id);
+        if (__sbIsFn(instance.alarm)) instance.alarm();
+      }
+    }, 500);
+  }
+};

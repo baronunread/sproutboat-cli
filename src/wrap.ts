@@ -177,16 +177,22 @@ export function wrapNativeFetchHandler(
   const compat =
     `globalThis.__sbCompat = ${JSON.stringify(compatibilityDate)};\n` +
     // #15 — the embedded transport derives its default data directory from this.
-    `globalThis.__sbAppName = ${JSON.stringify(appName)};\n`;
+    `globalThis.__sbAppName = ${JSON.stringify(appName)};\n` +
+    // #15 — and enforces the outbound allowlist itself, with no broker to do it.
+    `globalThis.__sbOutbound = ${JSON.stringify(bindings.outbound)};\n`;
   const wire = hasBindings(bindings) ? `__sbInstallBindings(env, ${JSON.stringify(bindings)});\n` : "";
   const registerDO = bindings.do.length
     ? `__sbRegisterDO({ ${bindings.do.map((d) => `${d.className}: ${d.className}`).join(", ")} });\n`
     : "";
+  // Cron / queue / alarm timers, for a transport that has no broker to deliver
+  // them. The broker transport defines this as a no-op, so the emitted module
+  // is the same either way.
+  const triggers = hasBindings(bindings) ? `__sbStartLocalTriggers(__sbHandlers, ${JSON.stringify(bindings)});\n` : "";
 
   return (
     `${prelude}\n${compat}${env}${wire}` +
     `${neutralised}\n` +
-    `${registerDO}` +
+    `${registerDO}${triggers}` +
     `export default {\n  port: ${port},\n  fetch(request) { return __sbEntry(__sbHandlers, request); }\n};\n`
   );
 }

@@ -131,3 +131,10 @@ function __sbCall(reqJson) {
   `;
   return res;
 }
+
+/**
+ * No-op: a deployed sprout's cron ticks, queue batches and DO alarms are
+ * delivered by the broker over x-sb-trigger. The embedded transport defines the
+ * real one, so the generated module can call this unconditionally.
+ */
+globalThis.__sbStartLocalTriggers = function () {};
