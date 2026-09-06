@@ -6,23 +6,11 @@ machine and run it.
 
 ```sh
 sproutboat build --standalone            # ~2 MB, SQLite compiled in
-./dist/hello                             # serves on $PORT (default 8080)
+PORT=3000 ./dist/hello                   # serves on $PORT (default 8080)
 ```
 
 The same handler source deploys to a box unchanged. That is the point: write a
 mini app, run it on a Pi, later `sproutboat deploy` it.
-
-## Two backends
-
-| | `--standalone` (default) | `--standalone --backend bundled` |
-| --- | --- | --- |
-| Size | ~2 MB | ~60 MB |
-| How | SQLite compiled into the sprout | the Bun broker stapled beside it |
-| `fetch()` | `http://` only | `http://` and `https://` |
-
-The embedded backend is the product. The bundled one survives because its
-broker is Bun, which speaks TLS today. Reach for it when a handler must call an
-https endpoint.
 
 ## Runtime surface
 
@@ -31,8 +19,13 @@ cron expressions, the outbound allowlist, `vars` — compiles in. Three things d
 not:
 
 - `PORT`: the port to listen on.
-- `--data <dir>` / `SPROUTBOAT_DATA`: where state lives.
+- `SB_DATA_DIR` or `SPROUTBOAT_DATA`: where state lives.
 - **Secrets**: from the environment, or `<data>/secrets.json`.
+
+All three arrive through the environment, and none of them through flags: a
+native-fetch binary never sees `argv`, because Porffor's runtime init calls
+`porf_init(0, NULL)`. That suits systemd and docker, which set environment
+variables anyway.
 
 The binary never carries a secret, for the same reason an artifact never does:
 the bytes are identical for everyone who has the file, and rotating a compiled
@@ -53,11 +46,12 @@ D1 stays separate on purpose: it runs user-supplied SQL, so a handler's
 WAL mode adds `-wal` and `-shm` beside `store.sqlite`.
 
 The layout is identical to what `sproutboat dev` writes, which is what lets one
-conformance suite run against both backends and mean something.
+conformance suite run against both the broker and this binary and mean
+something.
 
 ## What differs from a deployed sprout
 
-- **Outbound `fetch()` speaks `http://` only** on the embedded backend. TLS
+- **Outbound `fetch()` speaks `http://` only.** TLS
   needs a certificate store plus a crypto stack; an https call says so instead
   of failing obscurely.
 - **Service bindings do not exist.** They call another deployment through an

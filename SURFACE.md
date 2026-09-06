@@ -12,7 +12,7 @@
 | `init` | `[name]` | Scaffold sproutboat.jsonc + src/index.js in ./<name>. |
 | `check` | `[project-dir]` | Validate the config and entry point without building. |
 | `dev` | `[project-dir] [--port <n>] [--no-watch]` | Run the project on this machine against a real broker, rebuilding on save. |
-| `build` | `[project-dir] [--target host] [--standalone [--backend bundled]]` | Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. `--standalone` emits one executable carrying its own bindings: SQLite compiled in (~2 MB), or `--backend bundled` to ship the Bun broker beside it (~60 MB) when a handler needs https from `fetch()`. |
+| `build` | `[project-dir] [--target host] [--standalone]` | Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process. |
 | `deploy` | `[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision]` | Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores. |
 | `versions` | `<list | view <version-id>> [project-dir]` | List the project's deployed versions, or show one version's artifact and bindings. |
 | `rollback` | `<version-id> [project-dir]` | Re-activate a previous version. |
@@ -29,7 +29,7 @@
 | `whoami` | — | Show the active endpoint and the account the stored token belongs to. |
 
 ```
-usage: sproutboat <init [name] | check [project-dir] | dev [project-dir] [--port <n>] [--no-watch] | build [project-dir] [--target host] [--standalone [--backend bundled]] | deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] | versions <list | view <version-id>> [project-dir] | rollback <version-id> [project-dir] | tail [project-dir] [--sprout] | kv <list | create <name> | info <name> | rename <name> <new> | delete <name>> | d1 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | r2 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | queues <list | create <name> | info <name> | rename <name> <new> | delete <name>> | domains <list | add <host> | verify <host> | delete <host>> [project-dir] | secrets <list | put <NAME> [--value <value>] | delete <NAME>> [project-dir] | delete [project-dir] [--name <project>] --yes | login [--api-url <url>] [--token <token>] | logout [--api-url <url>] | whoami>
+usage: sproutboat <init [name] | check [project-dir] | dev [project-dir] [--port <n>] [--no-watch] | build [project-dir] [--target host] [--standalone] | deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] | versions <list | view <version-id>> [project-dir] | rollback <version-id> [project-dir] | tail [project-dir] [--sprout] | kv <list | create <name> | info <name> | rename <name> <new> | delete <name>> | d1 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | r2 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | queues <list | create <name> | info <name> | rename <name> <new> | delete <name>> | domains <list | add <host> | verify <host> | delete <host>> [project-dir] | secrets <list | put <NAME> [--value <value>] | delete <NAME>> [project-dir] | delete [project-dir] [--name <project>] --yes | login [--api-url <url>] [--token <token>] | logout [--api-url <url>] | whoami>
 ```
 
 ## Environment variables
@@ -52,7 +52,7 @@ usage: sproutboat <init [name] | check [project-dir] | dev [project-dir] [--port
 | `SB_BROKER_TOKEN` | Per-deployment auth token the sprout sends on every broker frame, and the broker sends back on scheduled/queue triggers (paired with SB_BROKER_PORT). |
 | `SB_SPROUT_URL` | http://127.0.0.1:<PORT> of the sprout; when set, `src/broker.ts` runs the cron scheduler and queue consumer and delivers triggers to it. |
 | `SB_DATA_DIR` | Where a standalone binary keeps store.sqlite and d1/ (#15). Read by the sprout itself in an embedded build; defaults to ./<name>.data. |
-| `SPROUTBOAT_DATA` | Same as --data for a standalone binary: the data directory, overriding the ./<name>.data default (#15). |
+| `SPROUTBOAT_DATA` | Data directory for a standalone binary, after --data and SB_DATA_DIR, before the ./<name>.data default (#15). |
 | `SB_EXTRA_LINK` | Objects to add to Porffor's native-fetch link line, set by the build for an embedded standalone binary so SQLite is linked in (#15). |
 
 ## Build toolchain (pinned)

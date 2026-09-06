@@ -16,12 +16,21 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { porfforRoot } from "./toolchain";
 
-// Splice INJECT in immediately after the opening brace, before the return.
+// Each edit below is independent and idempotent, with its own marker: a file
+// patched by an older version of this file must still receive the newer edits.
 const ANCHOR = "f64 porf_native_fetch_get_port(void) {\n";
-const INJECT =
+
+/** Port from $PORT (the supervisor and `sproutboat dev` set it). */
+const ENV_INJECT =
   '  const char* __sb_port = getenv("PORT");\n' +
   "  if (__sb_port && *__sb_port) { long __sb_v = strtol(__sb_port, NULL, 10); if (__sb_v > 0 && __sb_v < 65536) return (f64)__sb_v; }\n";
-const MARKER = 'getenv("PORT")';
+const ENV_MARKER = 'getenv("PORT")';
+
+// #15 — no `--port` flag: Porffor's native-fetch entry point calls
+// `porf_init(0, NULL)` (see porf_native_fetch_runtime_init in render.js), so a
+// native-fetch binary never sees argv at all. A standalone binary takes its
+// port and data directory from the environment instead, which is what systemd
+// and docker set anyway. Worth an upstream note alongside the $PORT ask.
 
 /**
  * #15 — let the build add objects to the native-fetch link line.
@@ -29,10 +38,7 @@ const MARKER = 'getenv("PORT")';
  * Porffor builds `linkArgs` as a fixed array, so an embedded backend that needs
  * SQLite compiled into the sprout has nowhere to put it. `CXX` is not a way in:
  * a musl (deploy) build overrides it outright. This splices one spread of
- * `SB_EXTRA_LINK` before `-lm`, which is inert unless the variable is set.
- *
- * Same shape as the $PORT patch above, and tracked in the same place — an
- * upstream hook for extra link arguments would remove it.
+ * `SB_EXTRA_LINK` before `-lm`, inert unless the variable is set.
  */
 const LINK_ANCHOR = "          uSocketsArchive,\n          '-lm'\n";
 const LINK_INJECT =
@@ -60,7 +66,7 @@ export async function ensurePorfforPatched(): Promise<void> {
   await patchLinkArgs();
   const file = resolve(porfforRoot(), "compiler/render.js");
   const src = await readFile(file, "utf8");
-  if (src.includes(MARKER)) {
+  if (src.includes(ENV_MARKER)) {
     done = true;
     return;
   }
@@ -71,7 +77,6 @@ export async function ensurePorfforPatched(): Promise<void> {
         "Porffor's native-fetch renderer changed — check patches/UPSTREAM.md.",
     );
   }
-  const patched = src.slice(0, anchorAt + ANCHOR.length) + INJECT + src.slice(anchorAt + ANCHOR.length);
-  await writeFile(file, patched);
+  await writeFile(file, src.slice(0, anchorAt + ANCHOR.length) + ENV_INJECT + src.slice(anchorAt + ANCHOR.length));
   done = true;
 }

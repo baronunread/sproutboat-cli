@@ -20,8 +20,6 @@ import { bundleHandler } from "../../src/bundle";
 import { parseConfig } from "../../src/config";
 import type { JsonValue } from "../../src/json";
 
-/** `bundled` (phase 0) or `embedded` (phase 1+). */
-const backend = Bun.argv[2] === "embedded" ? "embedded" : "bundled";
 const HERE = import.meta.dir;
 const workdir = mkdtempSync(join(tmpdir(), "sb-standalone-"));
 const cleanup: Array<() => void> = [() => rmSync(workdir, { recursive: true, force: true })];
@@ -58,34 +56,28 @@ buildWebUi();
 const sourcePath = join(HERE, config.main);
 const bundle = await bundleHandler(sourcePath, HERE);
 
-console.log(`building the standalone binary (${backend})…`);
+console.log("building the standalone binary…");
 const built = await buildStandalone({
   projectDir: HERE,
   config,
   sourcePath,
   source: bundle.code,
   target: "host",
-  workDir: join(workdir, "build"),
   outPath: join(workdir, "kitchen-sink"),
-  backend,
 });
 console.log(`  ${(built.bytes / 1_000_000).toFixed(1)} MB\n`);
 
+// Unused by the binary (it accepts no external triggers); the suite still wants
+// a value for the checks it skips.
 const TOKEN = "harness-token";
 const port = 8000 + Math.floor(Math.random() * 1000);
 const dataDir = join(workdir, "data");
-// The embedded binary *is* the sprout: it reads PORT and SB_DATA_DIR directly,
-// where the phase-0 launcher takes --port/--data and starts a broker itself.
-const child =
-  backend === "embedded"
-    ? Bun.spawn([built.outPath], {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, PORT: String(port), SB_DATA_DIR: dataDir, ADMIN_TOKEN: "s3cr3t-admin" },
-      })
-    : Bun.spawn([built.outPath, "--port", String(port), "--data", dataDir], {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, SB_BROKER_TOKEN: TOKEN, ADMIN_TOKEN: "s3cr3t-admin" },
-      });
+// Environment only: a native-fetch binary never sees argv (Porffor's runtime
+// init calls porf_init(0, NULL)), so PORT and SB_DATA_DIR are the whole surface.
+const child = Bun.spawn([built.outPath], {
+  stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, PORT: String(port), SB_DATA_DIR: dataDir, ADMIN_TOKEN: "s3cr3t-admin" },
+});
 cleanup.push(() => child.kill(9));
 
 const base = `http://127.0.0.1:${port}`;
@@ -93,7 +85,9 @@ const deadline = Date.now() + 20_000;
 let up = false;
 while (Date.now() < deadline && !up) {
   try {
-    await fetch(base + "/");
+    // AbortSignal matters: without it a binary that accepts the connection and
+    // never answers hangs this loop past its own deadline.
+    await fetch(base + "/", { signal: AbortSignal.timeout(2000) });
     up = true;
   } catch {
     await Bun.sleep(100);
@@ -101,11 +95,10 @@ while (Date.now() < deadline && !up) {
 }
 if (!up) die(`standalone binary never listened on ${port}:\n${await new Response(child.stderr).text()}`);
 
-console.log(`bindings (standalone, ${backend}):`);
-// An embedded binary drives its own cron and queue timers, so the suite's
-// HTTP-delivered triggers do not apply: nothing is listening for x-sb-trigger
-// with no broker to send it.
-await runConformance(base, TOKEN, check, backend === "embedded" ? { skipTriggers: true } : {});
+console.log("bindings (standalone):");
+// The binary drives its own cron and queue timers and refuses external
+// triggers, so the suite's HTTP-delivered ones do not apply here.
+await runConformance(base, TOKEN, check, { skipTriggers: true });
 
 console.log(`\n${passed} checks passed — same suite as harness.ts, one binary.`);
 for (const c of cleanup.reverse())

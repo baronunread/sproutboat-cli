@@ -89,10 +89,10 @@ export const COMMANDS: readonly Command[] = [
     name: "build",
     group: "Develop",
     emoji: "🔨",
-    args: "[project-dir] [--target host] [--standalone [--backend bundled]]",
+    args: "[project-dir] [--target host] [--standalone]",
     brief: "[project-dir]",
     summary:
-      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. `--standalone` emits one executable carrying its own bindings: SQLite compiled in (~2 MB), or `--backend bundled` to ship the Bun broker beside it (~60 MB) when a handler needs https from `fetch()`.",
+      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process.",
   },
 
   {
@@ -235,7 +235,8 @@ export const ENV_VARS: readonly EnvVar[] = [
   },
   {
     name: "SPROUTBOAT_DATA",
-    purpose: "Same as --data for a standalone binary: the data directory, overriding the ./<name>.data default (#15).",
+    purpose:
+      "Data directory for a standalone binary, after --data and SB_DATA_DIR, before the ./<name>.data default (#15).",
   },
   {
     name: "SB_EXTRA_LINK",

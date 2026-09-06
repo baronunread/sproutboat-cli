@@ -528,10 +528,13 @@ function bindingsOutbound() {
 
 var __sbDataDir = "";
 function __sbDir() {
-  // SB_DATA_DIR, else `<name>.data` relative to the working directory — the
-  // same rule the phase-0 launcher applies, baked in because there is no
-  // launcher here to apply it.
-  if (!__sbDataDir) __sbDataDir = __sbEnv("SB_DATA_DIR") || (globalThis.__sbAppName || "app") + ".data";
+  // SB_DATA_DIR, then SPROUTBOAT_DATA, then <name>.data relative to the working
+  // directory. Environment only: a native-fetch binary never sees argv, because
+  // Porffor's runtime init calls porf_init(0, NULL). Resolved once — the answer
+  // cannot change mid-run.
+  if (!__sbDataDir) {
+    __sbDataDir = __sbEnv("SB_DATA_DIR") || __sbEnv("SPROUTBOAT_DATA") || (globalThis.__sbAppName || "app") + ".data";
+  }
   return __sbDataDir;
 }
 function __sbStore() {

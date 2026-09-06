@@ -10,8 +10,8 @@ test("service bindings cannot work in a standalone binary", () => {
 });
 
 test("outbound does not block a build", () => {
-  // http:// works on the embedded backend and https reports at runtime, so a
-  // project that only talks to its own network still builds.
+  // http:// works and https reports at runtime, so a project that only talks to
+  // its own network still builds.
   expect(unsupportedBindings({ outbound: ["api.example.com"] })).toEqual([]);
 });
 
