@@ -196,14 +196,14 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       assetManifest = JSON.parse(readFileSync(manifestPath, "utf8")) as AssetManifest;
     }
   }
-  const readAsset = (path: string): { type: string; hash: string; body: string } | null => {
+  const readAsset = (path: string): { type: string; hash: string; body: Uint8Array } | null => {
     if (!assetsDir || !assetManifest) return null;
     const entry = assetManifest.files[path];
     if (!entry) return null;
     // path keys are `/`-prefixed and `..`-free (walkAssets), but re-check.
     const abs = normalize(join(assetsDir, path));
     if (!abs.startsWith(assetsDir)) return null;
-    return { type: entry.type, hash: entry.hash, body: readFileSync(abs, "utf8") };
+    return { type: entry.type, hash: entry.hash, body: readFileSync(abs) };
   };
   const token = opts.token ?? "";
   /** #63 §3 — replies to recent non-idempotent requests, keyed by op and id. */
@@ -716,16 +716,38 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         const reqPath = str(msg.path) || "/";
         const key = resolveAssetKey(reqPath, (k) => !!assetManifest?.files[k]);
         const hit = key ? readAsset(key) : null;
-        if (hit) return { ok: true, found: true, status: 200, type: hit.type, hash: hit.hash, body: hit.body };
+        if (hit)
+          return {
+            ok: true,
+            found: true,
+            status: 200,
+            type: hit.type,
+            hash: hit.hash,
+            body: new TextDecoder().decode(hit.body),
+          };
         const nfh = assetManifest?.notFound ?? "none";
         if (nfh === "single-page-application") {
           const shell = readAsset("/index.html");
           if (shell)
-            return { ok: true, found: true, status: 200, type: shell.type, hash: shell.hash, body: shell.body };
+            return {
+              ok: true,
+              found: true,
+              status: 200,
+              type: shell.type,
+              hash: shell.hash,
+              body: new TextDecoder().decode(shell.body),
+            };
         }
         if (nfh === "404-page") {
           const page = readAsset("/404.html");
-          if (page) return { ok: true, found: false, status: 404, type: page.type, body: page.body };
+          if (page)
+            return {
+              ok: true,
+              found: false,
+              status: 404,
+              type: page.type,
+              body: new TextDecoder().decode(page.body),
+            };
         }
         return { ok: true, found: false, status: 404, body: "Not Found" };
       }
@@ -773,6 +795,27 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
         .get(bucket, str(msg.key));
       if (!row) return { reply: { ok: true, found: false } };
       return { reply: { ok: true, found: true, object: r2Row(row) }, bytes: r2Bytes(row.body) };
+    }
+
+    if (msg.op === "assets.get") {
+      if (!bindings.assets) throw new Error("assets not bound");
+      const reqPath = str(msg.path) || "/";
+      const key = resolveAssetKey(reqPath, (candidate) => !!assetManifest?.files[candidate]);
+      let hit = key ? readAsset(key) : null;
+      let found = Boolean(hit);
+      let status = hit ? 200 : 404;
+      if (!hit && assetManifest?.notFound === "single-page-application") {
+        hit = readAsset("/index.html");
+        found = Boolean(hit);
+        status = hit ? 200 : 404;
+      } else if (!hit && assetManifest?.notFound === "404-page") {
+        hit = readAsset("/404.html");
+      }
+      if (!hit) return { reply: { ok: true, found: false, status: 404 }, bytes: new TextEncoder().encode("Not Found") };
+      return {
+        reply: { ok: true, found, status, type: hit.type, hash: hit.hash },
+        bytes: hit.body,
+      };
     }
 
     return { reply: await dispatchOnce(msg) };

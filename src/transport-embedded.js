@@ -1413,6 +1413,10 @@ globalThis.__sbR2Get = function (bucket, key) {
   return { found: true, object: meta.object, body: __sbR2GetRaw(__sbStore(), String(bucket), String(key)) };
 };
 
+globalThis.__sbAssetsGet = function (path) {
+  return __sbEmbeddedDispatch({ op: "assets.get", path });
+};
+
 /** The transport contract: one request string in, one reply string out. */
 function __sbCall(reqJson) {
   try {

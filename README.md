@@ -69,6 +69,32 @@ Run `sproutboat` with no arguments for the grouped list.
 [`SURFACE.md`](SURFACE.md) is the generated inventory: every command, every
 argument, every env var, kept honest by a drift test.
 
+### KV data and waitlist export
+
+Manage one namespace by its account-level name:
+
+```sh
+sproutboat kv key list registrations --prefix email:
+sproutboat kv key get registrations email:person@example.com --text
+sproutboat kv key put registrations email:person@example.com joined
+sproutboat kv key delete registrations email:person@example.com --yes
+sproutboat kv export registrations --prefix email: --output registrations.json
+```
+
+Bulk put, and therefore exported dumps, use the version 1 text-value format:
+
+```json
+[
+  { "key": "email:person@example.com", "value": "joined" }
+]
+```
+
+`kv bulk get` and `kv bulk delete` accept a JSON array of key strings. `kv bulk
+put` accepts the entry array above. The CLI sends large inputs in bounded
+batches. Export pages through the namespace and writes incrementally to a
+permission-restricted temporary file, then renames it into place only after a
+complete export. Existing output files require `--force`.
+
 ## Config
 
 `sproutboat.jsonc`: the entry point plus Cloudflare-shaped `env.*` bindings.

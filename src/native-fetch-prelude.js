@@ -587,8 +587,8 @@ globalThis.__sbInstallBindings = function (target, bindings) {
 
   // Static assets: env.<ASSETS>.fetch(request) -> broker `assets.get`. The edge
   // already serves matching files directly; the sprout only calls this for paths
-  // it wants to own (SPA fallback, auth-gated files). Text assets only — binary
-  // files go through the edge (the broker frame is UTF-8 JSON).
+  // it wants to own (SPA fallback, auth-gated files). The transport keeps the
+  // body byte-preserving for binary assets.
   if (bindings.assets) {
     target[bindings.assets] = {
       fetch(input) {
@@ -598,7 +598,7 @@ globalThis.__sbInstallBindings = function (target, bindings) {
         } catch {
           /* use as-is */
         }
-        const r = __sbRpc("assets.get", { path });
+        const r = globalThis.__sbAssetsGet(path);
         const headers = {};
         if (r.type) headers["content-type"] = r.type;
         if (r.found) headers["etag"] = '"' + r.hash + '"';

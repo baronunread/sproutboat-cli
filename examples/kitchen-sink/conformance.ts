@@ -73,6 +73,11 @@ export async function runConformance(
     "assets: unknown GET falls back to the SPA shell (200)",
     spa.status === 200 && (await spa.text()).includes("<h1>Sproutboat Notes"),
   );
+  const binaryAsset = new Uint8Array(await (await fetch(base + "/binary-fixture.bin")).arrayBuffer());
+  check(
+    "assets: binary bytes are unchanged",
+    binaryAsset.length === 256 && binaryAsset.every((byte, index) => byte === index),
+  );
 
   // KV (login -> whoami)
   const login = await jget("/login", { method: "POST" });

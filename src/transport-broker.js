@@ -288,3 +288,12 @@ globalThis.__sbR2Get = function (bucket, key) {
   if (!reply.found) return { found: false };
   return { found: true, object: reply.object, body: __sbTakeBin() };
 };
+
+/** Static asset metadata stays JSON; the response body uses the v1 byte tail. */
+globalThis.__sbAssetsGet = function (path) {
+  const token = __sbEnv("SB_BROKER_TOKEN");
+  const reply = JSON.parse(__sbCallBin(JSON.stringify({ v: 1, token, op: "assets.get", path }), ""));
+  if (reply.ok === false) throw new Error("sproutboat assets.get: " + (reply.error || "failed"));
+  reply.body = __sbTakeBin();
+  return reply;
+};

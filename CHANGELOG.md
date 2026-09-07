@@ -10,6 +10,28 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-07
+### Added
+- KV content management: `kv key get`, `put`, `delete`, and `list`; bounded
+  `kv bulk get`, `put`, and `delete`; and cursor-paginated `kv export` files
+  that can be restored with `kv bulk put`.
+- CLI integration coverage for pagination, bounded batches, text and file
+  output, overwrite refusal, and cleanup after failed exports.
+- `sproutboat-env.d.ts` generation from project bindings.
+- Focused runnable examples for every supported binding.
+
+### Fixed
+- Static assets keep arbitrary binary bytes when they travel through the broker.
+- KV exports use a permission-restricted temporary file and move into place only
+  after a complete export. Failed exports leave neither partial output nor a
+  temporary file behind.
+- First-host builds no longer require Git or Make.
+
+### Changed
+- Development binaries compile with Porffor `-O0` for faster iteration.
+- The installation docs state that the CLI requires Bun and should be invoked
+  with `bunx` rather than `npx`.
+
 ## [0.8.0] — 2026-09-07
 ### Added
 - `sproutboat build --standalone`: one executable that carries its own bindings.

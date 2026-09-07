@@ -1,6 +1,6 @@
 {
   "name": "sproutboat",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Wrangler-shaped CLI for Sproutboat. Deploys workers to any control plane via --api-url / SPROUTBOAT_API_URL.",
   "keywords": [
     "cli",
@@ -22,7 +22,7 @@
     "sproutboat": "src/main.ts"
   },
   "files": [
-    "!src/*.test.ts",
+    "CHANGELOG.md",
     "SURFACE.md",
     "src",
     "types",

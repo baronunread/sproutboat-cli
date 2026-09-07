@@ -557,6 +557,31 @@ test("v1: an object body round-trips as bytes, not as escaped JSON", async () =>
   server.stop();
 });
 
+test("v1: a binary static asset round-trips without UTF-8 replacement", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-binary-asset-"));
+  const assets = join(dir, "assets");
+  mkdirSync(assets);
+  const body = new Uint8Array(256);
+  for (let index = 0; index < body.length; index++) body[index] = index;
+  writeFileSync(join(assets, "fixture.bin"), body);
+  writeFileSync(
+    join(dir, "assets.json"),
+    JSON.stringify({
+      notFound: "none",
+      runSproutFirst: false,
+      files: { "/fixture.bin": { type: "application/octet-stream", hash: "fixture" } },
+    }),
+  );
+  const b = make({ bindings: { assets: "ASSETS" }, assetsDir: assets, token: "tok" });
+  const server = listen(b, "127.0.0.1", 0);
+  const got = await v1(server, { v: 1, token: "tok", op: "assets.get", path: "/fixture.bin" });
+  expect(got.json.found).toBe(true);
+  expect(Buffer.from(got.bytes).equals(Buffer.from(body))).toBe(true);
+  server.stop();
+  b.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("v1: the etag is sha256 of the bytes, matching the v0 path", async () => {
   const b = make({ bindings: { r2: ["UP"] }, token: "tok" });
   const server = listen(b, "127.0.0.1", 0);

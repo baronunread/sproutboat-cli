@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, relative, resolve } from "node:path";
+import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
+import { rmSync } from "node:fs";
+import { basename, dirname, relative, resolve } from "node:path";
 import { isBoolean, isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject } from "./json";
 import type { AssetFiles } from "./assets";
 import { parseConfig, pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
@@ -930,6 +931,194 @@ async function storage(key: string, args: string[]) {
   console.log(ok(`deleted ${product.noun} ${name}`));
 }
 
+function option(args: string[], name: string): string | undefined {
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+async function writeAtomic(
+  path: string,
+  chunks: AsyncIterable<string> | readonly string[],
+  overwrite: boolean,
+): Promise<void> {
+  const destination = resolve(path);
+  if (!overwrite && (await Bun.file(destination).exists())) fail(`${path} already exists; pass --force to replace it`);
+  await mkdir(dirname(destination), { recursive: true });
+  const temporary = `${destination}.tmp-${process.pid}-${Date.now()}`;
+  const cleanup = () => {
+    try {
+      rmSync(temporary, { force: true });
+    } catch {
+      /* best effort during process shutdown */
+    }
+  };
+  process.once("exit", cleanup);
+  const file = await open(temporary, "wx", 0o600);
+  try {
+    for await (const chunk of chunks) await file.write(chunk);
+    await file.sync();
+    await file.close();
+    await rename(temporary, destination);
+    process.off("exit", cleanup);
+  } catch (error) {
+    await file.close().catch(() => undefined);
+    cleanup();
+    process.off("exit", cleanup);
+    throw error;
+  }
+}
+
+async function kvContents(args: string[]): Promise<void> {
+  const area = args.shift();
+  if (!area || !["key", "bulk", "export"].includes(area))
+    usageError("kv: unknown contents command", "kv <key | bulk | export> ...");
+  const namespace = area === "export" ? args.shift() : args[1];
+  if (!namespace) usageError(`kv ${area}: missing <namespace>`, `kv ${area} <namespace> ...`);
+  const { apiUrl, token } = await apiCredentials();
+  const rows = await storageRows(`${apiUrl}/api/kv`, { "x-api-key": token }, STORAGE_PRODUCTS[0]);
+  const id = idForName(rows, namespace, STORAGE_PRODUCTS[0]);
+  const base = `${apiUrl}/api/kv/${id}`;
+  const auth = { "x-api-key": token };
+
+  if (area === "key") {
+    const verb = args.shift();
+    args.shift();
+    if (!verb || !["list", "get", "put", "delete"].includes(verb))
+      usageError("kv key: unknown operation", "kv key <list | get | put | delete> <namespace> ...");
+    if (verb === "list") {
+      const query = new URLSearchParams();
+      for (const flag of ["--prefix", "--cursor", "--limit"] as const) {
+        const value = option(args, flag);
+        if (value !== undefined) query.set(flag.slice(2), value);
+      }
+      const body = await responseText(await fetch(`${base}/keys?${query}`, { headers: auth }), "list rejected");
+      console.log(body);
+      return;
+    }
+    const key = args.shift();
+    if (!key) usageError(`kv key ${verb}: missing <key>`, `kv key ${verb} <namespace> <key>`);
+    const url = `${base}/keys/${encodeURIComponent(key)}`;
+    if (verb === "get") {
+      const body = await responseText(await fetch(url, { headers: auth }), "get rejected");
+      const record = jsonObject(parseJsonValue(body));
+      if (!record || !isString(record.value)) fail("get response did not contain a value");
+      const output = option(args, "--output");
+      if (output) await writeAtomic(output, [record.value], args.includes("--force"));
+      else console.log(args.includes("--text") ? record.value : JSON.stringify({ key, value: record.value }, null, 2));
+      return;
+    }
+    if (verb === "put") {
+      const path = option(args, "--path");
+      const positional = args.find((arg, index) => !arg.startsWith("-") && args[index - 1] !== "--path");
+      if (path && positional)
+        usageError(
+          "kv key put: use a value or --path, not both",
+          "kv key put <namespace> <key> [value] [--path <file>]",
+        );
+      const value = path ? await readFile(resolve(path), "utf8") : (positional ?? (await Bun.stdin.text()));
+      await responseText(
+        await fetch(url, {
+          method: "PUT",
+          headers: { ...auth, "content-type": "application/json" },
+          body: JSON.stringify({ value }),
+        }),
+        "put rejected",
+      );
+      console.log(ok(`set ${key}`));
+      return;
+    }
+    if (!args.includes("--yes")) fail(`this permanently deletes "${key}"; re-run with --yes`);
+    await responseText(await fetch(url, { method: "DELETE", headers: auth }), "delete rejected");
+    console.log(ok(`deleted ${key}`));
+    return;
+  }
+
+  if (area === "bulk") {
+    const verb = args.shift();
+    args.shift();
+    const input = args.shift();
+    if (!verb || !["get", "put", "delete"].includes(verb) || !input)
+      usageError(
+        "kv bulk: expected an operation, namespace, and JSON file",
+        "kv bulk <get | put | delete> <namespace> <file>",
+      );
+    if (verb === "delete" && !args.includes("--yes")) fail("bulk deletion requires --yes");
+    const parsed = parseJsonValue(await readFile(resolve(input), "utf8"));
+    if (!Array.isArray(parsed) || parsed.length === 0) fail("bulk input must be a non-empty JSON array");
+    const responses: unknown[] = [];
+    let changed = 0;
+    const failures: unknown[] = [];
+    for (let start = 0; start < parsed.length; start += 100) {
+      const body = await responseText(
+        await fetch(`${base}/bulk/${verb}`, {
+          method: "POST",
+          headers: { ...auth, "content-type": "application/json" },
+          body: JSON.stringify(parsed.slice(start, start + 100)),
+        }),
+        `bulk ${verb} rejected`,
+      );
+      const result = parseJsonValue(body);
+      if (verb === "get" && Array.isArray(result)) responses.push(...result);
+      else {
+        const summary = jsonObject(result);
+        changed += Number(summary?.written ?? summary?.deleted ?? 0);
+        if (Array.isArray(summary?.failures)) failures.push(...summary.failures);
+      }
+    }
+    const result = verb === "get" ? responses : { [verb === "put" ? "written" : "deleted"]: changed, failures };
+    const output = option(args, "--output");
+    if (output) await writeAtomic(output, [JSON.stringify(result, null, 2) + "\n"], args.includes("--force"));
+    else console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  const output = option(args, "--output");
+  if (!output)
+    usageError(
+      "kv export: missing --output <file>",
+      "kv export <namespace> --output <dump.json> [--prefix <prefix>] [--force]",
+    );
+  const prefix = option(args, "--prefix") ?? "";
+  async function* dump(): AsyncGenerator<string> {
+    yield "[\n";
+    let cursor = "";
+    let first = true;
+    do {
+      const query = new URLSearchParams({ prefix, limit: "100" });
+      if (cursor) query.set("cursor", cursor);
+      const listed = jsonObject(
+        parseJsonValue(
+          await responseText(await fetch(`${base}/keys?${query}`, { headers: auth }), "export list rejected"),
+        ),
+      );
+      const keys = Array.isArray(listed?.keys) ? listed.keys.filter(isString) : [];
+      if (keys.length) {
+        const values = parseJsonValue(
+          await responseText(
+            await fetch(`${base}/bulk/get`, {
+              method: "POST",
+              headers: { ...auth, "content-type": "application/json" },
+              body: JSON.stringify(keys),
+            }),
+            "export read rejected",
+          ),
+        );
+        if (!Array.isArray(values)) fail("export response was not an array");
+        for (const entry of values) {
+          const record = jsonObject(entry);
+          if (!record || !isString(record.key) || !isString(record.value)) continue;
+          yield `${first ? "" : ",\n"}  ${JSON.stringify({ key: record.key, value: record.value })}`;
+          first = false;
+        }
+      }
+      cursor = isString(listed?.cursor) ? listed.cursor : "";
+    } while (cursor);
+    yield "\n]\n";
+  }
+  await writeAtomic(output, dump(), args.includes("--force"));
+  console.log(ok(`exported ${namespace} to ${output}`));
+}
+
 async function deleteProject(args: string[]) {
   // `sproutboat delete [project-dir] [--name <project>] --yes` — flags in any order.
   const positional: string[] = [];
@@ -1034,6 +1223,9 @@ switch (command) {
     await secrets(args);
     break;
   case "kv":
+    if (["key", "bulk", "export"].includes(args[0] ?? "")) await kvContents(args);
+    else await storage(command, args);
+    break;
   case "d1":
   case "r2":
   case "queues":

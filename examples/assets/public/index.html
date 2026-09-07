@@ -5,5 +5,7 @@
 <p>The clock below comes from the handler, not a file.</p>
 <pre id="t">…</pre>
 <script>
-  fetch("/api/time").then((r) => r.json()).then((d) => (document.getElementById("t").textContent = d.now));
+  fetch("/api/time")
+    .then((r) => r.json())
+    .then((d) => (document.getElementById("t").textContent = d.now));
 </script>
