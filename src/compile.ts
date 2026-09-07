@@ -54,6 +54,16 @@ export type CompileInput = {
   extraLink?: string[];
   /** #15 — flags for the compile step, so inline C can include BearSSL's header. */
   extraCflags?: string[];
+  /**
+   * How hard the C compiler works on the generated code.
+   *
+   * Porffor defaults to `-O3` (compiler/index.js reads `-O` from its own argv),
+   * which costs most of the build: `examples/hello` is 8.4s at -O3 against 2.9s
+   * at -O0 on an M-series host. `dev` pays that on every edit for a binary that
+   * never leaves the machine, so it compiles at -O0 and takes a ~55% larger
+   * file. Anything that could be deployed stays at -O3.
+   */
+  optimize?: "dev" | "release";
   /** Cross-compiler for `linux-x86_64`. Not needed, and not used, for `host`. */
   zigBin?: string;
   /**
@@ -86,6 +96,31 @@ function compileEnv(path: string, extraLink?: string[], extraCflags?: string[]) 
   const link = extraLink && extraLink.length > 0 ? extraLink.join(" ") : undefined;
   const cflags = extraCflags && extraCflags.length > 0 ? extraCflags.join(" ") : undefined;
   return { ...process.env, PATH: path, SB_EXTRA_LINK: link, SB_EXTRA_CFLAGS: cflags };
+}
+
+/**
+ * The argument list handed to Porffor, minus the launcher.
+ *
+ * Exported for the test: the one thing worth pinning is that `-O0` reaches only
+ * a build that cannot be deployed. `-s` strips at link, because the unstripped
+ * static-musl binary is ~90% DWARF that nothing needs at runtime (12 MB down to
+ * ~1.3 MB for the kitchen-sink). `--musl` is what makes it a cross-compile; a
+ * host build omits it and Porffor targets the machine it runs on.
+ */
+export function porfforArgs(
+  generatedPath: string,
+  outPath: string,
+  target: CompileInput["target"],
+  optimize: CompileInput["optimize"],
+): string[] {
+  const args = ["native", generatedPath, "-o", outPath];
+  if (target !== "host") args.push("--musl");
+  args.push("-s");
+  // Porffor reads -O from its own argv and defaults to -O3. -O0 is roughly
+  // three times faster to compile, so dev takes it and everything else does
+  // not: a deployable artifact is never built with it.
+  if (optimize === "dev" && target === "host") args.push("-O0");
+  return args;
 }
 
 /** Compile `sourcePath` to a native binary at `outPath` (mode 0555). */
@@ -149,14 +184,8 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   const zigDir = input.zigBin ? `${dirname(input.zigBin)}:` : "";
   const path = `${zigDir}${binDir}:${process.env.PATH ?? ""}`;
 
-  // `-s`: strip at link. The unstripped static-musl binary is ~90% DWARF that
-  // nothing needs at runtime (12 MB -> ~1.3 MB for the kitchen-sink). Porffor
-  // forwards `-s` straight to the `zig cc` link step.
-  // `--musl` is what makes it a cross-compile; a host build simply omits it and
-  // Porffor targets the machine it is running on.
-  const crossFlags = input.target === "host" ? [] : ["--musl"];
   const child = Bun.spawn(
-    [process.execPath, launcher, "native", generatedPath, "-o", input.outPath, ...crossFlags, "-s"],
+    [process.execPath, launcher, ...porfforArgs(generatedPath, input.outPath, input.target, input.optimize)],
     {
       cwd: outDir,
       stdout: "pipe",

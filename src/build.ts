@@ -35,6 +35,13 @@ export type BuildInput = {
   /** #15 — `embedded` compiles SQLite into the sprout instead of a broker
    *  transport. Defaults to the broker transport. */
   transport?: Transport;
+  /**
+   * `dev` compiles at -O0, which is roughly three times faster and produces a
+   * bigger binary. Only for artifacts that cannot be deployed: `deploy` refuses
+   * a host build already, and this defaults to `release` so a caller has to ask
+   * for the fast path deliberately.
+   */
+  optimize?: "dev" | "release";
 };
 
 export type BuildOutput = {
@@ -152,6 +159,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     assets: bakedAssets,
     extraLink,
     extraCflags,
+    optimize: input.optimize,
   });
 
   const sprout = await readFile(sproutPath);

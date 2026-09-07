@@ -85,6 +85,8 @@ async function start(input: DevInput, source: string): Promise<Running> {
     sourcePath: input.sourcePath,
     source,
     target: "host",
+    // Never deployable, rebuilt on every edit: buy the iteration loop.
+    optimize: "dev",
   });
   const artifactDir = artifact.artifactDir;
   const sproutPath = resolve(artifactDir, "sprout");

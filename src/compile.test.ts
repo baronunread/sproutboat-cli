@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { BASELINE_COMPATIBILITY_DATE, wrapNativeFetchHandler } from "./compile";
+import { BASELINE_COMPATIBILITY_DATE, porfforArgs, wrapNativeFetchHandler } from "./compile";
 import { DEPLOY_TARGET, hostTarget, validateManifest } from "./manifest";
 
 test("wrap: injects prelude + env, keeps the handler body verbatim", () => {
@@ -180,4 +180,26 @@ test("manifest: compatibilityDate is optional, and validated when present", () =
   const bad = validateManifest({ ...base, compatibilityDate: "Nov 2 2026" });
   expect(bad.ok).toBe(false);
   if (!bad.ok) expect(bad.errors).toContain("compatibilityDate must be YYYY-MM-DD");
+});
+
+// -O0 roughly triples build speed (8.4s -> 2.9s for examples/hello) and grows
+// the binary by about half, so it is for `dev` only. The risk worth pinning is
+// that it never reaches something a user could ship.
+test("porfforArgs: dev host builds take -O0", () => {
+  expect(porfforArgs("/t/m.js", "/t/out", "host", "dev")).toEqual(["native", "/t/m.js", "-o", "/t/out", "-s", "-O0"]);
+});
+
+test("porfforArgs: a deployable build is never -O0", () => {
+  // The deploy target, however it is asked for.
+  expect(porfforArgs("/t/m.js", "/t/out", "linux-x86_64", "dev")).not.toContain("-O0");
+  expect(porfforArgs("/t/m.js", "/t/out", "linux-x86_64", "release")).not.toContain("-O0");
+  expect(porfforArgs("/t/m.js", "/t/out", "linux-x86_64", undefined)).not.toContain("-O0");
+  // And a host build that did not ask for the fast path.
+  expect(porfforArgs("/t/m.js", "/t/out", "host", "release")).not.toContain("-O0");
+  expect(porfforArgs("/t/m.js", "/t/out", "host", undefined)).not.toContain("-O0");
+});
+
+test("porfforArgs: --musl marks the cross-compile, and only that", () => {
+  expect(porfforArgs("/t/m.js", "/t/out", "linux-x86_64", "release")).toContain("--musl");
+  expect(porfforArgs("/t/m.js", "/t/out", "host", "release")).not.toContain("--musl");
 });
