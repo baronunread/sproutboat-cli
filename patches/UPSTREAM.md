@@ -95,3 +95,58 @@ Worth raising alongside the `$PORT` ask above: both are the same shape of
 problem, a compiled server with no way to be told anything at startup. Passing
 the shim's `argc`/`argv` through to `porf_init` would solve both, without a
 `PORT` special case.
+
+---
+
+## Upstream issues we depend on
+
+Filed and tracked at `CanadaHonk/porffor`. None of these are things to fix
+locally: each is a language or platform gap that only makes sense in the
+compiler. Recorded here so the next person checks the issue before writing a
+workaround.
+
+| # | What | Why it matters here |
+| --- | --- | --- |
+| [#145](https://github.com/CanadaHonk/porffor/issues/145) | `Proxy` support | `new Proxy` compiles and silently ignores every trap |
+| [#347](https://github.com/CanadaHonk/porffor/issues/347) | Web Crypto | no `crypto.*` at all; blocks any auth library |
+| [#349](https://github.com/CanadaHonk/porffor/issues/349) | Streams | a response body is one whole string |
+| [#350](https://github.com/CanadaHonk/porffor/issues/350) | Coroutine stack corruption on native fetch exception | an async handler that throws |
+
+### #145 — `Proxy`, and why we reject it at build time
+
+`compiler/builtins/object.ts` validates the two arguments and returns the
+target. No trap ever runs, so a program using a Proxy reads wrong values rather
+than failing: `p.a` returns the target's `a`, and `p.b = 5` is discarded. Of
+337 Proxy tests in test262, the 14 that pass are argument-validation tests the
+stub satisfies by accident.
+
+**We cannot shim this.** A JavaScript-level Proxy shim can only intercept
+properties it can enumerate at construction time, using `defineProperty`
+getters — which is the one case where the caller did not need a Proxy. Google's
+`proxy-polyfill` has the same limitation for the same reason: intercepting a
+read of a key nobody knew about needs the engine.
+
+So `src/source.ts` rejects `new Proxy` at build time instead. That is the whole
+of the local fix, and it is the right one: it converts a silent wrong answer
+into a build error naming the cause. It is why itty-router and other
+Proxy-based routers do not work, and why better-auth does not build (its env
+shim is a Proxy).
+
+### #347 — Web Crypto, and what we ship meanwhile
+
+Upstream provides `globalThis.crypto = {}` in `runtime/fetch-globals.js` and
+nothing on it. The issue is labelled `C-wintercg`, so server-side web APIs are
+in scope upstream — this is not a case of us filling in something the compiler
+considers out of bounds.
+
+`src/native-fetch-prelude.js` shims `crypto.getRandomValues` and
+`crypto.randomUUID` over OS entropy. There is no `crypto.subtle`, which is what
+an auth library actually needs: better-auth alone calls `importKey`, `sign`,
+`digest`, `encrypt` and `decrypt` across 17 sites.
+
+A `subtle` subset is worth building here rather than waiting, for reasons that
+are ours and not upstream's: standalone builds already link BearSSL (SHA-256,
+HMAC, AES, EC), a deployed sprout does not link it at all and would need the
+broker or a second link line, and that split is a Sproutboat problem that means
+nothing in the compiler. Keep the surface standard so it can be dropped when
+upstream lands theirs.
