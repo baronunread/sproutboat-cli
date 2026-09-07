@@ -19,6 +19,12 @@ for agents: [sproutboat.com/llms.txt](https://sproutboat.com/llms.txt)).
 
 ## Using
 
+Sproutboat is a Bun tool. It needs **Bun 1.4+** on the machine you build from,
+and `bunx` rather than `npx`: the CLI runs on Bun's APIs, and `npm install`
+cannot resolve it today ([#134](https://github.com/baronunread/sproutboat/issues/134)).
+Nothing is needed on the machine that *runs* a sprout: that gets a static
+binary.
+
 ```sh
 bunx sproutboat init hello
 cd hello
@@ -32,7 +38,7 @@ bunx sproutboat login --api-url https://control.example.com   # one browser appr
 bunx sproutboat deploy
 ```
 
-Or install it once and drop the `bunx`:
+Or install it once with Bun and drop the `bunx`:
 
 ```sh
 bun add -g sproutboat     # then: sproutboat deploy, sproutboat tail, ...
