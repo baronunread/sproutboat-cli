@@ -40,7 +40,9 @@ usage: sproutboat <init [name] | check [project-dir] | types [project-dir] | dev
 | `SPROUTBOAT_API_URL` | Control-plane URL. Overrides the saved active endpoint. |
 | `SPROUTBOAT_TOKEN` | API token. Overrides the saved credential for the endpoint. |
 | `SPROUTBOAT_ZIG` | Path to a Zig binary to use instead of downloading the pinned one. |
-| `SPROUTBOAT_UWS_TARBALL` | Path to a prebuilt uWebSockets (x86_64-linux-musl) tarball to seed the Porffor cache with, instead of downloading it (removes the first-build git + make need). |
+| `SPROUTBOAT_UWS_TARBALL` | Path to a uWebSockets source tarball to seed the Porffor cache with, instead of the one vendored in the package. Both targets are seeded from it. |
+| `CC` | C compiler used to build uSockets for a host build (default `cc`). A host build needs one regardless: it is what Porffor compiles its own generated C with. |
+| `AR` | Archiver used to assemble uSockets.a for a host build (default `ar`). |
 | `SPROUTBOAT_COMPILE_TIMEOUT_MS` | Porffor compile timeout in ms (default 600000). |
 | `SPROUTBOAT_VARS_JSON` | JSON object of baked `vars` (UPPER_SNAKE -> string), read by the wrapper when generating the sprout module. |
 | `SPROUTBOAT_BINDINGS_JSON` | The artifact's bindings.json, read by the wrapper to emit the `__sbInstallBindings` line. |

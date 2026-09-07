@@ -106,7 +106,11 @@ test("no COMMANDS entry documents an env var that src/ never reads", () => {
   for (const file of readdirSync(srcDir)) {
     if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
     const text = readFileSync(resolve(srcDir, file), "utf8");
-    for (const m of text.matchAll(/([A-Z][A-Z0-9_]{3,})/g)) referenced.add(m[1]);
+    // Two characters, not four: CC and AR are real env vars and the old bound
+    // could never see them. Loose on purpose — some documented vars are set for
+    // a child process rather than read here (SB_EXTRA_LINK), so this only asks
+    // that the name appears in src/ at all.
+    for (const m of text.matchAll(/([A-Z][A-Z0-9_]+)/g)) referenced.add(m[1]);
   }
   const stale = ENV_VARS.map((e) => e.name).filter((name) => !referenced.has(name));
   expect(stale, `ENV_VARS lists names not found anywhere in src/: ${stale.join(", ")}`).toEqual([]);

@@ -156,6 +156,11 @@ export async function ensureUWebSockets(): Promise<void> {
     }
   }
 
+  await extractUws(archive, dir);
+}
+
+/** Unpack the vendored source tree into `dir`. */
+async function extractUws(archive: string, dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
   const untar = Bun.spawn(["tar", "-xJf", archive, "-C", dir, "--strip-components=1"], {
     stdout: "pipe",
@@ -165,6 +170,72 @@ export async function ensureUWebSockets(): Promise<void> {
   if (code !== 0) {
     await rm(dir, { recursive: true, force: true });
     throw new UwsUnavailableError(`could not extract vendored uWebSockets: ${err.trim()}`);
+  }
+}
+
+/**
+ * The same seeding for a **host** build (`dev`, `build --target host`,
+ * `--standalone` on this machine).
+ *
+ * The vendored archive is a full checkout, so the sources are the same for
+ * every target; only `uSockets.a` is target-specific. Porffor would build that
+ * with `make -C uSockets`, which is where the `git` and `make` requirements on
+ * a first build came from. Compiling the thirteen C files directly removes
+ * both, and adds no new dependency: a host build already needs a C compiler,
+ * because that is what Porffor compiles its own generated C with.
+ *
+ * Flags mirror the uSockets makefile's default target with the WITH_* switches
+ * Porffor passes (all off): `-std=c11 -Isrc -DLIBUS_NO_SSL -flto -O3`, then
+ * `ar rvs`. Nothing here is a judgement call; it is that recipe.
+ */
+export async function ensureUWebSocketsHost(): Promise<void> {
+  const commit = uwsCommitFull();
+  const dir = resolve(homedir(), ".cache/porffor/deps", `uWebSockets-${commit}`);
+  const uSockets = resolve(dir, "uSockets");
+  const archivePath = resolve(uSockets, "uSockets.a");
+  if (existsSync(resolve(dir, "src/App.h")) && existsSync(archivePath)) return;
+
+  const vendored = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(commit.slice(0, 8));
+  if (!existsSync(vendored)) {
+    throw new UwsUnavailableError(`no vendored uWebSockets archive at ${vendored}`);
+  }
+  if (!process.env.SPROUTBOAT_UWS_TARBALL) {
+    const actual = await sha256File(vendored);
+    if (actual !== UWS_TARBALL_SHA256) {
+      throw new UwsUnavailableError(
+        `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+      );
+    }
+  }
+  if (!existsSync(resolve(dir, "src/App.h"))) await extractUws(vendored, dir);
+
+  // The archive carries the musl-built uSockets.a. Linking that into a host
+  // binary fails in a way nobody would connect to this, so it goes first.
+  await rm(archivePath, { force: true });
+
+  const sources = ["src/*.c", "src/eventing/*.c", "src/crypto/*.c", "src/io_uring/*.c"];
+  const cc = process.env.CC || "cc";
+  const ar = process.env.AR || "ar";
+  const compile = Bun.spawn(["sh", "-c", `${cc} -std=c11 -Isrc -DLIBUS_NO_SSL -flto -O3 -c ${sources.join(" ")}`], {
+    cwd: uSockets,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [ccCode, ccErr] = await Promise.all([compile.exited, new Response(compile.stderr).text()]);
+  if (ccCode !== 0) {
+    throw new UwsUnavailableError(
+      `could not compile uSockets with ${cc}: ${ccErr.trim().split("\n").slice(-3).join(" ")}`,
+    );
+  }
+
+  const archiveStep = Bun.spawn(["sh", "-c", `${ar} rvs uSockets.a *.o`], {
+    cwd: uSockets,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [arCode, arErr] = await Promise.all([archiveStep.exited, new Response(archiveStep.stderr).text()]);
+  if (arCode !== 0 || !existsSync(archivePath)) {
+    throw new UwsUnavailableError(`could not archive uSockets with ${ar}: ${arErr.trim()}`);
   }
 }
 

@@ -197,8 +197,14 @@ export const ENV_VARS: readonly EnvVar[] = [
   {
     name: "SPROUTBOAT_UWS_TARBALL",
     purpose:
-      "Path to a prebuilt uWebSockets (x86_64-linux-musl) tarball to seed the Porffor cache with, instead of downloading it (removes the first-build git + make need).",
+      "Path to a uWebSockets source tarball to seed the Porffor cache with, instead of the one vendored in the package. Both targets are seeded from it.",
   },
+  {
+    name: "CC",
+    purpose:
+      "C compiler used to build uSockets for a host build (default `cc`). A host build needs one regardless: it is what Porffor compiles its own generated C with.",
+  },
+  { name: "AR", purpose: "Archiver used to assemble uSockets.a for a host build (default `ar`)." },
   { name: "SPROUTBOAT_COMPILE_TIMEOUT_MS", purpose: "Porffor compile timeout in ms (default 600000)." },
   {
     name: "SPROUTBOAT_VARS_JSON",

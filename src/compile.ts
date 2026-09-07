@@ -12,7 +12,7 @@
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
-import { ensureUWebSockets, porfforRoot, UwsUnavailableError } from "./toolchain";
+import { ensureUWebSockets, ensureUWebSocketsHost, porfforRoot, UwsUnavailableError } from "./toolchain";
 import {
   EMPTY_BINDINGS,
   preludePath,
@@ -128,10 +128,12 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   await ensurePorfforPatched();
 
   // Seed the Porffor uWebSockets cache from the prebuilt archive in `vendor/` so
-  // the first build needs no `git` / `make`. Fall back to Porffor's own git+make
-  // path if the archive is missing or fails its checksum.
+  // the first build needs no `git` / `make`. The two targets keep separate
+  // cache trees and separate uSockets.a, so seed whichever this build wants.
+  // Fall back to Porffor's own git+make path if the archive is unusable.
   try {
-    await ensureUWebSockets();
+    if (input.target === "host") await ensureUWebSocketsHost();
+    else await ensureUWebSockets();
   } catch (error) {
     if (!(error instanceof UwsUnavailableError)) throw error;
     const haveGit = Bun.which("git");
