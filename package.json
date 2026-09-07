@@ -22,12 +22,14 @@
     "sproutboat": "src/main.ts"
   },
   "files": [
-    "src",
     "!src/*.test.ts",
-    "vendor",
-    "SURFACE.md"
+    "SURFACE.md",
+    "src",
+    "types",
+    "vendor"
   ],
   "type": "module",
+  "types": "./types/sproutboat.d.ts",
   "exports": {
     "./runtime/config": "./src/config.ts",
     "./runtime/source": "./src/source.ts",
@@ -36,7 +38,8 @@
     "./runtime/broker": "./src/broker.ts",
     "./runtime/wrap": "./src/wrap.ts",
     "./runtime/prelude": "./src/native-fetch-prelude.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./types": "./types/sproutboat.d.ts"
   },
   "scripts": {
     "prepare": "lefthook install || true",

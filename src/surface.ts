@@ -78,6 +78,14 @@ export const COMMANDS: readonly Command[] = [
     summary: "Validate the config and entry point without building.",
   },
   {
+    name: "types",
+    group: "Develop",
+    emoji: "🧾",
+    args: "[project-dir]",
+    summary:
+      "Write sproutboat-env.d.ts from the config, so an editor knows what `env` holds. `dev` and `deploy` refresh it when the config is newer.",
+  },
+  {
     name: "dev",
     group: "Develop",
     emoji: "⚡",

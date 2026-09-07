@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename, relative, resolve } from "node:path";
 import { isBoolean, isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject } from "./json";
 import type { AssetFiles } from "./assets";
 import { parseConfig, pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
 import { validateHttpSyncSource } from "./source";
 import { buildArtifact } from "./build";
+import { generateTypes, TYPES_FILE } from "./types-gen";
 import { bundleHandler, BundleError, type BundleResult } from "./bundle";
 import { runDev } from "./dev";
 import { buildStandalone } from "./standalone-build";
@@ -231,6 +232,35 @@ async function check(directory?: string) {
   console.log(ok(`check passed — ${project.config.name} (${project.config.main}, native-fetch)`));
 }
 
+async function types(directory?: string) {
+  const project = await readProject(directory);
+  const path = resolve(project.directory, TYPES_FILE);
+  await writeFile(path, generateTypes(project.config));
+  console.log(ok(`wrote ${relative(process.cwd(), path) || TYPES_FILE}`));
+  console.log(dim("  Commit it. Add it to tsconfig `include` if your project has one."));
+}
+
+/**
+ * Rewrite the generated types when the config has moved on, and only then.
+ *
+ * Called from `dev` and `deploy` so a binding added to sproutboat.jsonc cannot
+ * sit unreflected in the editor. It writes only when the content actually
+ * differs, which keeps it out of the way of git and of file watchers.
+ */
+async function refreshTypes(projectDir: string, config: SproutboatConfig): Promise<void> {
+  const path = resolve(projectDir, TYPES_FILE);
+  const wanted = generateTypes(config);
+  try {
+    if ((await readFile(path, "utf8")) === wanted) return;
+  } catch {
+    // No file yet: only write one if the project already opted in by having a
+    // tsconfig. Generating into a plain JavaScript project is noise.
+    if (!(await Bun.file(resolve(projectDir, "tsconfig.json")).exists())) return;
+  }
+  await writeFile(path, wanted);
+  console.log(dim(`  ${TYPES_FILE} refreshed from sproutboat.jsonc`));
+}
+
 async function build(directory?: string, target: "linux-x86_64" | "host" = "linux-x86_64") {
   const project = await readProject(directory);
   console.log(
@@ -287,6 +317,7 @@ async function dev(args: string[]) {
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535)
     usageError(`invalid --port: ${portArg}`, "dev [project-dir] [--port <n>] [--no-watch]");
   const project = await readProject(directory);
+  await refreshTypes(project.directory, project.config);
   console.log(dim(`Building ${project.config.name} for this machine (${hostTarget()})…`));
   await runDev({
     projectDir: project.directory,
@@ -410,6 +441,8 @@ async function deploy(args: string[]) {
     projectName = built.project.config.name;
     artifactDir = built.artifact.artifactDir;
     config = built.project.config;
+    // After provisioning: ids may have been pinned into the config just now.
+    await refreshTypes(built.project.directory, built.project.config);
   }
   const manifest = Bun.file(resolve(artifactDir, "manifest.json"));
   const sprout = Bun.file(resolve(artifactDir, "sprout"));
@@ -962,6 +995,9 @@ switch (command) {
     break;
   case "check":
     await check(args[0]);
+    break;
+  case "types":
+    await types(args[0]);
     break;
   case "dev":
     await dev(args);
