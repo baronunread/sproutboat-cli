@@ -24,31 +24,57 @@ draft below in your own words before filing. File as an **issue**, not a PR
 
 ## Draft — rewrite before filing
 
-**Title:** native-fetch: compiled server can't get its listen port at runtime
+Nothing upstream covers this: searched their issues for port, getenv,
+process.env, argv and native fetch, all open and closed. Checked against
+`main` at `a415d194`, which is the commit we pin.
 
-**Version:** `alpha-4` (`a415d19`), `porf native`, `export default { fetch }`.
+Porffor's `AI_POLICY` asks that AI use is disclosed and that LLM prose is not
+pasted. Rewrite the below in your own words before filing, and file it as an
+**issue**, not a PR: the maintainer may prefer a general environment binding
+over a `PORT` special case.
+
+---
+
+**Title:** native-fetch: a compiled server cannot be told its port
+
+**Version:** `main` @ `a415d194`, `porf native`, `export default { fetch }`.
 
 ### Problem
 
-The port a native-fetch server listens on is fixed at compile time. The `port:`
-field on the handler object is read by `runtime/native-fetch.js` while bundling
-and rendered into the C as a constant; `porf_native_fetch_get_port()` returns
-that constant unconditionally. The compiled binary parses no argv and reads no
-environment, so nothing can tell it which port to use when it starts.
+The listen port is fixed at compile time. `compiler/render.js:1521`:
 
-This blocks running more than one compiled handler on a host. A supervisor that
-spawns many handlers assigns each a distinct port at spawn time — it can't, so
-every handler has to be recompiled with its port baked in. "Compile once, run
-anywhere" becomes "compile once per port".
+```c
+f64 porf_native_fetch_get_port(void) {
+  return __porffor_native_fetch_port.val;
+}
+```
+
+That value comes from the `port:` field on the handler object, read while
+bundling and rendered into the C as a constant. Nothing at runtime can change
+it.
+
+The environment is not a way out either, because there is no argv to fall back
+on: `porf_native_fetch_runtime_init()` calls `porf_init(0, NULL)`
+(`render.js:1481`), so `porf_argc` / `porf_argv` are empty for every
+native-fetch build, while the regular native entry point passes `main`'s
+through. The two paths disagree.
+
+So a compiled `export default { fetch }` server can be told nothing at startup:
+not a port, not a config path.
+
+### Why it matters
+
+Running more than one compiled handler on a host means assigning each a port at
+spawn time. Today that is impossible, so every handler has to be recompiled per
+port, and "compile once, run anywhere" becomes "compile once per port". Any
+supervisor, container platform or PaaS hits this immediately, since $PORT is
+the near-universal convention.
 
 ### Repro
 
 ```js
 // handler.js
-export default {
-  port: 3000,
-  fetch() { return new Response("ok"); },
-};
+export default { port: 3000, fetch() { return new Response("ok"); } };
 ```
 
 ```
@@ -57,44 +83,20 @@ $ PORT=8080 ./handler
 Porffor native fetch server listening on http://127.0.0.1:3000
 ```
 
-Expected: some runtime input (env var or argv) selects the port. Actual: always
-the compiled value.
+Expected: some runtime input selects the port. Actual: always the compiled
+value.
 
-### Suggested fix
+### Two possible fixes
 
-Have `porf_native_fetch_get_port()` check `getenv("PORT")` first and fall back to
-the compiled `port:` value. Smallest possible change, and it matches how
-workerd/`wrangler dev` and most PaaS runtimes pick up a port.
+1. Smallest: have `porf_native_fetch_get_port()` read `getenv("PORT")` first
+   and fall back to the compiled `port:`. Matches workerd, `wrangler dev` and
+   most PaaS runtimes.
+2. More general, and fixes both halves: pass the real `argc` / `argv` into
+   `porf_init` from the native-fetch entry point, so a compiled server can take
+   arguments like any other program. That covers config paths too, not just the
+   port.
 
-A general `getenv` / `Porffor.env()` binding for handler code would also solve
-this and cover other env-driven config, but that's a much larger surface — the
-`PORT` read is enough to unblock multi-process hosting.
-
-### What we do locally
-
-A 2-line patch to `compiler/render.js` adding exactly that `getenv("PORT")`
-branch. Happy to send it as a PR if the env-var shape is acceptable.
-
-> Draft prepared with Claude (Claude Code); to be rewritten before filing.
-
-
----
-
-## Second finding: a native-fetch binary cannot see its own argv
-
-`porf_native_fetch_runtime_init()` calls `porf_init(0, NULL)`, so `porf_argc` /
-`porf_argv` are empty for every native-fetch build. The regular native entry
-point passes the real `argc`/`argv` from `main`, so the two paths disagree.
-
-The effect is that a compiled `export default { fetch }` server can take no
-command-line arguments at all — not a port, not a config path. Sproutboat works
-around it by reading the environment (`PORT`, `SB_DATA_DIR`), which is fine for
-systemd and docker but surprising for a binary someone runs by hand.
-
-Worth raising alongside the `$PORT` ask above: both are the same shape of
-problem, a compiled server with no way to be told anything at startup. Passing
-the shim's `argc`/`argv` through to `porf_init` would solve both, without a
-`PORT` special case.
+Happy to send either as a PR if one of the shapes is acceptable.
 
 ---
 
