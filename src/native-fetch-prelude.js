@@ -79,8 +79,11 @@ function __sbTagCpu(res, t0) {
       res.headers.forEach(function (value, name) {
         headers[name] = value;
       });
-      headers["x-sb-cpu-ms"] = (cpu >= 0 ? cpu : 0).toFixed(3);
-      return new Response(body, { status: res.status, headers: headers });
+      const cpuMs = (cpu >= 0 ? cpu : 0).toFixed(3);
+      headers["x-sb-cpu-ms"] = cpuMs;
+      // A handler can reserve this literal in HTML when it needs the final
+      // runtime measurement in its first server-rendered response.
+      return new Response(body.replaceAll("__SB_CPU_MS__", cpuMs), { status: res.status, headers: headers });
     }
   } catch {
     /* fall through to the original response */
