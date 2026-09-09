@@ -34,6 +34,10 @@ export type DevInput = {
   rebuild: () => Promise<Pick<DevInput, "config" | "sourcePath" | "source">>;
   /** Set internally for an asset-only refresh, where recompiling is unnecessary. */
   reuseSproutPath?: string;
+  /** Test seam: production always uses the native artifact starter below. */
+  candidateFactory?: (input: DevInput, port: number) => Promise<Running>;
+  /** Test seam: avoid terminating Bun's test process on a simulated signal. */
+  exitOnShutdown?: boolean;
 };
 
 export function isAssetOnlyRefresh(
@@ -80,7 +84,7 @@ async function readBindings(artifactDir: string): Promise<Partial<Bindings> | un
   return record as Partial<Bindings> | undefined;
 }
 
-type Running = {
+export type Running = {
   sprout: Bun.Subprocess;
   sproutPath: string;
   artifactDir: string;
@@ -222,7 +226,8 @@ export function tcpReady(port: number, timeout: number): Promise<boolean> {
 /** Build, run, and (optionally) rebuild on change. Resolves only on shutdown. */
 export async function runDev(input: DevInput): Promise<void> {
   let current = input;
-  let running = await start(current, candidatePort());
+  const startCandidate = input.candidateFactory ?? start;
+  let running = await startCandidate(current, candidatePort());
   try {
     await waitUntilReady(running);
   } catch (error) {
@@ -267,7 +272,7 @@ export async function runDev(input: DevInput): Promise<void> {
     proxy.stop();
     stop(running);
     resolveShutdown?.();
-    process.exit(0);
+    if (input.exitOnShutdown !== false) process.exit(0);
   };
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, shutdown);
 
@@ -305,7 +310,7 @@ export async function runDev(input: DevInput): Promise<void> {
             const next = await current.rebuild();
             console.log(dim("  change detected, rebuilding…"));
             const assetOnly = isAssetOnlyRefresh(current, next);
-            const candidate = await start(
+            const candidate = await startCandidate(
               { ...current, ...next, reuseSproutPath: assetOnly ? running.sproutPath : undefined },
               candidatePort(),
             );
