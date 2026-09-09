@@ -11,7 +11,8 @@
  * project, one port.
  */
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
+import { connect } from "node:net";
 import { dirname, resolve } from "node:path";
 import { buildArtifact } from "./build";
 import { createBroker, listen, type Bindings, type Broker } from "./broker";
@@ -34,6 +35,13 @@ export type DevInput = {
   /** Set internally for an asset-only refresh, where recompiling is unnecessary. */
   reuseSproutPath?: string;
 };
+
+export function isAssetOnlyRefresh(
+  current: Pick<DevInput, "config" | "source">,
+  next: Pick<DevInput, "config" | "source">,
+): boolean {
+  return next.source === current.source && JSON.stringify(next.config) === JSON.stringify(current.config);
+}
 
 /**
  * Secrets for local dev, `KEY=value` per line, from `.dev.vars` beside the
@@ -75,11 +83,14 @@ async function readBindings(artifactDir: string): Promise<Partial<Bindings> | un
 type Running = {
   sprout: Bun.Subprocess;
   sproutPath: string;
+  artifactDir: string;
   broker: Broker;
   stopBroker: () => void;
   /** Set before a kill we initiated, so its exit code is not reported as a crash. */
   expected: boolean;
   port: number;
+  enableDispatch: () => void;
+  disableDispatch: () => void;
 };
 
 async function start(input: DevInput, port: number): Promise<Running> {
@@ -107,6 +118,7 @@ async function start(input: DevInput, port: number): Promise<Running> {
   const stateDir = resolve(input.projectDir, ".sproutboat/dev");
   await mkdir(stateDir, { recursive: true });
   const assetsDir = resolve(artifactDir, "assets");
+  let dispatchEnabled = false;
   const broker = createBroker({
     db: resolve(stateDir, "state.sqlite"),
     dataDir: resolve(stateDir, "d1"),
@@ -116,6 +128,7 @@ async function start(input: DevInput, port: number): Promise<Running> {
     secrets: await readDevVars(input.projectDir),
     sproutUrl: `http://127.0.0.1:${port}/`,
     assetsDir: existsSync(assetsDir) ? assetsDir : undefined,
+    dispatchEnabled: () => dispatchEnabled,
   });
   const server = listen(broker, "127.0.0.1", 0);
 
@@ -133,6 +146,7 @@ async function start(input: DevInput, port: number): Promise<Running> {
   return {
     sprout,
     sproutPath,
+    artifactDir,
     broker,
     stopBroker: () => {
       server.stop();
@@ -140,13 +154,23 @@ async function start(input: DevInput, port: number): Promise<Running> {
     },
     expected: false,
     port,
+    enableDispatch: () => {
+      dispatchEnabled = true;
+    },
+    disableDispatch: () => {
+      dispatchEnabled = false;
+    },
   };
 }
 
 function stop(running: Running): void {
   running.expected = true;
+  running.disableDispatch();
   running.sprout.kill(9);
   running.stopBroker();
+  // Every candidate owns an isolated snapshot. Once it is no longer serving,
+  // remove it so repeated edits do not grow .sproutboat/dev-build forever.
+  void rm(running.artifactDir, { recursive: true, force: true });
 }
 
 /** Report a sprout that died on its own; a kill we asked for is not news. */
@@ -174,34 +198,61 @@ async function waitUntilReady(running: Running): Promise<void> {
     if (running.expected) throw new Error("candidate stopped before becoming ready");
     const exited = await Promise.race([running.sprout.exited.then(() => true), Bun.sleep(30).then(() => false)]);
     if (exited) throw new Error("candidate sprout exited before becoming ready");
-    try {
-      // Any HTTP status is ready: applications are allowed to return 404 at /.
-      await fetch(`http://127.0.0.1:${running.port}/`, { redirect: "manual" });
-      return;
-    } catch {
-      // Native-fetch has not bound its socket yet.
-    }
+    if (await tcpReady(running.port, Math.min(250, deadline - Date.now()))) return;
   }
   throw new Error("candidate sprout did not become ready within 3s");
+}
+
+/** Readiness is a bounded TCP connect, never an application request: booting a
+ * candidate must not execute user code or wait forever on a handler. */
+export function tcpReady(port: number, timeout: number): Promise<boolean> {
+  return new Promise((resolveReady) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    const finish = (ready: boolean) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolveReady(ready);
+    };
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.setTimeout(timeout, () => finish(false));
+  });
 }
 
 /** Build, run, and (optionally) rebuild on change. Resolves only on shutdown. */
 export async function runDev(input: DevInput): Promise<void> {
   let current = input;
   let running = await start(current, candidatePort());
-  await waitUntilReady(running);
+  try {
+    await waitUntilReady(running);
+  } catch (error) {
+    stop(running);
+    throw error;
+  }
+  running.enableDispatch();
   let activePort = running.port;
   // Keep the public port stable while candidates boot on private ports. This is
   // what lets a failed startup leave the last known-good process reachable.
-  const proxy = Bun.serve({
-    hostname: "127.0.0.1",
-    port: input.port,
-    fetch(request) {
-      const target = new URL(request.url);
-      target.host = `127.0.0.1:${activePort}`;
-      return fetch(target, request);
-    },
-  });
+  let proxy: ReturnType<typeof Bun.serve>;
+  try {
+    proxy = Bun.serve({
+      hostname: "127.0.0.1",
+      port: input.port,
+      fetch(request) {
+        const target = new URL(request.url);
+        target.host = `127.0.0.1:${activePort}`;
+        return fetch(target, {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+          redirect: "manual",
+        }).catch(() => new Response("sprout unavailable", { status: 502 }));
+      },
+    });
+  } catch (error) {
+    stop(running);
+    throw error;
+  }
   watchExit(running);
   console.log(ok(`${input.config.name} running on ${leaf(`http://127.0.0.1:${input.port}`)}`));
   if (input.watch) console.log(dim("  watching for changes — ctrl-c to stop"));
@@ -234,6 +285,9 @@ export async function runDev(input: DevInput): Promise<void> {
       ];
       if (current.config.assets) {
         const assets = resolve(current.projectDir, current.config.assets.directory);
+        // The parent sees a generated directory being atomically replaced;
+        // the directory watcher sees updates inside an existing snapshot.
+        next.push(watch(dirname(assets), { recursive: false }, onChange));
         if (existsSync(assets)) next.push(watch(assets, { recursive: true }, onChange));
       }
       watchers = next;
@@ -250,12 +304,15 @@ export async function runDev(input: DevInput): Promise<void> {
             dirty = false;
             const next = await current.rebuild();
             console.log(dim("  change detected, rebuilding…"));
-            const assetOnly =
-              next.source === current.source && JSON.stringify(next.config) === JSON.stringify(current.config);
+            const assetOnly = isAssetOnlyRefresh(current, next);
             const candidate = await start(
               { ...current, ...next, reuseSproutPath: assetOnly ? running.sproutPath : undefined },
               candidatePort(),
             );
+            if (shuttingDown) {
+              stop(candidate);
+              return;
+            }
             try {
               await waitUntilReady(candidate);
             } catch (error) {
@@ -265,6 +322,8 @@ export async function runDev(input: DevInput): Promise<void> {
             // Only now is the public route switched. The old process stays up
             // through compilation and candidate startup.
             const previous = running;
+            previous.disableDispatch();
+            candidate.enableDispatch();
             running = candidate;
             current = { ...current, ...next };
             activePort = candidate.port;

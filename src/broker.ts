@@ -90,6 +90,9 @@ export type BrokerOptions = {
    * with an `x-sb-trigger` header authenticated by `token`.
    */
   sproutUrl?: string;
+  /** Lets a supervisor prepare a replacement without two brokers claiming
+   * queues, alarms, or cron ticks at once. Defaults to active. */
+  dispatchEnabled?: () => boolean;
   /** Directory of published static assets (its sibling `assets.json` is the manifest). Backs `assets.get`. */
   assetsDir?: string;
   /** Injected in tests; defaults to the global `fetch`. */
@@ -907,11 +910,12 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
 
   // --- cron + queue delivery (only when this broker knows its sprout) --------
   const timers: ReturnType<typeof setInterval>[] = [];
+  const dispatchEnabled = () => opts.dispatchEnabled?.() ?? true;
   const QUEUE_BATCH = 10;
   const QUEUE_MAX_ATTEMPTS = 5;
 
   async function deliverTrigger(kind: "scheduled" | "queue" | "alarm", body: JsonObject): Promise<Response | null> {
-    if (!opts.sproutUrl) return null;
+    if (!opts.sproutUrl || !dispatchEnabled()) return null;
     try {
       return await doFetch(opts.sproutUrl, {
         method: "POST",
@@ -924,7 +928,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
   }
 
   function drainQueuesOnce(): void {
-    if (!opts.sproutUrl || bindings.queues.length === 0) return;
+    if (!opts.sproutUrl || !dispatchEnabled() || bindings.queues.length === 0) return;
     const now = Date.now();
     for (const binding of bindings.queues) {
       // `store`/`part` route the rows to this queue's backing file (#74); the
@@ -986,7 +990,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
    * handler set itself.
    */
   function fireAlarmsOnce(): void {
-    if (!opts.sproutUrl || bindings.do.length === 0) return;
+    if (!opts.sproutUrl || !dispatchEnabled() || bindings.do.length === 0) return;
     const now = Date.now();
     const due = db
       .query<{ cls: string; id: string; at: number; attempts: number }, [number]>(
@@ -1016,6 +1020,7 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       let lastTick = "";
       timers.push(
         setInterval(() => {
+          if (!dispatchEnabled()) return;
           const now = new Date();
           const stamp = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}-${now.getUTCMinutes()}`;
           if (stamp === lastTick) return; // once per minute
