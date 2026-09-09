@@ -103,17 +103,23 @@ async function start(input: DevInput, port: number): Promise<Running> {
     ".sproutboat/dev-build",
     `${Date.now()}-${Math.random().toString(16).slice(2)}`,
   );
-  const artifact = await buildArtifact({
-    projectDir: input.projectDir,
-    config: input.config,
-    sourcePath: input.sourcePath,
-    source: input.source,
-    target: "host",
-    // Never deployable, rebuilt on every edit: buy the iteration loop.
-    optimize: "dev",
-    reuseSproutPath: input.reuseSproutPath,
-    outputDirectory: candidateDir,
-  });
+  let artifact;
+  try {
+    artifact = await buildArtifact({
+      projectDir: input.projectDir,
+      config: input.config,
+      sourcePath: input.sourcePath,
+      source: input.source,
+      target: "host",
+      // Never deployable, rebuilt on every edit: buy the iteration loop.
+      optimize: "dev",
+      reuseSproutPath: input.reuseSproutPath,
+      outputDirectory: candidateDir,
+    });
+  } catch (error) {
+    await rm(candidateDir, { recursive: true, force: true });
+    throw error;
+  }
   const artifactDir = artifact.artifactDir;
   const sproutPath = resolve(artifactDir, "sprout");
 
@@ -136,17 +142,25 @@ async function start(input: DevInput, port: number): Promise<Running> {
   });
   const server = listen(broker, "127.0.0.1", 0);
 
-  const sprout = Bun.spawn([sproutPath], {
-    cwd: dirname(sproutPath),
-    env: {
-      ...process.env,
-      PORT: String(port),
-      SB_BROKER_PORT: String(server.port),
-      SB_BROKER_TOKEN: "sproutboat-dev",
-    },
-    stdout: "inherit",
-    stderr: "inherit",
-  });
+  let sprout: Bun.Subprocess;
+  try {
+    sprout = Bun.spawn([sproutPath], {
+      cwd: dirname(sproutPath),
+      env: {
+        ...process.env,
+        PORT: String(port),
+        SB_BROKER_PORT: String(server.port),
+        SB_BROKER_TOKEN: "sproutboat-dev",
+      },
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+  } catch (error) {
+    server.stop();
+    broker.close();
+    await rm(candidateDir, { recursive: true, force: true });
+    throw error;
+  }
   return {
     sprout,
     sproutPath,
@@ -323,6 +337,10 @@ export async function runDev(input: DevInput): Promise<void> {
             } catch (error) {
               stop(candidate);
               throw error;
+            }
+            if (shuttingDown) {
+              stop(candidate);
+              return;
             }
             // Only now is the public route switched. The old process stays up
             // through compilation and candidate startup.
