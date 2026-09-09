@@ -19,12 +19,14 @@
     "url": "git+https://github.com/baronunread/sproutboat-cli.git"
   },
   "bin": {
-    "sproutboat": "src/main.ts"
+    "sproutboat": "bin/sproutboat.cjs"
   },
   "files": [
     "CHANGELOG.md",
     "SURFACE.md",
     "src",
+    "bin",
+    "scripts",
     "types",
     "vendor"
   ],
@@ -46,6 +48,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint .",
     "examples": "bun examples/smoke.ts",
+    "build:cli": "bun scripts/build-cli.ts",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
     "test": "bun test",
