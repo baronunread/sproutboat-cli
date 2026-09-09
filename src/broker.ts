@@ -1141,6 +1141,7 @@ if (import.meta.main) {
       "assets-dir": { type: "string" },
       "edge-url": { type: "string" },
       services: { type: "string" },
+      "dispatch-disabled": { type: "boolean" },
     },
   });
   // SAFETY: --bindings and --secrets are the artifact's own bindings.json /
@@ -1168,6 +1169,16 @@ if (import.meta.main) {
       console.error("sproutboat broker: --services is not valid JSON; service bindings disabled");
     }
   }
+  // Candidate brokers must be able to listen before they claim timers. The
+  // supervisor promotes one only after the edge points at it, using a local
+  // signal instead of a network-visible control endpoint.
+  let dispatchEnabled = !values["dispatch-disabled"];
+  process.on("SIGUSR1", () => {
+    dispatchEnabled = true;
+  });
+  process.on("SIGUSR2", () => {
+    dispatchEnabled = false;
+  });
   const broker = createBroker({
     db: values.db,
     dataDir: values["data-dir"],
@@ -1179,9 +1190,10 @@ if (import.meta.main) {
     assetsDir: values["assets-dir"],
     edgeUrl: values["edge-url"],
     services,
+    dispatchEnabled: () => dispatchEnabled,
   });
   const { port } = listen(broker, "127.0.0.1", Number(values.port ?? process.env.SB_BROKER_PORT ?? 0));
   console.log(
-    `sproutboat broker: 127.0.0.1:${port} db=${values.db ?? ":memory:"} sprout=${values["sprout-url"] ?? process.env.SB_SPROUT_URL ?? "(none)"}`,
+    `sproutboat broker: 127.0.0.1:${port} db=${values.db ?? ":memory:"} sprout=${values["sprout-url"] ?? process.env.SB_SPROUT_URL ?? "(none)"} dispatch=${dispatchEnabled ? "enabled" : "disabled"}`,
   );
 }
