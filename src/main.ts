@@ -165,7 +165,9 @@ function usageError(what: string, usage: string): never {
   process.exit(2);
 }
 
-async function readProject(directory = process.cwd()) {
+/** Read the project identity and configuration without touching application code.
+ * Management commands must remain usable when a local checkout is incomplete. */
+async function readProjectConfig(directory = process.cwd()) {
   const projectDirectory = resolve(directory);
   const configPath = resolve(projectDirectory, "sproutboat.jsonc");
   let configSource: string;
@@ -176,25 +178,31 @@ async function readProject(directory = process.cwd()) {
   }
   const parsed = parseConfig(configSource);
   if (!parsed.ok) fail(parsed.errors.join("\n"));
-  const sourcePath = resolve(projectDirectory, parsed.value.main);
+  return { directory: projectDirectory, config: parsed.value };
+}
+
+/** Full build input: configuration plus entry point, resolved imports and checks. */
+async function readProject(directory = process.cwd()) {
+  const project = await readProjectConfig(directory);
+  const sourcePath = resolve(project.directory, project.config.main);
   let source: string;
   try {
     source = await readFile(sourcePath, "utf8");
   } catch {
-    fail(`entry point not found: ${parsed.value.main}`);
+    fail(`entry point not found: ${project.config.main}`);
   }
   // #89 — resolve imports first, then hold the *bundled* module to the
   // capability rules. Validating the entry file instead would let a dependency
   // smuggle in a Node API the handler is not allowed to touch.
   let bundle: BundleResult;
   try {
-    bundle = await bundleHandler(sourcePath, projectDirectory);
+    bundle = await bundleHandler(sourcePath, project.directory);
   } catch (cause) {
     fail(cause instanceof BundleError ? cause.message : String(cause));
   }
-  const supported = validateHttpSyncSource(bundle.code, (parsed.value.outbound ?? []).length > 0);
+  const supported = validateHttpSyncSource(bundle.code, (project.config.outbound ?? []).length > 0);
   if (!supported.ok) fail(supported.errors.join("\n"));
-  return { directory: projectDirectory, config: parsed.value, sourcePath, source, bundle };
+  return { ...project, sourcePath, source, bundle };
 }
 
 async function init(name = "hello") {
@@ -329,7 +337,11 @@ async function dev(args: string[]) {
     watch: !args.includes("--no-watch"),
     // Re-read from disk on every rebuild: the point of watching is that the
     // files changed, so the bundle captured at startup is stale by definition.
-    rebuild: async () => (await readProject(directory)).bundle.code,
+    rebuild: async () => {
+      const next = await readProject(directory);
+      await refreshTypes(next.directory, next.config);
+      return { config: next.config, sourcePath: next.sourcePath, source: next.bundle.code };
+    },
   });
 }
 
@@ -631,7 +643,7 @@ async function versions(args: string[]) {
   if (sub === "view") {
     const id = args.shift();
     if (!id) usageError("versions view: missing <version-id>", "versions view <version-id> [project-dir]");
-    const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
+    const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(args[0]), apiCredentials()]);
     const body = await responseText(
       await fetch(`${apiUrl}/api/projects/${project.config.name}/deployments/${encodeURIComponent(id)}`, {
         headers: { "x-api-key": token },
@@ -662,7 +674,7 @@ async function versions(args: string[]) {
     return;
   }
 
-  const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
+  const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(args[0]), apiCredentials()]);
   const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/deployments`, {
     headers: { "x-api-key": token },
   });
@@ -677,7 +689,7 @@ async function versions(args: string[]) {
 async function rollback(args: string[]) {
   const id = args[0];
   if (!id) usageError("rollback: missing <version-id>", "rollback <version-id> [project-dir]");
-  const [project, { apiUrl, token }] = await Promise.all([readProject(args[1]), apiCredentials()]);
+  const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(args[1]), apiCredentials()]);
   const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/deployments/${id}/activate`, {
     method: "POST",
     headers: { "x-api-key": token },
@@ -691,7 +703,7 @@ async function rollback(args: string[]) {
 async function tail(args: string[]) {
   const sproutLog = args.includes("--sprout");
   const dir = args.find((arg) => !arg.startsWith("-"));
-  const [project, { apiUrl, token }] = await Promise.all([readProject(dir), apiCredentials()]);
+  const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(dir), apiCredentials()]);
   const path = sproutLog ? "logs/sprout" : "logs/recent";
   const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/${path}`, {
     headers: { "x-api-key": token },
@@ -746,7 +758,7 @@ async function domains(args: string[]) {
   const host = sub === "list" ? undefined : args.shift();
   if (sub !== "list" && !host)
     usageError(`domains ${sub}: missing <hostname>`, `domains ${sub} <hostname> [project-dir]`);
-  const [project, { apiUrl, token }] = await Promise.all([readProject(args[0]), apiCredentials()]);
+  const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(args[0]), apiCredentials()]);
   const base = `${apiUrl}/api/projects/${project.config.name}/domains`;
   const auth = { "x-api-key": token };
 
@@ -803,7 +815,7 @@ async function secrets(args: string[]) {
   const name = sub === "list" ? undefined : positional.shift();
   if (sub !== "list" && !name) usageError(`secrets ${sub}: missing <NAME>`, `secrets ${sub} <NAME> [project-dir]`);
   if (name && !/^[A-Z][A-Z0-9_]*$/.test(name)) fail("secret name must be UPPER_SNAKE_CASE");
-  const [project, { apiUrl, token }] = await Promise.all([readProject(positional[0]), apiCredentials()]);
+  const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(positional[0]), apiCredentials()]);
   const base = `${apiUrl}/api/projects/${project.config.name}/secrets`;
   const auth = { "x-api-key": token };
 
@@ -1133,7 +1145,7 @@ async function deleteProject(args: string[]) {
   }
 
   const { apiUrl, token } = await apiCredentials();
-  const name = explicitName ?? (await readProject(positional[0])).config.name;
+  const name = explicitName ?? (await readProjectConfig(positional[0])).config.name;
   if (!confirmed) fail(`this permanently removes "${name}", every version, and its route — re-run with --yes`);
 
   const url = `${apiUrl}/api/projects/${encodeURIComponent(name)}?confirm=${encodeURIComponent(name)}`;

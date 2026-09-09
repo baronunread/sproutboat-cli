@@ -42,6 +42,10 @@ export type BuildInput = {
    * for the fast path deliberately.
    */
   optimize?: "dev" | "release";
+  /** Reuse a previously compiled native sprout when only sidecar assets changed. */
+  reuseSproutPath?: string;
+  /** An isolated artifact directory, used by dev candidates to avoid mixing snapshots. */
+  outputDirectory?: string;
 };
 
 export type BuildOutput = {
@@ -67,7 +71,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   const source = input.source ?? (await readFile(input.sourcePath));
   const sourceHash = digest(source);
   const artifactId = sourceHash.slice("sha256:".length, 24);
-  const artifactDir = resolve(input.projectDir, ".sproutboat/dist", artifactId);
+  const artifactDir = input.outputDirectory ?? resolve(input.projectDir, ".sproutboat/dist", artifactId);
   const sproutPath = resolve(artifactDir, "sprout");
   await mkdir(artifactDir, { recursive: true });
 
@@ -145,22 +149,24 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     bakedAssets = { manifest, files };
   }
 
-  await compileSprout({
-    sourcePath: input.sourcePath,
-    source: input.source,
-    outPath: sproutPath,
-    vars: input.config.vars ?? {},
-    bindings,
-    zigBin,
-    target: input.target,
-    compatibilityDate: input.config.compatibility_date,
-    transport: input.transport,
-    appName: input.config.name,
-    assets: bakedAssets,
-    extraLink,
-    extraCflags,
-    optimize: input.optimize,
-  });
+  if (input.reuseSproutPath) await cp(input.reuseSproutPath, sproutPath);
+  else
+    await compileSprout({
+      sourcePath: input.sourcePath,
+      source: input.source,
+      outPath: sproutPath,
+      vars: input.config.vars ?? {},
+      bindings,
+      zigBin,
+      target: input.target,
+      compatibilityDate: input.config.compatibility_date,
+      transport: input.transport,
+      appName: input.config.name,
+      assets: bakedAssets,
+      extraLink,
+      extraCflags,
+      optimize: input.optimize,
+    });
 
   const sprout = await readFile(sproutPath);
   const manifest: ArtifactManifest = {

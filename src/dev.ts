@@ -29,8 +29,10 @@ export type DevInput = {
   source: string;
   port: number;
   watch: boolean;
-  /** Re-bundle and re-validate after a file changes; throws with a readable message. */
-  rebuild: () => Promise<string>;
+  /** Re-read the complete project after a change; throws with a readable message. */
+  rebuild: () => Promise<Pick<DevInput, "config" | "sourcePath" | "source">>;
+  /** Set internally for an asset-only refresh, where recompiling is unnecessary. */
+  reuseSproutPath?: string;
 };
 
 /**
@@ -72,21 +74,30 @@ async function readBindings(artifactDir: string): Promise<Partial<Bindings> | un
 
 type Running = {
   sprout: Bun.Subprocess;
+  sproutPath: string;
   broker: Broker;
   stopBroker: () => void;
   /** Set before a kill we initiated, so its exit code is not reported as a crash. */
   expected: boolean;
+  port: number;
 };
 
-async function start(input: DevInput, source: string): Promise<Running> {
+async function start(input: DevInput, port: number): Promise<Running> {
+  const candidateDir = resolve(
+    input.projectDir,
+    ".sproutboat/dev-build",
+    `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
   const artifact = await buildArtifact({
     projectDir: input.projectDir,
     config: input.config,
     sourcePath: input.sourcePath,
-    source,
+    source: input.source,
     target: "host",
     // Never deployable, rebuilt on every edit: buy the iteration loop.
     optimize: "dev",
+    reuseSproutPath: input.reuseSproutPath,
+    outputDirectory: candidateDir,
   });
   const artifactDir = artifact.artifactDir;
   const sproutPath = resolve(artifactDir, "sprout");
@@ -103,7 +114,7 @@ async function start(input: DevInput, source: string): Promise<Running> {
     token: "sproutboat-dev",
     bindings: await readBindings(artifactDir),
     secrets: await readDevVars(input.projectDir),
-    sproutUrl: `http://127.0.0.1:${input.port}/`,
+    sproutUrl: `http://127.0.0.1:${port}/`,
     assetsDir: existsSync(assetsDir) ? assetsDir : undefined,
   });
   const server = listen(broker, "127.0.0.1", 0);
@@ -112,7 +123,7 @@ async function start(input: DevInput, source: string): Promise<Running> {
     cwd: dirname(sproutPath),
     env: {
       ...process.env,
-      PORT: String(input.port),
+      PORT: String(port),
       SB_BROKER_PORT: String(server.port),
       SB_BROKER_TOKEN: "sproutboat-dev",
     },
@@ -121,12 +132,14 @@ async function start(input: DevInput, source: string): Promise<Running> {
   });
   return {
     sprout,
+    sproutPath,
     broker,
     stopBroker: () => {
       server.stop();
       broker.close();
     },
     expected: false,
+    port,
   };
 }
 
@@ -144,20 +157,63 @@ function watchExit(running: Running): void {
   });
 }
 
+/** Pick an unused loopback port without keeping it reserved. The candidate is
+ * started immediately afterwards; the tiny race is preferable to interrupting
+ * the current server just to discover a bad replacement. */
+function candidatePort(): number {
+  const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+  const port = probe.port;
+  probe.stop();
+  if (port === undefined) throw new Error("could not allocate a candidate port");
+  return port;
+}
+
+async function waitUntilReady(running: Running): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    if (running.expected) throw new Error("candidate stopped before becoming ready");
+    const exited = await Promise.race([running.sprout.exited.then(() => true), Bun.sleep(30).then(() => false)]);
+    if (exited) throw new Error("candidate sprout exited before becoming ready");
+    try {
+      // Any HTTP status is ready: applications are allowed to return 404 at /.
+      await fetch(`http://127.0.0.1:${running.port}/`, { redirect: "manual" });
+      return;
+    } catch {
+      // Native-fetch has not bound its socket yet.
+    }
+  }
+  throw new Error("candidate sprout did not become ready within 3s");
+}
+
 /** Build, run, and (optionally) rebuild on change. Resolves only on shutdown. */
 export async function runDev(input: DevInput): Promise<void> {
-  let running = await start(input, input.source);
+  let current = input;
+  let running = await start(current, candidatePort());
+  await waitUntilReady(running);
+  let activePort = running.port;
+  // Keep the public port stable while candidates boot on private ports. This is
+  // what lets a failed startup leave the last known-good process reachable.
+  const proxy = Bun.serve({
+    hostname: "127.0.0.1",
+    port: input.port,
+    fetch(request) {
+      const target = new URL(request.url);
+      target.host = `127.0.0.1:${activePort}`;
+      return fetch(target, request);
+    },
+  });
   watchExit(running);
   console.log(ok(`${input.config.name} running on ${leaf(`http://127.0.0.1:${input.port}`)}`));
   if (input.watch) console.log(dim("  watching for changes — ctrl-c to stop"));
 
-  const watchers: FSWatcher[] = [];
+  let watchers: FSWatcher[] = [];
   let shuttingDown = false;
   let resolveShutdown: (() => void) | null = null;
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
     for (const watcher of watchers) watcher.close();
+    proxy.stop();
     stop(running);
     resolveShutdown?.();
     process.exit(0);
@@ -167,7 +223,23 @@ export async function runDev(input: DevInput): Promise<void> {
   if (input.watch) {
     let pending: ReturnType<typeof setTimeout> | null = null;
     let rebuilding = false;
+    let dirty = false;
+    const resetWatchers = () => {
+      for (const watcher of watchers) watcher.close();
+      const next: FSWatcher[] = [
+        watch(dirname(current.sourcePath), { recursive: true }, onChange),
+        // Watch the containing directory as well: atomic-save editors replace
+        // the config inode, which otherwise silently detaches a file watcher.
+        watch(current.projectDir, { recursive: false }, onChange),
+      ];
+      if (current.config.assets) {
+        const assets = resolve(current.projectDir, current.config.assets.directory);
+        if (existsSync(assets)) next.push(watch(assets, { recursive: true }, onChange));
+      }
+      watchers = next;
+    };
     const onChange = () => {
+      dirty = true;
       if (pending !== null) clearTimeout(pending);
       // Editors write a file in several syscalls; one save should be one build.
       pending = setTimeout(() => {
@@ -175,10 +247,29 @@ export async function runDev(input: DevInput): Promise<void> {
           if (rebuilding || shuttingDown) return;
           rebuilding = true;
           try {
-            const source = await input.rebuild();
+            dirty = false;
+            const next = await current.rebuild();
             console.log(dim("  change detected, rebuilding…"));
-            stop(running);
-            running = await start(input, source);
+            const assetOnly =
+              next.source === current.source && JSON.stringify(next.config) === JSON.stringify(current.config);
+            const candidate = await start(
+              { ...current, ...next, reuseSproutPath: assetOnly ? running.sproutPath : undefined },
+              candidatePort(),
+            );
+            try {
+              await waitUntilReady(candidate);
+            } catch (error) {
+              stop(candidate);
+              throw error;
+            }
+            // Only now is the public route switched. The old process stays up
+            // through compilation and candidate startup.
+            const previous = running;
+            running = candidate;
+            current = { ...current, ...next };
+            activePort = candidate.port;
+            resetWatchers();
+            stop(previous);
             watchExit(running);
             console.log(ok(`  reloaded on http://127.0.0.1:${input.port}`));
           } catch (cause) {
@@ -191,14 +282,12 @@ export async function runDev(input: DevInput): Promise<void> {
             );
           } finally {
             rebuilding = false;
+            if (dirty && !shuttingDown) onChange();
           }
         })();
       }, RESTART_DEBOUNCE_MS);
     };
-    // The entry's directory covers the usual `src/` layout; the config itself
-    // changes bindings, so it needs a rebuild too.
-    watchers.push(watch(dirname(input.sourcePath), { recursive: true }, onChange));
-    watchers.push(watch(resolve(input.projectDir, "sproutboat.jsonc"), onChange));
+    resetWatchers();
   }
 
   // Watching, we stay up until a signal: a crashed sprout is something to fix
