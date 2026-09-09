@@ -122,63 +122,69 @@ async function start(input: DevInput, port: number): Promise<Running> {
   }
   const artifactDir = artifact.artifactDir;
   const sproutPath = resolve(artifactDir, "sprout");
-
-  // `new Database(path, { create: true })` creates the file, never the
-  // directory above it, so a first run would fail with SQLITE_CANTOPEN.
-  const stateDir = resolve(input.projectDir, ".sproutboat/dev");
-  await mkdir(stateDir, { recursive: true });
-  const assetsDir = resolve(artifactDir, "assets");
   let dispatchEnabled = false;
-  const broker = createBroker({
-    db: resolve(stateDir, "state.sqlite"),
-    dataDir: resolve(stateDir, "d1"),
-    resourceDir: resolve(stateDir, "resources"),
-    token: "sproutboat-dev",
-    bindings: await readBindings(artifactDir),
-    secrets: await readDevVars(input.projectDir),
-    sproutUrl: `http://127.0.0.1:${port}/`,
-    assetsDir: existsSync(assetsDir) ? assetsDir : undefined,
-    dispatchEnabled: () => dispatchEnabled,
-  });
-  const server = listen(broker, "127.0.0.1", 0);
-
-  let sprout: Bun.Subprocess;
   try {
-    sprout = Bun.spawn([sproutPath], {
-      cwd: dirname(sproutPath),
-      env: {
-        ...process.env,
-        PORT: String(port),
-        SB_BROKER_PORT: String(server.port),
-        SB_BROKER_TOKEN: "sproutboat-dev",
-      },
-      stdout: "inherit",
-      stderr: "inherit",
+    const stateDir = resolve(input.projectDir, ".sproutboat/dev");
+    await mkdir(stateDir, { recursive: true });
+    const assetsDir = resolve(artifactDir, "assets");
+    const broker = createBroker({
+      db: resolve(stateDir, "state.sqlite"),
+      dataDir: resolve(stateDir, "d1"),
+      resourceDir: resolve(stateDir, "resources"),
+      token: "sproutboat-dev",
+      bindings: await readBindings(artifactDir),
+      secrets: await readDevVars(input.projectDir),
+      sproutUrl: `http://127.0.0.1:${port}/`,
+      assetsDir: existsSync(assetsDir) ? assetsDir : undefined,
+      dispatchEnabled: () => dispatchEnabled,
     });
+    let server: ReturnType<typeof listen>;
+    try {
+      server = listen(broker, "127.0.0.1", 0);
+    } catch (error) {
+      broker.close();
+      throw error;
+    }
+    let sprout: Bun.Subprocess;
+    try {
+      sprout = Bun.spawn([sproutPath], {
+        cwd: dirname(sproutPath),
+        env: {
+          ...process.env,
+          PORT: String(port),
+          SB_BROKER_PORT: String(server.port),
+          SB_BROKER_TOKEN: "sproutboat-dev",
+        },
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+    } catch (error) {
+      server.stop();
+      broker.close();
+      throw error;
+    }
+    return {
+      sprout,
+      sproutPath,
+      artifactDir,
+      broker,
+      stopBroker: () => {
+        server.stop();
+        broker.close();
+      },
+      expected: false,
+      port,
+      enableDispatch: () => {
+        dispatchEnabled = true;
+      },
+      disableDispatch: () => {
+        dispatchEnabled = false;
+      },
+    };
   } catch (error) {
-    server.stop();
-    broker.close();
     await rm(candidateDir, { recursive: true, force: true });
     throw error;
   }
-  return {
-    sprout,
-    sproutPath,
-    artifactDir,
-    broker,
-    stopBroker: () => {
-      server.stop();
-      broker.close();
-    },
-    expected: false,
-    port,
-    enableDispatch: () => {
-      dispatchEnabled = true;
-    },
-    disableDispatch: () => {
-      dispatchEnabled = false;
-    },
-  };
 }
 
 function stop(running: Running): void {
