@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -320,6 +321,76 @@ test("a bare-string binding still uses the per-broker db, not resourceDir", asyn
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("queue and alarm poll indexes migrate existing broker and resource stores", async () => {
+  const root = mkdtempSync(join(tmpdir(), "sb-trigger-index-"));
+  const state = join(root, "state.sqlite");
+  const resourceDir = join(root, "resources");
+  const queueId = "queue_0123456789abcdef01234567";
+  const oldState = new Database(state, { create: true });
+  oldState.exec(
+    "CREATE TABLE mq (queue TEXT NOT NULL, id TEXT PRIMARY KEY, body TEXT NOT NULL, visible_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, dead INTEGER NOT NULL DEFAULT 0); " +
+      "CREATE TABLE do_alarm (cls TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cls, id))",
+  );
+  oldState.close();
+  mkdirSync(resourceDir, { recursive: true });
+  const oldQueue = new Database(join(resourceDir, `${queueId}.sqlite`), { create: true });
+  oldQueue.exec(
+    "CREATE TABLE mq (queue TEXT NOT NULL, id TEXT PRIMARY KEY, body TEXT NOT NULL, visible_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, dead INTEGER NOT NULL DEFAULT 0)",
+  );
+  oldQueue.close();
+
+  const broker = createBroker({
+    db: state,
+    resourceDir,
+    bindings: {
+      queues: ["JOBS"],
+      do: [{ binding: "COUNTER", className: "Counter" }],
+      resources: { JOBS: { kind: "queue", id: queueId } },
+    },
+  });
+  // Resource-backed stores open on first binding use, just as they do in a
+  // deployed worker. Opening the queue upgrades its existing SQLite file.
+  await broker.dispatch({ op: "queue.send", queue: "JOBS", body: "first" });
+  broker.close();
+
+  const names = (path: string): string[] => {
+    const store = new Database(path);
+    const rows = store.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'index'").all();
+    store.close();
+    return rows.map((row) => row.name);
+  };
+  expect(names(state)).toEqual(expect.arrayContaining(["mq_due", "do_alarm_due"]));
+  expect(names(join(resourceDir, `${queueId}.sqlite`))).toContain("mq_due");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("queue and alarm due queries use their poll indexes", () => {
+  const root = mkdtempSync(join(tmpdir(), "sb-trigger-plan-"));
+  const path = join(root, "state.sqlite");
+  const broker = createBroker({
+    db: path,
+    bindings: { queues: ["JOBS"], do: [{ binding: "COUNTER", className: "Counter" }] },
+  });
+  broker.close();
+  const store = new Database(path);
+  const plan = (sql: string): string =>
+    store
+      .query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${sql}`)
+      .all()
+      .map((row) => row.detail)
+      .join("\n");
+  expect(
+    plan(
+      "SELECT id, body, attempts FROM mq WHERE queue = 'JOBS' AND dead = 0 AND visible_at <= 1 ORDER BY visible_at LIMIT 10",
+    ),
+  ).toContain("mq_due");
+  expect(plan("SELECT cls, id, at, attempts FROM do_alarm WHERE at <= 1 ORDER BY at LIMIT 10")).toContain(
+    "do_alarm_due",
+  );
+  store.close();
+  rmSync(root, { recursive: true, force: true });
 });
 
 test("token line is enforced by handlePayload", async () => {

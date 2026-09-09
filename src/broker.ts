@@ -239,6 +239,9 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
       "CREATE TABLE IF NOT EXISTS mq (queue TEXT NOT NULL, id TEXT PRIMARY KEY, body TEXT NOT NULL, " +
         "visible_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, dead INTEGER NOT NULL DEFAULT 0)",
     );
+    // Every queue poll filters one partition's live rows and takes its earliest
+    // visible batch. This additive index also upgrades existing resource files.
+    conn.exec("CREATE INDEX IF NOT EXISTS mq_due ON mq (queue, dead, visible_at)");
     return conn;
   };
 
@@ -259,6 +262,8 @@ export function createBroker(opts: BrokerOptions = {}): Broker {
     "CREATE TABLE IF NOT EXISTS do_alarm (cls TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, " +
       "attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cls, id))",
   );
+  // Alarm polling reads the earliest due objects across classes.
+  db.exec("CREATE INDEX IF NOT EXISTS do_alarm_due ON do_alarm (at)");
 
   // #74 — one SQLite file per account-level resource id, opened on first use.
   const resourceDbs = new Map<string, Database>();

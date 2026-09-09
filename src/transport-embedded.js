@@ -1036,6 +1036,8 @@ function __sbEnsureSchema() {
     "CREATE TABLE IF NOT EXISTS mq (queue TEXT NOT NULL, id TEXT PRIMARY KEY, body TEXT NOT NULL, " +
       "visible_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, dead INTEGER NOT NULL DEFAULT 0)",
   );
+  // Additive: old standalone store.sqlite files gain the poll index on open.
+  __sbSql(s, "CREATE INDEX IF NOT EXISTS mq_due ON mq (queue, dead, visible_at)", []);
   __sbSql(
     s,
     "CREATE TABLE IF NOT EXISTS do_storage (cls TEXT NOT NULL, id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cls, id, key))",
@@ -1044,6 +1046,7 @@ function __sbEnsureSchema() {
     s,
     "CREATE TABLE IF NOT EXISTS do_alarm (cls TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cls, id))",
   );
+  __sbSql(s, "CREATE INDEX IF NOT EXISTS do_alarm_due ON do_alarm (at)", []);
   __sbSql(
     s,
     "CREATE TABLE IF NOT EXISTS ae (dataset TEXT NOT NULL, ts INTEGER NOT NULL, indexes_json TEXT NOT NULL, blobs_json TEXT NOT NULL, doubles_json TEXT NOT NULL)",

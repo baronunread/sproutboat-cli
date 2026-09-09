@@ -166,3 +166,9 @@ test("a storage resource written by v0.1.0 is still readable", async () => {
   expect(reply.found).toBe(true);
   expect(reply.value).toBe("hello from v0.1.0");
 });
+
+test("standalone storage creates the same additive trigger poll indexes", () => {
+  const source = read("transport-embedded.js");
+  expect(source).toContain("CREATE INDEX IF NOT EXISTS mq_due ON mq (queue, dead, visible_at)");
+  expect(source).toContain("CREATE INDEX IF NOT EXISTS do_alarm_due ON do_alarm (at)");
+});
