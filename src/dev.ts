@@ -38,6 +38,10 @@ export type DevInput = {
   candidateFactory?: (input: DevInput, port: number) => Promise<Running>;
   /** Test seam: avoid terminating Bun's test process on a simulated signal. */
   exitOnShutdown?: boolean;
+  /** Clock seam for reload observability tests. */
+  now?: () => number;
+  /** Called once a replacement is ready and the stable route has switched. */
+  onReload?: (timing: { editToReadyMs: number; downtimeMs: number }) => void;
 };
 
 export function isAssetOnlyRefresh(
@@ -188,6 +192,7 @@ async function start(input: DevInput, port: number): Promise<Running> {
 }
 
 function stop(running: Running): void {
+  if (running.expected) return;
   running.expected = true;
   running.disableDispatch();
   running.sprout.kill(9);
@@ -246,6 +251,7 @@ export function tcpReady(port: number, timeout: number): Promise<boolean> {
 /** Build, run, and (optionally) rebuild on change. Resolves only on shutdown. */
 export async function runDev(input: DevInput): Promise<void> {
   let current = input;
+  const now = input.now ?? Date.now;
   const startCandidate = input.candidateFactory ?? start;
   let running = await startCandidate(current, candidatePort());
   try {
@@ -285,16 +291,20 @@ export async function runDev(input: DevInput): Promise<void> {
   let watchers: FSWatcher[] = [];
   let shuttingDown = false;
   let resolveShutdown: (() => void) | null = null;
+  let pendingCandidate: Running | null = null;
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
     for (const watcher of watchers) watcher.close();
     proxy.stop();
+    if (pendingCandidate) stop(pendingCandidate);
     stop(running);
     resolveShutdown?.();
     if (input.exitOnShutdown !== false) process.exit(0);
   };
-  for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, shutdown);
+  const signals = ["SIGINT", "SIGTERM"] as const;
+  for (const signal of signals) process.on(signal, shutdown);
+  let rebuildTask: Promise<void> | null = null;
 
   if (input.watch) {
     let pending: ReturnType<typeof setTimeout> | null = null;
@@ -322,11 +332,12 @@ export async function runDev(input: DevInput): Promise<void> {
       if (pending !== null) clearTimeout(pending);
       // Editors write a file in several syscalls; one save should be one build.
       pending = setTimeout(() => {
-        void (async () => {
+        rebuildTask = (async () => {
           if (rebuilding || shuttingDown) return;
           rebuilding = true;
           try {
             dirty = false;
+            const editStartedAt = now();
             const next = await current.rebuild();
             console.log(dim("  change detected, rebuilding…"));
             const assetOnly = isAssetOnlyRefresh(current, next);
@@ -334,18 +345,22 @@ export async function runDev(input: DevInput): Promise<void> {
               { ...current, ...next, reuseSproutPath: assetOnly ? running.sproutPath : undefined },
               candidatePort(),
             );
+            pendingCandidate = candidate;
             if (shuttingDown) {
               stop(candidate);
+              pendingCandidate = null;
               return;
             }
             try {
               await waitUntilReady(candidate);
             } catch (error) {
               stop(candidate);
+              pendingCandidate = null;
               throw error;
             }
             if (shuttingDown) {
               stop(candidate);
+              pendingCandidate = null;
               return;
             }
             // Only now is the public route switched. The old process stays up
@@ -354,11 +369,14 @@ export async function runDev(input: DevInput): Promise<void> {
             previous.disableDispatch();
             candidate.enableDispatch();
             running = candidate;
+            pendingCandidate = null;
             current = { ...current, ...next };
+            const switchedAt = now();
             activePort = candidate.port;
             resetWatchers();
             stop(previous);
             watchExit(running);
+            input.onReload?.({ editToReadyMs: switchedAt - editStartedAt, downtimeMs: now() - switchedAt });
             console.log(ok(`  reloaded on http://127.0.0.1:${input.port}`));
           } catch (cause) {
             // Keep the last good build serving; a typo should not take the
@@ -373,6 +391,7 @@ export async function runDev(input: DevInput): Promise<void> {
             if (dirty && !shuttingDown) onChange();
           }
         })();
+        void rebuildTask;
       }, RESTART_DEBOUNCE_MS);
     };
     resetWatchers();
@@ -385,8 +404,13 @@ export async function runDev(input: DevInput): Promise<void> {
     await new Promise<void>((resolve) => {
       resolveShutdown = resolve;
     });
+    // A signal can arrive while a candidate factory is building. Let that task
+    // return its newly-created resources to the coordinator, which observes
+    // `shuttingDown` and stops them, before declaring shutdown complete.
+    await rebuildTask;
   } else {
     await running.sprout.exited;
     stop(running);
   }
+  for (const signal of signals) process.off(signal, shutdown);
 }
