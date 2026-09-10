@@ -44,6 +44,7 @@ usage: sproutboat <init [name] | check [project-dir] | types [project-dir] | dev
 | `CC` | C compiler used to build uSockets for a host build (default `cc`). A host build needs one regardless: it is what Porffor compiles its own generated C with. |
 | `AR` | Archiver used to assemble uSockets.a for a host build (default `ar`). |
 | `SPROUTBOAT_COMPILE_TIMEOUT_MS` | Porffor compile timeout in ms (default 600000). |
+| `SPROUTBOAT_CLI_VERSION` | CLI version embedded by the release executable build. Not normally set by users. |
 | `SPROUTBOAT_VARS_JSON` | JSON object of baked `vars` (UPPER_SNAKE -> string), read by the wrapper when generating the sprout module. |
 | `SPROUTBOAT_BINDINGS_JSON` | The artifact's bindings.json, read by the wrapper to emit the `__sbInstallBindings` line. |
 | `SPROUTBOAT_CONFIG_DIR` | Directory for credentials.json (default ~/.config/sproutboat). |

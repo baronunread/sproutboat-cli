@@ -207,6 +207,10 @@ export const ENV_VARS: readonly EnvVar[] = [
   { name: "AR", purpose: "Archiver used to assemble uSockets.a for a host build (default `ar`)." },
   { name: "SPROUTBOAT_COMPILE_TIMEOUT_MS", purpose: "Porffor compile timeout in ms (default 600000)." },
   {
+    name: "SPROUTBOAT_CLI_VERSION",
+    purpose: "CLI version embedded by the release executable build. Not normally set by users.",
+  },
+  {
     name: "SPROUTBOAT_VARS_JSON",
     purpose:
       "JSON object of baked `vars` (UPPER_SNAKE -> string), read by the wrapper when generating the sprout module.",

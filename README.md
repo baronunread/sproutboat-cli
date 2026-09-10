@@ -19,16 +19,17 @@ for agents: [sproutboat.com/llms.txt](https://sproutboat.com/llms.txt)).
 
 ## Using
 
-Sproutboat is a Bun tool. It needs **Bun 1.4+** on the machine you build from,
-and `bunx` rather than `npx`: the CLI runs on Bun's APIs, and `npm install`
-cannot resolve it today ([#134](https://github.com/baronunread/sproutboat/issues/134)).
+The npm package installs a small Node launcher and the matching native
+platform package, so `npm install -g sproutboat` and `npm exec sproutboat` work
+without Bun on `darwin` and `linux` for `arm64` and `x64`. The self-hosted
+runtime exports remain in the root package for Bun-based platform integrations.
 Nothing is needed on the machine that *runs* a sprout: that gets a static
 binary.
 
 ```sh
-bunx sproutboat init hello
+npm exec sproutboat init hello
 cd hello
-bunx sproutboat dev        # runs it right here, no control plane needed
+npm exec sproutboat dev    # runs it right here, no control plane needed
 ```
 
 Happy with it? Ship it:
@@ -38,10 +39,10 @@ bunx sproutboat login --api-url https://control.example.com   # one browser appr
 bunx sproutboat deploy
 ```
 
-Or install it once with Bun and drop the `bunx`:
+Or install it once and drop the `npm exec`:
 
 ```sh
-bun add -g sproutboat     # then: sproutboat deploy, sproutboat tail, ...
+npm install -g sproutboat # then: sproutboat deploy, sproutboat tail, ...
 ```
 
 `login` is one-time. It writes a long-lived token to

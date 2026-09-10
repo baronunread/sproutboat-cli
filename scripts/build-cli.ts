@@ -1,16 +1,20 @@
-/** Build a release-layout executable. Run on each supported host in CI; npm's
- * tiny launcher chooses the matching bin/platform/<os>-<arch>/sproutboat. */
+/** Build one platform package executable. npm's tiny root launcher resolves it. */
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const platform = process.platform === "darwin" ? "darwin" : process.platform === "linux" ? "linux" : null;
 const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : null;
 if (!platform || !arch) throw new Error(`unsupported release host ${process.platform}/${process.arch}`);
-const out = resolve(import.meta.dir, "..", "bin", "platform", `${platform}-${arch}`, "sproutboat");
+const packageDir = resolve(import.meta.dir, "..", "platform-packages", `${platform}-${arch}`);
+const out = resolve(packageDir, "bin", "sproutboat");
 await mkdir(resolve(out, ".."), { recursive: true });
 // SAFETY: package.json is this release's manifest and npm requires its version.
 const version = ((await Bun.file(resolve(import.meta.dir, "..", "package.json")).json()) as { version: string })
   .version;
+// SAFETY: every checked-in platform package manifest owns a required string version.
+const platformVersion = ((await Bun.file(resolve(packageDir, "package.json")).json()) as { version: string }).version;
+if (platformVersion !== version)
+  throw new Error(`platform package version ${platformVersion} does not match root ${version}`);
 const child = Bun.spawn(
   [
     process.execPath,
