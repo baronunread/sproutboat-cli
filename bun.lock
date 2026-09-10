@@ -5,6 +5,8 @@
     "": {
       "name": "@sproutboat/cli",
       "dependencies": {
+        "@sproutboat/artifact": "file:../sproutboat-packages/packages/artifact",
+        "@sproutboat/config": "file:../sproutboat-packages/packages/config",
         "esbuild": "^0.28.2",
       },
       "devDependencies": {
@@ -153,6 +155,10 @@
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.81.0", "", { "os": "win32", "cpu": "x64" }, "sha512-IZuUCwGw9emG5JtCp+fYGB+Z4OWEoeEcM8R5BA1pYw63/ieYFVdcU2ylxTpHbVHSenZnsYE+ZZ20uHAJszQ4cA=="],
 
     "@oxlint/plugins": ["@oxlint/plugins@1.81.0", "", {}, "sha512-HhD8kd3r6XpelZkhxhRty/po8V6yK1VV63Eq4kSsOS2IoHUywG3DV2EX+z/ZHw46aLI74Y6aA604NRiAqLKW9w=="],
+
+    "@sproutboat/artifact": ["@sproutboat/artifact@file:../sproutboat-packages/packages/artifact", {}],
+
+    "@sproutboat/config": ["@sproutboat/config@file:../sproutboat-packages/packages/config", {}],
 
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 

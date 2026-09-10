@@ -26,6 +26,15 @@ const srcDir = import.meta.dir;
 const root = resolve(srcDir, "..");
 const read = (file: string) => readFileSync(resolve(srcDir, file), "utf8");
 
+/**
+ * Source text of a shared-package module. config.ts and manifest.ts moved to
+ * @sproutboat/* (src/ files here are re-export shims), so the doc generator
+ * reads the single source of truth from the linked packages.
+ */
+function pkgSource(pkg: string, file: string): string {
+  return readFileSync(resolve(root, "node_modules", pkg, "src", file), "utf8");
+}
+
 /** All `case "op.name":` labels in the broker's dispatch — the switch is the truth. */
 function brokerOps(): string[] {
   const source = read("broker.ts");
@@ -37,9 +46,8 @@ function storageTables(): string[] {
   return [...read("broker.ts").matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]).sort();
 }
 
-/** Pull a quoted-string array/Set literal out of a source file by its declaration. */
-function stringList(file: string, declaration: string): string[] {
-  const source = read(file);
+/** Pull a quoted-string array/Set literal out of source text by its declaration. */
+function stringListFrom(source: string, file: string, declaration: string): string[] {
   const start = source.indexOf(declaration);
   if (start === -1) throw new Error(`${file}: could not find ${declaration}`);
   const open = source.indexOf("[", start);
@@ -79,7 +87,7 @@ function render(): string {
     "",
     "Required fields:",
     "",
-    list(stringList("manifest.ts", "const required = [")),
+    list(stringListFrom(pkgSource("@sproutboat/artifact", "manifest.ts"), "manifest.ts", "const required = [")),
     "",
     "Optional fields (absent in artifacts built before they existed, and that",
     "must keep validating):",
@@ -111,7 +119,7 @@ function render(): string {
     "adding a key makes new configs unreadable by older CLIs — additive here is",
     "still a compatibility event.",
     "",
-    list(stringList("config.ts", "const allowed = new Set([")),
+    list(stringListFrom(pkgSource("@sproutboat/config", "config.ts"), "config.ts", "const allowed = new Set([")),
     "",
     "## Version handshake",
     "",
