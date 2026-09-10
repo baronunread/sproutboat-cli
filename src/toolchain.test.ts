@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -107,6 +108,47 @@ test("Zig integrity and download failures publish no cache entry", async () => {
   expect(download.kind).toBe("download");
   expect(attempts).toBe(2);
   expect(await readdir(cacheRoot)).toEqual([]);
+});
+
+test("Zig falls back across community mirrors to ziglang.org", async () => {
+  const { archive, sha256 } = await fixture();
+  const cacheRoot = await mkdtemp(join(tmpdir(), "sb-zig-mirror-"));
+  temporary.push(cacheRoot);
+  const seen: string[] = [];
+  const bin = await ensureZig({
+    cacheRoot,
+    platform: "x86_64-linux",
+    expectedSha256: sha256,
+    fetcher: async (input) => {
+      const url = String(input);
+      seen.push(url);
+      if (url.endsWith("community-mirrors.txt")) return new Response("https://mirror.example/zig/\n");
+      if (url.startsWith("https://mirror.example/")) throw new Error("mirror down");
+      if (url.startsWith(`https://ziglang.org/download/${ZIG_VERSION}/`)) return new Response(Bun.file(archive));
+      throw new Error(`unexpected url ${url}`);
+    },
+  });
+  expect(await readFile(bin, "utf8")).toContain("fixture zig");
+  expect(seen.some((u) => u.endsWith("community-mirrors.txt"))).toBe(true);
+  expect(seen.some((u) => u === `https://mirror.example/zig/zig-x86_64-linux-${ZIG_VERSION}.tar.xz`)).toBe(true);
+  expect(seen.some((u) => u.startsWith(`https://ziglang.org/download/${ZIG_VERSION}/`))).toBe(true);
+});
+
+test("the legacy unsuffixed Zig cache directory is removed", async () => {
+  const { archive, sha256 } = await fixture();
+  const cacheRoot = await mkdtemp(join(tmpdir(), "sb-zig-legacy-"));
+  temporary.push(cacheRoot);
+  const legacy = join(cacheRoot, `zig-${ZIG_VERSION}`);
+  await mkdir(legacy);
+  await writeFile(join(legacy, "zig"), "old layout");
+  await ensureZig({
+    cacheRoot,
+    platform: "x86_64-linux",
+    url: "fixture",
+    expectedSha256: sha256,
+    fetcher: async () => new Response(Bun.file(archive)),
+  });
+  expect(existsSync(legacy)).toBe(false);
 });
 
 test("an interrupted Zig lock is recovered", async () => {

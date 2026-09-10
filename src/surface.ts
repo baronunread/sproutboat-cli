@@ -195,6 +195,11 @@ export const ENV_VARS: readonly EnvVar[] = [
   { name: "SPROUTBOAT_TOKEN", purpose: "API token. Overrides the saved credential for the endpoint." },
   { name: "SPROUTBOAT_ZIG", purpose: "Path to a Zig binary to use instead of downloading the pinned one." },
   {
+    name: "SPROUTBOAT_ZIG_URL",
+    purpose:
+      "URL to download the pinned Zig tarball from, instead of a Zig community mirror. The sha256 is still enforced.",
+  },
+  {
     name: "SPROUTBOAT_UWS_TARBALL",
     purpose:
       "Path to a uWebSockets source tarball to seed the Porffor cache with, instead of the one vendored in the package. Both targets are seeded from it.",

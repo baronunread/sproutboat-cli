@@ -10,6 +10,18 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-09-11
+### Fixed
+- The one-time Zig download no longer depends on ziglang.org being reachable.
+  It now pulls from a random Zig community mirror, with ziglang.org kept only
+  as a last resort, and tries the mirrors in turn on failure. ziglang.org
+  rate-limits the multi-megabyte tarballs and had been timing out mid-build,
+  with no fallback (baronunread/sproutboat#166). The archive sha256 is still
+  enforced whatever the source. `SPROUTBOAT_ZIG_URL` overrides the source;
+  `SPROUTBOAT_ZIG` still points at a prebuilt binary.
+- A leftover `~/.cache/sproutboat/zig-<version>/` directory from an earlier
+  cache layout is removed on the next build instead of sitting unused.
+
 ## [0.10.1] - 2026-09-11
 ### Fixed
 - `npm install sproutboat` / `bunx sproutboat` work again. 0.10.0's launcher
@@ -358,7 +370,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.8.0...v0.9.0

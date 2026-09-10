@@ -2,8 +2,11 @@
  * The build toolchain: a pinned Zig (the linux-x86_64 cross-compiler Porffor
  * shells out to for `--musl`) plus version stamps for the artifact manifest.
  *
- * Zig is fetched once to ~/.cache/sproutboat/zig-<version>/ and reused. No
- * Docker, no root. Override with SPROUTBOAT_ZIG=/path/to/zig.
+ * Zig is fetched once to ~/.cache/sproutboat/zig-<version>-<platform>/ and
+ * reused. No Docker, no root. It comes from a random Zig community mirror with
+ * ziglang.org as the last resort, because ziglang.org rate-limits the large
+ * tarballs and has been timing out. Override the binary with
+ * SPROUTBOAT_ZIG=/path/to/zig, or the download source with SPROUTBOAT_ZIG_URL.
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -101,24 +104,69 @@ async function zigComplete(dir: string, key: ZigPlatform, expectedArchive: strin
   }
 }
 
+// Zig asks tooling not to hammer ziglang.org for the multi-megabyte tarballs:
+// pick a random community mirror and keep the official host only as a last
+// resort. https://ziglang.org/download/community-mirrors.txt
+const ZIG_MIRRORS_URL = "https://ziglang.org/download/community-mirrors.txt";
+
+function shuffle<T>(items: T[]): T[] {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
+}
+
+/**
+ * Ordered list of URLs to try for the pinned Zig tarball: the community mirrors
+ * (shuffled) followed by ziglang.org. Falls back to ziglang.org alone if the
+ * mirror list itself is unreachable.
+ */
+async function zigDownloadUrls(
+  key: ZigPlatform,
+  fetcher: NonNullable<EnsureZigOptions["fetcher"]>,
+  timeoutMs: number,
+): Promise<string[]> {
+  const file = `zig-${key}-${ZIG_VERSION}.tar.xz`;
+  const official = `https://ziglang.org/download/${ZIG_VERSION}/${file}`;
+  try {
+    const response = await fetcher(ZIG_MIRRORS_URL, { signal: AbortSignal.timeout(Math.min(timeoutMs, 10_000)) });
+    if (response.ok) {
+      const mirrors = (await response.text())
+        .split(/\s+/)
+        .filter((line) => line.startsWith("https://"))
+        .map((base) => `${base.replace(/\/+$/, "")}/${file}`);
+      if (mirrors.length > 0) return [...shuffle(mirrors), official];
+    }
+  } catch {
+    // Mirror list unreachable: the official host is the only option left.
+  }
+  return [official];
+}
+
 async function downloadZig(
-  url: string,
+  urls: string[],
   path: string,
   fetcher: NonNullable<EnsureZigOptions["fetcher"]>,
   timeoutMs: number,
 ): Promise<void> {
-  let last: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const response = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs) });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      await writeFile(path, new Uint8Array(await response.arrayBuffer()));
-      return;
-    } catch (error) {
-      last = error;
+  // One shot per mirror; two at the single fallback URL so a lone flaky host
+  // still gets a retry.
+  const attemptsPer = urls.length > 1 ? 1 : 2;
+  const failures: string[] = [];
+  for (const url of urls) {
+    for (let attempt = 0; attempt < attemptsPer; attempt++) {
+      try {
+        const response = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        await writeFile(path, new Uint8Array(await response.arrayBuffer()));
+        return;
+      } catch (error) {
+        failures.push(`${url}: ${String(error)}`);
+      }
     }
   }
-  throw new ZigToolchainError("download", `could not download pinned Zig from ${url}: ${String(last)}`);
+  throw new ZigToolchainError("download", `could not download pinned Zig\n  ${failures.join("\n  ")}`);
 }
 
 async function waitForZigPublisher(
@@ -151,6 +199,10 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
   const root = resolve(
     options.cacheRoot ?? process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? resolve(homedir(), ".cache/sproutboat"),
   );
+  // Older builds cached Zig at `zig-<version>/` with no platform suffix; nothing
+  // reads that layout now, so drop it rather than leave it as dead weight.
+  const legacy = resolve(root, `zig-${ZIG_VERSION}`);
+  if (existsSync(legacy)) await rm(legacy, { recursive: true, force: true }).catch(() => {});
   const dir = resolve(root, `zig-${ZIG_VERSION}-${key}`);
   const expected = options.expectedSha256 ?? ZIG_SHA256[key];
   if (await zigComplete(dir, key, expected)) return resolve(dir, "zig");
@@ -164,14 +216,16 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
     return ensureZig(options);
   }
   const stage = resolve(root, `.zig-${ZIG_VERSION}-${key}-${process.pid}-${crypto.randomUUID()}`);
-  const url = options.url ?? `https://ziglang.org/download/${ZIG_VERSION}/zig-${key}-${ZIG_VERSION}.tar.xz`;
+  const fetcher = options.fetcher ?? fetch;
+  const sourceUrl = options.url ?? process.env.SPROUTBOAT_ZIG_URL;
+  const urls = sourceUrl ? [sourceUrl] : await zigDownloadUrls(key, fetcher, options.timeoutMs ?? 30_000);
   console.log(`Fetching Zig ${ZIG_VERSION} (${key}, one-time)...`);
   try {
     if (await zigComplete(dir, key, expected)) return resolve(dir, "zig");
     await rm(dir, { recursive: true, force: true });
     await mkdir(stage);
     const archive = resolve(stage, "zig.tar.xz");
-    await downloadZig(url, archive, options.fetcher ?? fetch, options.timeoutMs ?? 30_000);
+    await downloadZig(urls, archive, fetcher, options.timeoutMs ?? 60_000);
     const actual = await sha256File(archive);
     if (actual !== expected)
       throw new ZigToolchainError(
