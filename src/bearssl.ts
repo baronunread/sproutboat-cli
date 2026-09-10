@@ -16,7 +16,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
@@ -41,6 +41,11 @@ const cacheDir = (): string =>
     process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? resolve(homedir(), ".cache/sproutboat"),
     `bearssl-${BEARSSL_VERSION}`,
   );
+
+const digest = async (path: string): Promise<string> =>
+  createHash("sha256")
+    .update(await readFile(path))
+    .digest("hex");
 
 export type BearsslInput = {
   target: "linux-x86_64" | "host";
@@ -156,27 +161,82 @@ export async function ensureBearssl(input: BearsslInput): Promise<BearsslBuild> 
   const tree = await sourceTree();
   const includeDir = resolve(tree, "inc");
   const objDir = resolve(cacheDir(), `obj-${input.target}`);
-  await mkdir(objDir, { recursive: true });
-
   const [cc, prefix] =
     input.target === "host"
       ? (["cc", []] as const)
       : ([input.zigBin ?? "zig", ["cc", "-target", "x86_64-linux-musl"]] as const);
   const includes = [includeDir, resolve(tree, "src")];
+  const sourceFiles = await sources(tree);
+  const anchors = await trustAnchorSource(tree);
+  const sourceHashes = Object.fromEntries(
+    await Promise.all(sourceFiles.map(async (source) => [source, await digest(source)] as const)),
+  );
+  const anchorSha256 = await digest(anchors);
+  const manifestPath = resolve(objDir, ".sproutboat-complete");
+  const objectNames = [
+    ...sourceFiles.map((source) => `${source.split("/").pop()!.replace(/\.c$/, "")}.o`),
+    "trust-anchors.o",
+  ];
+  const flags = ["-Os", ...includes.flatMap((include) => ["-I", include])];
+  try {
+    // SAFETY: the manifest is private data written below. Every source, target,
+    // compiler invocation, and object digest must match before reuse.
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      target?: string;
+      command?: string[];
+      flags?: string[];
+      sources?: Record<string, string>;
+      anchors?: string;
+      objects?: Record<string, string>;
+    };
+    const validObjects = await Promise.all(
+      objectNames.map(async (name) => manifest.objects?.[name] === (await digest(resolve(objDir, name)))),
+    );
+    if (
+      manifest.target === input.target &&
+      JSON.stringify(manifest.command) === JSON.stringify([cc, ...prefix]) &&
+      JSON.stringify(manifest.flags) === JSON.stringify(flags) &&
+      JSON.stringify(manifest.sources) === JSON.stringify(sourceHashes) &&
+      manifest.anchors === anchorSha256 &&
+      validObjects.every(Boolean)
+    )
+      return { includeDir, objects: objectNames.map((name) => resolve(objDir, name)) };
+  } catch {
+    /* rebuild the complete target set below */
+  }
+  await rm(objDir, { recursive: true, force: true });
+  await mkdir(objDir, { recursive: true });
 
   const objects: string[] = [];
   // Sequential rather than parallel: this runs once per target and a burst of
   // ~180 compiler processes is a worse neighbour than a slow first build.
-  for (const source of await sources(tree)) {
+  for (const source of sourceFiles) {
     const out = resolve(objDir, `${source.split("/").pop()!.replace(/\.c$/, "")}.o`);
     await compile(cc, [...prefix], source, out, includes);
     objects.push(out);
   }
 
-  const anchors = await trustAnchorSource(tree);
   const anchorObject = resolve(objDir, "trust-anchors.o");
   await compile(cc, [...prefix], anchors, anchorObject, includes);
   objects.push(anchorObject);
+
+  const objectHashes = Object.fromEntries(
+    await Promise.all(objects.map(async (object) => [object.split("/").pop()!, await digest(object)] as const)),
+  );
+  const stagedManifest = `${manifestPath}.${process.pid}.${crypto.randomUUID()}`;
+  await writeFile(
+    stagedManifest,
+    JSON.stringify({
+      target: input.target,
+      command: [cc, ...prefix],
+      flags,
+      sources: sourceHashes,
+      anchors: anchorSha256,
+      objects: objectHashes,
+    }),
+    { mode: 0o444 },
+  );
+  await rename(stagedManifest, manifestPath);
 
   return { includeDir, objects };
 }
