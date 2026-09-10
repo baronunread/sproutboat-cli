@@ -85,6 +85,12 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       compatibilityDate: input.config.compatibility_date,
       config: input.config,
       toolchain: toolchainStamp(),
+      compiler:
+        target === "host"
+          ? `host:${process.env.CC ?? "cc"}`
+          : process.env.SPROUTBOAT_ZIG
+            ? `override:${process.env.SPROUTBOAT_ZIG}`
+            : "managed-zig",
       native: embedded ? [sqliteStamp(), bearsslStamp()] : [],
     }),
   ).slice("sha256:".length, 24);
