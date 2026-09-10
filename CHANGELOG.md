@@ -10,6 +10,23 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-11
+### Fixed
+- `npm install sproutboat` / `bunx sproutboat` work again. 0.10.0's launcher
+  hard-required per-platform `@sproutboat/cli-*` packages that are not published
+  yet, so it always failed with "optional package … is missing". The launcher
+  now falls back to running `src/main.ts` with Bun when no platform binary is
+  installed (the v0.9.0 model), and `optionalDependencies` are dropped until the
+  binaries actually ship. 0.10.0 is deprecated on npm.
+- `sproutboat --version` and the deploy banner report the real version instead
+  of a hard-coded `0.9.0` when run from the npm package rather than a
+  `bun build --compile` binary.
+- `sproutboat build` / `deploy` locate `esbuild` via the installed dependency,
+  not just `process.execPath`'s directory, so bundling works on the Bun
+  fallback path.
+- The launcher no longer hangs when it receives `SIGINT` / `SIGTERM` while
+  forwarding a signal to a running platform binary.
+
 ## [0.10.0] - 2026-09-11
 ### Added
 - Per-platform native CLI: `npm install sproutboat` pulls a prebuilt binary for
@@ -341,7 +358,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.7.0...v0.8.0

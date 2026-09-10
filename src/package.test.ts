@@ -62,13 +62,19 @@ async function fixtures(): Promise<{
   await mkdir(join(platformPackage, "bin"), { recursive: true });
   await mkdir(tarballs);
   await cp(join(root, "bin", "sproutboat.cjs"), join(rootPackage, "bin", "sproutboat.cjs"));
+  // A stand-in for src/main.ts, so the "no platform package" fallback has an
+  // entry point to reach with Bun. Prints its args, echoes exit code.
+  await mkdir(join(rootPackage, "src"), { recursive: true });
+  await writeFile(
+    join(rootPackage, "src", "main.ts"),
+    'const a = process.argv.slice(2);\nconsole.log("from-src " + a.join(" "));\nif (a[0] === "exit") process.exit(Number(a[1]));\n',
+  );
   await writeFile(
     join(rootPackage, "package.json"),
     JSON.stringify({
       name: "sproutboat",
       version: release,
       bin: { sproutboat: "bin/sproutboat.cjs" },
-      optionalDependencies: { [packageName]: release },
     }),
   );
   await writeFile(
@@ -110,12 +116,12 @@ test("root npm pack excludes platform binaries and retains runtime exports", asy
   expect(files.some((file) => file.includes("platform/") || file.includes("platform-packages/"))).toBe(false);
 }, 120000);
 
-test("root optional dependencies and platform package constraints cover the release matrix", async () => {
+test("platform package manifests stay consistent with the release matrix", async () => {
+  // The per-platform binaries are not published yet (#134); the launcher falls
+  // back to Bun without them. The manifests are kept ready so the release that
+  // publishes them, and re-adds `optionalDependencies`, is a single change.
   // SAFETY: package manifests in this repository are JSON owned by this test.
-  const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
-    version: string;
-    optionalDependencies: Record<string, string>;
-  };
+  const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string };
   for (const [platform, arch] of [
     ["darwin", "arm64"],
     ["darwin", "x64"],
@@ -123,7 +129,6 @@ test("root optional dependencies and platform package constraints cover the rele
     ["linux", "x64"],
   ]) {
     const name = `@sproutboat/cli-${platform}-${arch}`;
-    expect(manifest.optionalDependencies[name]).toBe(manifest.version);
     // SAFETY: platform package manifests in this repository are JSON owned by this test.
     const platformManifest = JSON.parse(
       await readFile(join(root, "platform-packages", `${platform}-${arch}`, "package.json"), "utf8"),
@@ -180,7 +185,7 @@ test("npm local, global, and exec installs resolve an optional platform tarball"
   expect(globalRun).toEqual({ code: 0, stdout: "global\n", stderr: "" });
 }, 120000);
 
-test("launcher forwards termination and explains missing or unsupported platforms", async () => {
+test("launcher uses the platform binary when present and forwards a signal", async () => {
   if (!node) throw new Error("node is required for package tests");
   const fixture = await fixtures();
   const project = join(fixture.directory, "signal project");
@@ -203,18 +208,28 @@ test("launcher forwards termination and explains missing or unsupported platform
   expect(existsSync(ready)).toBe(true);
   child.kill("SIGTERM");
   expect(await child.exited).toBe(77);
+});
 
-  const missing = await run(node, [join(fixture.directory, "root", "bin", "sproutboat.cjs")], project);
-  expect(missing.code).toBe(1);
-  expect(missing.stderr).toContain(`optional package ${fixture.packageName} is missing`);
-  const unsupported = await run(
-    node,
-    [
-      "-e",
-      `Object.defineProperty(process, 'platform', { value: 'freebsd' }); require(${JSON.stringify(join(fixture.directory, "root", "bin", "sproutboat.cjs"))})`,
-    ],
-    project,
-  );
-  expect(unsupported.code).toBe(1);
-  expect(unsupported.stderr).toContain("unsupported platform freebsd/");
+test("launcher falls back to Bun on src/main.ts when no platform package is installed", async () => {
+  if (!node) throw new Error("node is required for package tests");
+  const fixture = await fixtures();
+  const project = join(fixture.directory, "no-platform");
+  await mkdir(project);
+  // Root only, no @sproutboat/cli-* alongside it: require.resolve fails -> Bun.
+  const installed = join(project, "node_modules", "sproutboat");
+  await cp(join(fixture.directory, "root"), installed, { recursive: true });
+  const launcher = join(installed, "bin", "sproutboat.cjs");
+
+  const ran = await run(node, [launcher, "hello", "world"], project);
+  expect(ran).toMatchObject({ code: 0, stdout: "from-src hello world\n" });
+  const exited = await run(node, [launcher, "exit", "23"], project);
+  expect(exited.code).toBe(23);
+
+  // No Bun on PATH -> a clear message, not a stack trace.
+  const noBun = await run(node, [launcher], project, {
+    PATH: dirname(node),
+    SPROUTBOAT_BUN: "definitely-not-a-real-bun",
+  });
+  expect(noBun.code).toBe(1);
+  expect(noBun.stderr).toContain("needs Bun on PATH");
 }, 120000);

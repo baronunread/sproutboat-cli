@@ -1,6 +1,6 @@
 {
   "name": "sproutboat",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Wrangler-shaped CLI for Sproutboat. Deploys workers to any control plane via --api-url / SPROUTBOAT_API_URL.",
   "keywords": [
     "cli",
@@ -75,12 +75,6 @@
     "oxfmt": "0.66.0",
     "oxlint": "1.81.0",
     "typescript": "7.0.2"
-  },
-  "optionalDependencies": {
-    "@sproutboat/cli-darwin-arm64": "0.10.0",
-    "@sproutboat/cli-darwin-x64": "0.10.0",
-    "@sproutboat/cli-linux-arm64": "0.10.0",
-    "@sproutboat/cli-linux-x64": "0.10.0"
   },
   "engines": {
     "node": ">=18"

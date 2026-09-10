@@ -201,10 +201,21 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   const launcher = resolve(porffor, "runtime/index.js");
   // A host build never shells `zig`, so it has no zigBin to contribute.
   const zigDir = input.zigBin ? `${dirname(input.zigBin)}:` : "";
+  // The per-platform binary ships esbuild next to it; a compiled build finds it
+  // there. Running from the npm package under Bun, `process.execPath` is Bun
+  // itself and `npm i -g` puts no dependency `.bin` on PATH, so resolve the
+  // esbuild dependency directly. `Bun.which` is the last resort.
   const packagedEsbuild = resolve(dirname(process.execPath), "esbuild");
-  const esbuild = existsSync(packagedEsbuild) ? packagedEsbuild : Bun.which("esbuild");
-  if (!esbuild)
-    throw new Error("the packaged esbuild executable is missing; reinstall the Sproutboat platform package");
+  let esbuild: string | null = existsSync(packagedEsbuild) ? packagedEsbuild : null;
+  if (!esbuild) {
+    try {
+      esbuild = Bun.resolveSync("esbuild/bin/esbuild", import.meta.dir);
+    } catch {
+      esbuild = null;
+    }
+  }
+  esbuild ??= Bun.which("esbuild");
+  if (!esbuild) throw new Error("esbuild could not be located; install it or reinstall sproutboat");
   const path = `${zigDir}${dirname(esbuild)}:${process.env.PATH ?? ""}`;
   const command = PACKAGED
     ? [process.execPath, "__porffor", launcher]

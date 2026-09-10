@@ -1,32 +1,50 @@
 #!/usr/bin/env node
-// npm only selects the packaged executable. The CLI itself always runs in Bun.
+// npm selects the packaged executable for this host when it is installed; that
+// is a native single-file binary that needs no Bun. When it is absent (it is
+// not published yet — see issue #134), fall back to running the TypeScript
+// entry point with Bun, which is how the CLI shipped through v0.9.0.
 const { spawn } = require("node:child_process");
-const { resolve } = require("node:path");
+const { join } = require("node:path");
 
 const platform = process.platform === "darwin" ? "darwin" : process.platform === "linux" ? "linux" : null;
 const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : null;
-if (!platform || !arch) {
-  console.error(`sproutboat: unsupported platform ${process.platform}/${process.arch}`);
-  process.exit(1);
-}
-const packageName = `@sproutboat/cli-${platform}-${arch}`;
-let executable;
+
+let command;
+let args;
+let viaBun = false;
 try {
-  executable = require.resolve(`${packageName}/bin/sproutboat`);
+  if (!platform || !arch) throw new Error(`unsupported host ${process.platform}/${process.arch}`);
+  command = require.resolve(`@sproutboat/cli-${platform}-${arch}/bin/sproutboat`);
+  args = process.argv.slice(2);
 } catch {
-  console.error(`sproutboat: optional package ${packageName} is missing for ${platform}/${arch}`);
-  console.error("Reinstall sproutboat without --omit=optional, or use a direct release download.");
-  process.exit(1);
+  viaBun = true;
+  // SPROUTBOAT_BUN is an escape hatch for an unusual install; otherwise PATH.
+  command = process.env.SPROUTBOAT_BUN || "bun";
+  args = [join(__dirname, "..", "src", "main.ts"), ...process.argv.slice(2)];
 }
-const child = spawn(resolve(executable), process.argv.slice(2), { stdio: "inherit" });
+
+const child = spawn(command, args, { stdio: "inherit", windowsHide: true });
+
 child.once("error", (error) => {
-  console.error(`sproutboat: could not start bundled executable: ${error.message}`);
+  if (viaBun && error.code === "ENOENT") {
+    console.error("sproutboat: this build needs Bun on PATH. Install it: https://bun.sh");
+  } else {
+    console.error(`sproutboat: could not start: ${error.message}`);
+  }
   process.exit(1);
 });
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => child.kill(signal));
 }
+
 child.once("exit", (code, signal) => {
-  if (signal) process.kill(process.pid, signal);
-  else process.exit(code ?? 1);
+  if (signal) {
+    // Re-raise so the parent's exit reflects the signal — but drop our own
+    // handler first, or the re-raise re-enters it and the process hangs.
+    process.removeAllListeners(signal);
+    process.kill(process.pid, signal);
+  } else {
+    process.exit(code ?? 1);
+  }
 });

@@ -2,10 +2,13 @@ import { gzipSync } from "bun";
 import { resourceRefs, type SproutboatConfig } from "./config";
 import type { ArtifactManifest } from "./manifest";
 import { bold, dim, leaf, sprout } from "./style";
+import pkg from "../package.json" with { type: "json" };
 
-// `bun build --compile` has no package-relative filesystem at runtime. The
-// release build injects this value; source development keeps the package value.
-export const CLI_VERSION = process.env.SPROUTBOAT_CLI_VERSION ?? "0.9.0";
+// `bun build --compile` has no package-relative filesystem at runtime, so the
+// release build injects this via `--define`. Running from source (or the npm
+// package under Bun) falls back to the bundled package.json version — `bun build
+// --compile` inlines the JSON import, so this branch is correct there too.
+export const CLI_VERSION = process.env.SPROUTBOAT_CLI_VERSION ?? pkg.version;
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
