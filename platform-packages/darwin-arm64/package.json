@@ -5,7 +5,8 @@
   "license": "MIT",
   "files": [
     "bin/sproutboat",
-    "bin/esbuild"
+    "bin/esbuild",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "os": [
     "darwin"
