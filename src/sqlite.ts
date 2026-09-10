@@ -13,7 +13,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -32,6 +32,46 @@ const digest = async (path: string): Promise<string> =>
   createHash("sha256")
     .update(await readFile(path))
     .digest("hex");
+
+async function withSqliteLock<T>(dir: string, name: string, action: () => Promise<T>): Promise<T> {
+  await mkdir(dir, { recursive: true });
+  const lock = resolve(dir, `.${name}.lock`);
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    try {
+      await mkdir(lock);
+      break;
+    } catch {
+      if (Date.now() > deadline) throw new Error(`timed out waiting for SQLite cache lock ${lock}`);
+      try {
+        if (Date.now() - (await stat(lock)).mtimeMs > 5 * 60_000) await rm(lock, { recursive: true, force: true });
+      } catch {
+        /* publisher released the lock while it was being inspected */
+      }
+      await Bun.sleep(25);
+    }
+  }
+  try {
+    return await action();
+  } finally {
+    await rm(lock, { recursive: true, force: true });
+  }
+}
+
+async function validAmalgamation(dir: string): Promise<string | null> {
+  const source = resolve(dir, "sqlite3.c");
+  try {
+    // SAFETY: this manifest is private data written below. The immutable
+    // archive identity and the consumed source digest are both verified.
+    const manifest = JSON.parse(await readFile(resolve(dir, ".sproutboat-source"), "utf8")) as {
+      archiveSha256?: string;
+      sourceSha256?: string;
+    };
+    return manifest.archiveSha256 === SQLITE_SHA256 && manifest.sourceSha256 === (await digest(source)) ? source : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Compile flags. THREADSAFE=0 because a sprout serves one turn at a time;
@@ -57,20 +97,14 @@ const run = (cmd: string, args: string[]): Promise<{ code: number; stderr: strin
 
 async function amalgamation(): Promise<string> {
   const dir = cacheDir();
+  const ready = await validAmalgamation(dir);
+  if (ready) return ready;
+  return withSqliteLock(dir, "source", async () => (await validAmalgamation(dir)) ?? acquireAmalgamation(dir));
+}
+
+async function acquireAmalgamation(dir: string): Promise<string> {
   const source = resolve(dir, "sqlite3.c");
   const manifestPath = resolve(dir, ".sproutboat-source");
-  try {
-    // SAFETY: this manifest is private data written below. The immutable
-    // archive identity and the consumed source digest are both verified.
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
-      archiveSha256?: string;
-      sourceSha256?: string;
-    };
-    if (manifest.archiveSha256 === SQLITE_SHA256 && manifest.sourceSha256 === (await digest(source))) return source;
-  } catch {
-    /* acquire a verified replacement below */
-  }
-  await mkdir(dir, { recursive: true });
   const stage = resolve(dir, `.source-${process.pid}-${crypto.randomUUID()}`);
   try {
     await mkdir(stage);
@@ -139,21 +173,25 @@ export async function ensureSqliteObject(input: SqliteObjectInput): Promise<stri
   } catch {
     /* compile a verified replacement below */
   }
-  const stage = `${objectPath}.${process.pid}.${crypto.randomUUID()}`;
-  const result = await run(cmd, [...prefix, "-c", source, "-o", stage, ...flags]);
-  if (result.code !== 0) throw new Error(`could not compile SQLite for ${input.target}:\n${result.stderr}`);
-  const objectSha256 = await digest(stage);
-  const stagedManifest = `${manifestPath}.${process.pid}.${crypto.randomUUID()}`;
-  await writeFile(
-    stagedManifest,
-    JSON.stringify({ sourceSha256, target: input.target, command, flags, objectSha256 }),
-    {
-      mode: 0o444,
-    },
-  );
-  await rename(stage, objectPath);
-  await rename(stagedManifest, manifestPath);
-  return objectPath;
+  return withSqliteLock(dir, `object-${input.target}`, async () => {
+    const stage = `${objectPath}.${process.pid}.${crypto.randomUUID()}`;
+    try {
+      const result = await run(cmd, [...prefix, "-c", source, "-o", stage, ...flags]);
+      if (result.code !== 0) throw new Error(`could not compile SQLite for ${input.target}:\n${result.stderr}`);
+      const objectSha256 = await digest(stage);
+      const stagedManifest = `${manifestPath}.${process.pid}.${crypto.randomUUID()}`;
+      await writeFile(
+        stagedManifest,
+        JSON.stringify({ sourceSha256, target: input.target, command, flags, objectSha256 }),
+        { mode: 0o444 },
+      );
+      await rename(stage, objectPath);
+      await rename(stagedManifest, manifestPath);
+      return objectPath;
+    } finally {
+      await rm(stage, { force: true });
+    }
+  });
 }
 
 /** The SQLite build stamp, for the artifact manifest's provenance string. */
