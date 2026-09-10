@@ -36,8 +36,11 @@ async function pack(directory: string, destination: string): Promise<string> {
   if (!npm) throw new Error("npm is required for package tests");
   const result = await run(npm, ["pack", "--json", "--ignore-scripts", "--pack-destination", destination], directory);
   expect(result).toMatchObject({ code: 0, stderr: "" });
-  // SAFETY: npm pack's --json response is an array with a filename string.
-  const filename = (JSON.parse(result.stdout) as Array<{ filename: string }>)[0]?.filename;
+  // SAFETY: npm pack's --json response is an array with a filename string
+  // (npm 11) or an object keyed by package name (npm 12+).
+  const parsed = JSON.parse(result.stdout) as Array<{ filename: string }> | Record<string, { filename: string }>;
+  const first = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
+  const filename = first?.filename;
   if (!filename) throw new Error(`npm pack did not return a filename: ${result.stdout}`);
   return join(destination, filename);
 }
@@ -95,9 +98,13 @@ test("root npm pack excludes platform binaries and retains runtime exports", asy
   if (!npm) throw new Error("npm is required for package tests");
   const result = await run(npm, ["pack", "--json", "--ignore-scripts", "--dry-run"], root);
   expect(result).toMatchObject({ code: 0, stderr: "" });
-  // SAFETY: npm pack's --json response is an array with a files array.
-  const files =
-    (JSON.parse(result.stdout) as Array<{ files: Array<{ path: string }> }>)[0]?.files.map((file) => file.path) ?? [];
+  // SAFETY: npm pack's --json response is an array with a files array
+  // (npm 11) or an object keyed by package name (npm 12+).
+  const packed = JSON.parse(result.stdout) as
+    | Array<{ files: Array<{ path: string }> }>
+    | Record<string, { files: Array<{ path: string }> }>;
+  const entry = Array.isArray(packed) ? packed[0] : Object.values(packed)[0];
+  const files = entry?.files.map((file) => file.path) ?? [];
   expect(files).toContain("bin/sproutboat.cjs");
   expect(files).toContain("src/broker.ts");
   expect(files.some((file) => file.includes("platform/") || file.includes("platform-packages/"))).toBe(false);
@@ -150,7 +157,7 @@ test("npm local, global, and exec installs resolve an optional platform tarball"
   expect(local).toEqual({ code: 0, stdout: "one\ntwo\n", stderr: "" });
   const exited = await run(node, [join(project, "node_modules", ".bin", "sproutboat"), "exit", "23"], project);
   expect(exited.code).toBe(23);
-  const exec = await run(npm, ["exec", "--", "sproutboat", "exec"], project);
+  const exec = await run(npm, ["exec", "--silent", "--", "sproutboat", "exec"], project);
   expect(exec).toEqual({ code: 0, stdout: "exec\n", stderr: "" });
 
   const global = await run(
