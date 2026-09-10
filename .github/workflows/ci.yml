@@ -49,3 +49,14 @@ jobs:
           HOME="$RUNNER_TEMP/sproutboat-home" \
           SPROUTBOAT_TOOLCHAIN_CACHE="$RUNNER_TEMP/sproutboat-toolchain" \
           "$cli" build --target host examples/hello
+          sprout="$(find examples/hello/.sproutboat/dist -type f -name sprout -print -quit)"
+          test -x "$sprout"
+          PORT=8791 "$sprout" >"$RUNNER_TEMP/sprout.log" 2>&1 &
+          sprout_pid=$!
+          trap 'kill "$sprout_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:8791/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/sprout.log"
+          exit 1
