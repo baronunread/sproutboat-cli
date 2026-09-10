@@ -222,7 +222,7 @@ export type ToolchainDoctor = {
   };
   sqlite: { version: string; path: string; present: boolean };
   bearssl: { version: string; path: string; present: boolean };
-  prerequisites: { cc: string | null; ar: string | null; tar: string | null; xcrun: string | null };
+  prerequisites: { cc: string | null; ar: string | null; tar: string | null; xcrun: string | null; sdk: string | null };
 };
 
 /** Inspect the selected toolchain without downloading, compiling, or mutating a cache. */
@@ -240,6 +240,12 @@ export function inspectToolchain(): ToolchainDoctor {
   const porfforPath = porfforOverride ?? cachedPorfforRoot(cacheRoot);
   const sqlitePath = resolve(cacheRoot, `sqlite-${SQLITE_VERSION}`);
   const bearsslPath = resolve(cacheRoot, `bearssl-${BEARSSL_VERSION}`);
+  const xcrun = process.platform === "darwin" ? Bun.which("xcrun") : null;
+  const sdk = (() => {
+    if (!xcrun) return null;
+    const probe = Bun.spawnSync([xcrun, "--show-sdk-path"], { stdout: "pipe", stderr: "ignore" });
+    return probe.exitCode === 0 ? probe.stdout.toString().trim() || null : null;
+  })();
   return {
     host: `${process.arch}/${process.platform}`,
     cacheRoot,
@@ -262,7 +268,8 @@ export function inspectToolchain(): ToolchainDoctor {
       cc: Bun.which(process.env.CC ?? "cc"),
       ar: Bun.which(process.env.AR ?? "ar"),
       tar: Bun.which("tar"),
-      xcrun: process.platform === "darwin" ? Bun.which("xcrun") : null,
+      xcrun,
+      sdk,
     },
   };
 }

@@ -1227,6 +1227,8 @@ async function toolchain(args: string[]): Promise<void> {
   console.log(`archive extractor: ${report.prerequisites.tar ?? "missing: install tar with xz support"}`);
   if (process.platform === "darwin")
     console.log(`macOS SDK tools: ${report.prerequisites.xcrun ?? "missing: run xcode-select --install"}`);
+  if (process.platform === "darwin")
+    console.log(`macOS SDK: ${report.prerequisites.sdk ?? "missing: run xcode-select --install"}`);
 }
 
 const [command, ...args] = process.argv.slice(2);
