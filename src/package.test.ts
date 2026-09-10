@@ -107,6 +107,7 @@ test("root npm pack excludes platform binaries and retains runtime exports", asy
   const files = entry?.files.map((file) => file.path) ?? [];
   expect(files).toContain("bin/sproutboat.cjs");
   expect(files).toContain("src/broker.ts");
+  expect(files).toContain("THIRD_PARTY_NOTICES.md");
   expect(files.some((file) => file.includes("platform/") || file.includes("platform-packages/"))).toBe(false);
 }, 120000);
 
@@ -133,8 +134,9 @@ test("root optional dependencies and platform package constraints cover the rele
       version: manifest.version,
       os: [platform],
       cpu: [arch],
-      files: ["bin/sproutboat", "bin/esbuild"],
+      files: ["bin/sproutboat", "bin/esbuild", "THIRD_PARTY_NOTICES.md"],
     });
+    expect(existsSync(join(root, "platform-packages", `${platform}-${arch}`, "THIRD_PARTY_NOTICES.md"))).toBe(true);
   }
 });
 

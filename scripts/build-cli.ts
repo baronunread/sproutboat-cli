@@ -41,4 +41,5 @@ try {
 }
 const packagedEsbuild = resolve(packageDir, "bin", "esbuild");
 await copyFile(esbuild, packagedEsbuild);
+await copyFile(resolve(import.meta.dir, "..", "THIRD_PARTY_NOTICES.md"), resolve(packageDir, "THIRD_PARTY_NOTICES.md"));
 await chmod(packagedEsbuild, 0o755);
