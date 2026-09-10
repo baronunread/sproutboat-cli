@@ -1213,6 +1213,14 @@ async function toolchain(args: string[]): Promise<void> {
     `  ${report.zig.present ? "ready" : "acquired on first deployment build"}${report.zig.override ? " (override)" : ""}`,
   );
   console.log(
+    `SQLite: ${report.sqlite.version} (${report.sqlite.present ? "cached" : "acquired for standalone builds"})`,
+  );
+  console.log(`  ${report.sqlite.path}`);
+  console.log(
+    `BearSSL: ${report.bearssl.version} (${report.bearssl.present ? "cached" : "acquired for standalone builds"})`,
+  );
+  console.log(`  ${report.bearssl.path}`);
+  console.log(
     `host compiler: ${report.prerequisites.cc ?? "missing: install Xcode Command Line Tools or a C compiler"}`,
   );
   console.log(`archiver: ${report.prerequisites.ar ?? "missing: install an archiver"}`);

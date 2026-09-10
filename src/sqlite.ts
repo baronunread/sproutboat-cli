@@ -20,7 +20,11 @@ import { homedir } from "node:os";
 export const SQLITE_VERSION = "3.50.4";
 
 /** Same cache root Zig uses, so one `rm -rf ~/.cache/sproutboat` clears everything. */
-const cacheDir = (): string => resolve(homedir(), ".cache/sproutboat", `sqlite-${SQLITE_VERSION}`);
+const cacheDir = (): string =>
+  resolve(
+    process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? resolve(homedir(), ".cache/sproutboat"),
+    `sqlite-${SQLITE_VERSION}`,
+  );
 const SQLITE_ZIP = `https://sqlite.org/2025/sqlite-amalgamation-3500400.zip`;
 const SQLITE_SHA256 = "1d3049dd0f830a025a53105fc79fd2ab9431aea99e137809d064d8ee8356b032";
 
