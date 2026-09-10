@@ -38,6 +38,7 @@ test("Zig acquisition is atomic, shared concurrently, and warm-cache offline", a
     platform: "x86_64-linux" as const,
     url: "fixture",
     expectedSha256: sha256,
+    validate: false,
     fetcher: async () => {
       requests += 1;
       await Bun.sleep(5);
@@ -66,6 +67,7 @@ test("a corrupt Zig cache is replaced from the verified archive", async () => {
     platform: "x86_64-linux" as const,
     url: "fixture",
     expectedSha256: sha256,
+    validate: false,
     fetcher: async () => {
       requests += 1;
       return new Response(Bun.file(archive));
@@ -109,6 +111,23 @@ test("Zig integrity and download failures publish no cache entry", async () => {
   expect(await readdir(cacheRoot)).toEqual([]);
 });
 
+test("an unusable pinned Zig is classified before it can publish a cache", async () => {
+  const { archive, sha256 } = await fixture();
+  const cacheRoot = await mkdtemp(join(tmpdir(), "sb-zig-compiler-"));
+  temporary.push(cacheRoot);
+  const error = await ensureZig({
+    cacheRoot,
+    platform: "x86_64-linux",
+    url: "fixture",
+    expectedSha256: sha256,
+    fetcher: async () => new Response(Bun.file(archive)),
+  }).catch((cause: unknown) => cause);
+  expect(error).toBeInstanceOf(ZigToolchainError);
+  if (!(error instanceof ZigToolchainError)) throw error;
+  expect(error.kind).toBe("compiler");
+  expect((await readdir(cacheRoot)).some((name) => name.startsWith("zig-"))).toBe(false);
+});
+
 test("an interrupted Zig lock is recovered", async () => {
   const { archive, sha256 } = await fixture();
   const cacheRoot = await mkdtemp(join(tmpdir(), "sb-zig-lock-"));
@@ -122,6 +141,7 @@ test("an interrupted Zig lock is recovered", async () => {
     platform: "x86_64-linux",
     url: "fixture",
     expectedSha256: sha256,
+    validate: false,
     fetcher: async () => new Response(Bun.file(archive)),
   });
   expect(await readFile(bin, "utf8")).toContain("fixture zig");
