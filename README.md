@@ -81,6 +81,13 @@ Run `sproutboat` with no arguments for the grouped list.
 [`SURFACE.md`](SURFACE.md) is the generated inventory: every command, every
 argument, every env var, kept honest by a drift test.
 
+### Toolchain diagnostics
+
+`sproutboat toolchain doctor` reports the selected Porffor, Zig, SQLite, and
+BearSSL inputs, cache locations, active overrides, and host compiler
+prerequisites. It never downloads a toolchain or starts a compiler. Use
+`sproutboat toolchain doctor --json` for CI or support tooling.
+
 ### KV data and waitlist export
 
 Manage one namespace by its account-level name:
