@@ -6,7 +6,10 @@
       "name": "@sproutboat/cli",
       "dependencies": {
         "@sproutboat/artifact": "file:../sproutboat-packages/packages/artifact",
+        "@sproutboat/assets": "file:../sproutboat-packages/packages/assets",
         "@sproutboat/config": "file:../sproutboat-packages/packages/config",
+        "@sproutboat/runtime": "file:../sproutboat-packages/packages/runtime",
+        "@sproutboat/wire": "file:../sproutboat-packages/packages/wire",
         "esbuild": "^0.28.2",
       },
       "devDependencies": {
@@ -158,7 +161,13 @@
 
     "@sproutboat/artifact": ["@sproutboat/artifact@file:../sproutboat-packages/packages/artifact", {}],
 
+    "@sproutboat/assets": ["@sproutboat/assets@file:../sproutboat-packages/packages/assets", {}],
+
     "@sproutboat/config": ["@sproutboat/config@file:../sproutboat-packages/packages/config", {}],
+
+    "@sproutboat/runtime": ["@sproutboat/runtime@file:../sproutboat-packages/packages/runtime", {}],
+
+    "@sproutboat/wire": ["@sproutboat/wire@file:../sproutboat-packages/packages/wire", {}],
 
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 

@@ -24,7 +24,6 @@ import { CONTROL_VERSION_HEADER, MIN_CLI_HEADER } from "./api-version";
 
 const srcDir = import.meta.dir;
 const root = resolve(srcDir, "..");
-const read = (file: string) => readFileSync(resolve(srcDir, file), "utf8");
 
 /**
  * Source text of a shared-package module. config.ts and manifest.ts moved to
@@ -37,13 +36,15 @@ function pkgSource(pkg: string, file: string): string {
 
 /** All `case "op.name":` labels in the broker's dispatch — the switch is the truth. */
 function brokerOps(): string[] {
-  const source = read("broker.ts");
+  const source = pkgSource("@sproutboat/wire", "broker.ts");
   return [...source.matchAll(/case "([a-z0-9_]+(?:\.[a-z0-9_]+)*)":/g)].map((m) => m[1]).sort();
 }
 
 /** Every table the broker creates, i.e. the shape a resource file is stuck with. */
 function storageTables(): string[] {
-  return [...read("broker.ts").matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]).sort();
+  return [...pkgSource("@sproutboat/wire", "broker.ts").matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)]
+    .map((m) => m[1])
+    .sort();
 }
 
 /** Pull a quoted-string array/Set literal out of source text by its declaration. */
@@ -176,7 +177,7 @@ test("a storage resource written by v0.1.0 is still readable", async () => {
 });
 
 test("standalone storage creates the same additive trigger poll indexes", () => {
-  const source = read("transport-embedded.js");
+  const source = pkgSource("@sproutboat/runtime", "transport-embedded.js");
   expect(source).toContain("CREATE INDEX IF NOT EXISTS mq_due ON mq (queue, dead, visible_at)");
   expect(source).toContain("CREATE INDEX IF NOT EXISTS do_alarm_due ON do_alarm (at)");
 });
