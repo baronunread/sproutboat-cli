@@ -316,7 +316,10 @@ async function writeUwsManifest(dir: string): Promise<void> {
   const files = Object.fromEntries(
     await Promise.all(UWS_REQUIRED.map(async (file) => [file, await sha256File(resolve(dir, file))] as const)),
   );
-  await writeFile(resolve(dir, ".sproutboat-complete"), JSON.stringify({ files }), { mode: 0o444 });
+  const manifest = resolve(dir, ".sproutboat-complete");
+  const stage = `${manifest}.${process.pid}.${crypto.randomUUID()}`;
+  await writeFile(stage, JSON.stringify({ files }), { mode: 0o444 });
+  await rename(stage, manifest);
 }
 
 /**
