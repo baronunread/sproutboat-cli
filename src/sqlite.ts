@@ -152,28 +152,31 @@ export async function ensureSqliteObject(input: SqliteObjectInput): Promise<stri
       ? (["cc", []] as const)
       : ([input.zigBin ?? "zig", ["cc", "-target", "x86_64-linux-musl"]] as const);
   const command = [cmd, ...prefix];
-  try {
-    // SAFETY: the manifest is private data written below. Its source, target,
-    // flags, and object digest must all agree before the cached object is used.
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
-      sourceSha256?: string;
-      target?: string;
-      command?: string[];
-      flags?: string[];
-      objectSha256?: string;
-    };
-    if (
-      manifest.sourceSha256 === sourceSha256 &&
-      manifest.target === input.target &&
-      JSON.stringify(manifest.command) === JSON.stringify(command) &&
-      JSON.stringify(manifest.flags) === JSON.stringify(flags) &&
-      manifest.objectSha256 === (await digest(objectPath))
-    )
-      return objectPath;
-  } catch {
-    /* compile a verified replacement below */
-  }
+  const validCache = async (): Promise<boolean> => {
+    try {
+      // SAFETY: the manifest is private data written below. Its source, target,
+      // flags, and object digest must all agree before the cached object is used.
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+        sourceSha256?: string;
+        target?: string;
+        command?: string[];
+        flags?: string[];
+        objectSha256?: string;
+      };
+      return (
+        manifest.sourceSha256 === sourceSha256 &&
+        manifest.target === input.target &&
+        JSON.stringify(manifest.command) === JSON.stringify(command) &&
+        JSON.stringify(manifest.flags) === JSON.stringify(flags) &&
+        manifest.objectSha256 === (await digest(objectPath))
+      );
+    } catch {
+      return false;
+    }
+  };
+  if (await validCache()) return objectPath;
   return withSqliteLock(dir, `object-${input.target}`, async () => {
+    if (await validCache()) return objectPath;
     const stage = `${objectPath}.${process.pid}.${crypto.randomUUID()}`;
     try {
       const result = await run(cmd, [...prefix, "-c", source, "-o", stage, ...flags]);
