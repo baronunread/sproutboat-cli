@@ -160,6 +160,30 @@ export async function runConformance(
     );
   }
 
+  // crypto.subtle (#133): a known SHA-256 vector and an HMAC round-trip.
+  const h = obj((await jget("/hash")).body);
+  check(
+    "crypto.subtle: SHA-256 digest matches the known vector",
+    h.digest === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    h.digest,
+  );
+  check(
+    "crypto.subtle: HMAC sign + verify round-trips, a tampered message fails",
+    isString(h.hmac) && h.hmac.length === 64 && h.verifyOk === true && h.verifyBad === false,
+    h,
+  );
+  check(
+    "crypto.scryptVerify: a matching hash verifies, a wrong password does not (#153)",
+    h.scryptOk === true && h.scryptBad === false,
+    h,
+  );
+
+  // rate limiter (#69): a unique key gets `limit` successes then a failure.
+  const rlKey = "conf-" + Date.now();
+  const rl = [];
+  for (let i = 0; i < 4; i++) rl.push(obj((await jget("/throttle?key=" + rlKey)).body).success);
+  check("ratelimit: THROTTLE allows 3 then blocks the 4th", JSON.stringify(rl) === "[true,true,true,false]", rl);
+
   // DO alarms (#125): viewing a note debounces an alarm a second out, whose
   // handler rolls the count up into D1. Poll, because the whole point is that
   // it happens after the request that scheduled it has gone.

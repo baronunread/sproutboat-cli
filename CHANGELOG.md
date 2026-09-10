@@ -21,11 +21,26 @@ maintained going forward by the `release` skill.
 - `env.<D1>.backup(name?)` — an online, integrity-checked single-file snapshot
   of a D1 database via `VACUUM INTO`, on both the embedded and broker transports
   (baronunread/sproutboat#164).
+- Rate Limiting binding: `ratelimiters: [{ binding, limit, period }]` in
+  `sproutboat.jsonc` gives `env.<NAME>.limit({ key }) -> { success }`, a
+  fixed-window counter on both transports (baronunread/sproutboat#69).
+- `crypto.subtle` subset: `digest` (SHA-256/384/512) and HMAC
+  `importKey` / `sign` / `verify`, backed by reference SHA-2 as inline C so it
+  works on both transports (baronunread/sproutboat#133). No ECDSA/AES yet.
+- `crypto.scryptVerify(password, salt, expected, { N, r, p })` — a verify-only
+  scrypt (RFC 7914) for migrating password hashes made by Node/Bun `scrypt`
+  (baronunread/sproutboat#153). Not a blessed KDF for new credentials.
 
 ### Performance
 - Embedded transport caches prepared statements per database (FIFO, 32/db)
   instead of compiling the SQL on every binding op — the op boundary drops from
   ~0.6 ms to tens of µs (baronunread/sproutboat#155).
+
+### Docs
+- `docs/standalone.md` documents the single-threaded execution model and the
+  `SO_REUSEPORT` multi-process recipe for scaling past one core
+  (baronunread/sproutboat#154). The embedded transport also sets
+  `PRAGMA busy_timeout` so shared-data-dir writers wait instead of failing.
 
 ### Fixed
 - `303` (and every other status not in Porffor's table) no longer resets the

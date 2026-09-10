@@ -77,6 +77,7 @@ Ops:
 - `r2.head`
 - `r2.list`
 - `r2.put`
+- `ratelimit.check`
 - `secret.get`
 - `service.fetch`
 
@@ -90,6 +91,7 @@ Tables in a resource file, which outlives every redeploy:
 - `kv`
 - `mq`
 - `r2`
+- `ratelimit`
 
 ## Binding kinds
 
@@ -102,6 +104,7 @@ Tables in a resource file, which outlives every redeploy:
 - `outbound`
 - `queues`
 - `r2`
+- `ratelimiters`
 - `secrets`
 - `services`
 
@@ -126,6 +129,7 @@ still a compatibility event.
 - `durable_objects`
 - `services`
 - `triggers`
+- `ratelimiters`
 - `assets`
 
 ## Version handshake

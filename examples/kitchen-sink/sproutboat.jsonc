@@ -20,6 +20,7 @@
   "queues": ["EMAILS"],
   "analytics_engine_datasets": ["METRICS"],
   "durable_objects": { "VIEWS": "ViewCounter" },
+  "ratelimiters": [{ "binding": "THROTTLE", "limit": 3, "period": 60 }],
   "outbound": ["api.quotable.local"],
   // #48 — worker-to-worker. The target must be a *different* deployment: one
   // sprout serves one turn at a time, so a binding pointing back at its own

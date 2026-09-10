@@ -95,6 +95,44 @@ ranges are IPv4; an IPv6 proxy must be listed as a bare address.
 - **Assets compile in**, capped at 8 MB. Past that, serve them from R2 or put a
   web server in front.
 
+## Concurrency and scaling
+
+One binary runs its handler on a single thread: the uWebSockets event loop
+accepts connections and flushes responses concurrently, but the handler body
+and every embedded binding call (D1, KV, R2, DO storage) execute serially, one
+request at a time. A CPU-bound or IO-heavy handler therefore has a per-core
+throughput ceiling of roughly `1 / handler-time`; adding client concurrency
+past two or three in flight only grows latency (Little's law), it does not add
+throughput. This is the runtime model, not a lock that can be narrowed:
+Porffor's compiled runtime keeps one linear memory and is not built to run two
+handler turns at once. It is also why a handler that calls its own service
+binding would deadlock, and why standalone has none.
+
+For most workloads this is not the wall it once was: a trivial write is tens of
+microseconds and a handful of indexed reads is around a hundred, so a single
+core clears well over ten thousand requests a second.
+
+When one core is not enough, run several copies of the binary on the **same
+`$PORT` and the same `SB_DATA_DIR`**. uWebSockets listens with `SO_REUSEPORT`,
+so on Linux the kernel load-balances incoming connections across every copy,
+and each copy is an independent runtime on its own core. The shared SQLite
+files are safe across processes: WAL allows any number of readers plus one
+writer, and `PRAGMA busy_timeout` (set to 5s by the runtime) makes a writer
+wait for the lock rather than fail. A process manager owns the fan-out:
+
+```ini
+# systemd: four workers, restarted independently
+[Service]
+Environment=PORT=8080 SB_DATA_DIR=/var/lib/notes
+ExecStart=/usr/local/bin/notes
+[Install]
+WantedBy=multi-user.target
+```
+
+installed as a template (`notes@.service`) and enabled `notes@{1,2,3,4}`, or
+any equivalent. macOS `SO_REUSEPORT` does not load-balance, so a host build
+scales only on the deploy target.
+
 ## TLS, in both directions
 
 **Inbound is not this binary's job.** It serves plain HTTP on `$PORT`; put

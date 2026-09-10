@@ -49,6 +49,9 @@ function entries(config: SproutboatConfig): Entry[] {
   for (const service of config.services ?? []) {
     out.push({ name: service.binding, type: "Fetcher", note: `service binding: ${service.service}` });
   }
+  for (const rl of config.ratelimiters ?? []) {
+    out.push({ name: rl.binding, type: "RateLimit", note: `rate limit: ${rl.limit} per ${rl.period}s` });
+  }
   if (config.assets?.binding) {
     out.push({ name: config.assets.binding, type: "Fetcher", note: `static assets: ${config.assets.directory}` });
   }

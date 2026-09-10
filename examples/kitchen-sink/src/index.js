@@ -52,6 +52,34 @@ async function asyncEcho(path) {
   return json({ async: true, path });
 }
 
+// #133 — crypto.subtle: a SHA-256 digest and an HMAC round-trip against known
+// vectors, so an incorrect or missing subset fails the suite on both backends.
+async function asyncHash() {
+  const hex = (buf) => {
+    const b = new Uint8Array(buf);
+    let s = "";
+    for (let i = 0; i < b.length; i++) s += (b[i] + 0x100).toString(16).slice(1);
+    return s;
+  };
+  const d = hex(await crypto.subtle.digest("SHA-256", "abc"));
+  const k = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode("key"),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", k, "message");
+  const ok = await crypto.subtle.verify("HMAC", k, sig, "message");
+  const bad = await crypto.subtle.verify("HMAC", k, sig, "message!");
+  // #153 — scrypt verify against a small-parameter vector (fast for the suite).
+  // node crypto.scryptSync("pw","salt",32,{N:1024,r:8,p:1}):
+  const scEx = "9f1f8695838e682c1689750f45a69fb95645b4a27f0c9994c696b1c98c0a1671";
+  const scOk = crypto.scryptVerify("pw", "salt", scEx, { N: 1024, r: 8, p: 1 });
+  const scBad = crypto.scryptVerify("nope", "salt", scEx, { N: 1024, r: 8, p: 1 });
+  return json({ digest: d, hmac: hex(sig), verifyOk: ok, verifyBad: bad, scryptOk: scOk, scryptBad: scBad });
+}
+
 function ensureSchema(env) {
   env.DB.exec(
     "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, body TEXT, attachment TEXT, created TEXT);" +
@@ -147,6 +175,17 @@ export default {
     if (path === "/attachments" && request.method === "GET") {
       const list = env.UPLOADS.list();
       return json(list.objects.map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded, httpEtag: o.httpEtag })));
+    }
+
+    // GET /hash -> crypto.subtle digest + HMAC (#133), no binding needed.
+    if (path === "/hash") {
+      return asyncHash();
+    }
+
+    // GET /throttle -> rate-limiter binding (#69). limit 3 / 60s per key.
+    if (path === "/throttle") {
+      const r = env.THROTTLE.limit({ key: url.searchParams.get("key") || "test" });
+      return json({ success: r.success });
     }
 
     // GET /quote -> outbound fetch (host from env.QUOTE_URL must be allowlisted)

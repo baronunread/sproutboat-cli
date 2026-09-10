@@ -99,6 +99,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     do: Object.entries(input.config.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
     services: input.config.services ?? [],
     crons: input.config.triggers?.crons ?? [],
+    ratelimiters: input.config.ratelimiters ?? [],
     assets: input.config.assets?.binding ?? "",
     // Baked plain values, read as env.NAME. The broker never serves these (they
     // are compiled in via SPROUTBOAT_VARS_JSON); they ride along so the control

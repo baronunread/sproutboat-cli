@@ -87,6 +87,7 @@ const bindings: Bindings = {
   do: Object.entries(c.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
   services: c.services ?? [],
   crons: c.triggers?.crons ?? [],
+  ratelimiters: c.ratelimiters ?? [],
   assets: c.assets?.binding ?? "",
 };
 const vars = { ...c.vars, QUOTE_URL: `http://${upstreamHost}/random` };

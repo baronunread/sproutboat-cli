@@ -237,17 +237,19 @@ nothing on it. The issue is labelled `C-wintercg`, so server-side web APIs are
 in scope upstream — this is not a case of us filling in something the compiler
 considers out of bounds.
 
-`src/native-fetch-prelude.js` shims `crypto.getRandomValues` and
-`crypto.randomUUID` over OS entropy. There is no `crypto.subtle`, which is what
-an auth library actually needs: better-auth alone calls `importKey`, `sign`,
-`digest`, `encrypt` and `decrypt` across 17 sites.
+The prelude shims `crypto.getRandomValues`, `crypto.randomUUID`, and, as of
+#133, a `crypto.subtle` subset: `digest` (SHA-256/384/512) and HMAC
+`importKey` / `sign` / `verify`. Enough for JWTs and hand-rolled sessions; no
+ECDSA, no AES, no key wrapping. better-auth still needs more (and is blocked by
+the zod init crash below regardless).
 
-A `subtle` subset is worth building here rather than waiting, for reasons that
-are ours and not upstream's: standalone builds already link BearSSL (SHA-256,
-HMAC, AES, EC), a deployed sprout does not link it at all and would need the
-broker or a second link line, and that split is a Sproutboat problem that means
-nothing in the compiler. Keep the surface standard so it can be dropped when
-upstream lands theirs.
+Backed by ~300 lines of reference SHA-2 as inline C, **not** BearSSL. BearSSL is
+linked only in `--standalone` builds, and the prelude's inline C is shared with
+the broker transport, so a link dependency would break `sproutboat build`
+without `--standalone`. Pure C is transport-independent and also lets a handler
+drop a vendored pure-JS SHA-256. Verified against NIST vectors on both
+transports. Keep the surface exactly standard so it deletes when upstream lands
+Web Crypto.
 
 ---
 

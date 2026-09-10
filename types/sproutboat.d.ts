@@ -176,6 +176,37 @@ declare global {
     query<T = unknown>(options?: { limit?: number }): { count: number; rows: T[] };
   }
 
+  // ------------------------------------ Rate limiting
+
+  /**
+   * A rate-limiter binding (#69). `limit` and `period` are fixed in
+   * sproutboat.jsonc; `limit({ key })` counts one call against a fixed window
+   * and reports whether the key is still under the cap.
+   */
+  interface RateLimit {
+    limit(options: { key: string }): { success: boolean };
+  }
+
+  // ------------------------------------ Crypto
+
+  /**
+   * `crypto.subtle` covers `digest` (SHA-256/384/512) and HMAC
+   * `importKey` / `sign` / `verify`; other algorithms throw.
+   *
+   * `crypto.scryptVerify` is a Sproutboat extension (#153), not WebCrypto: it
+   * re-derives a scrypt hash and compares it in constant time, for migrating
+   * password hashes made by Node/Bun `scrypt`. Verify-only on purpose; new
+   * credentials should use HMAC/PBKDF2 via `crypto.subtle`.
+   */
+  interface Crypto {
+    scryptVerify(
+      password: string | ArrayBuffer | ArrayBufferView,
+      salt: string | ArrayBuffer | ArrayBufferView,
+      expected: string | ArrayBuffer | ArrayBufferView,
+      params?: { N?: number; r?: number; p?: number },
+    ): boolean;
+  }
+
   // ------------------------------------ Fetchers: services and assets
 
   /** A service binding, and the shape of the static-asset binding. */

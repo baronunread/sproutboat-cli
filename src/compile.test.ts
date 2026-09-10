@@ -44,6 +44,7 @@ test("wrap: declared bindings emit one install line after `const env`", () => {
       do: [],
       services: [],
       crons: [],
+      ratelimiters: [],
       assets: "",
     },
   );
@@ -68,6 +69,7 @@ test("wrap: an assets binding alone triggers the install line", () => {
       do: [],
       services: [],
       crons: [],
+      ratelimiters: [],
       assets: "ASSETS",
     },
   );
@@ -91,6 +93,7 @@ test("wrap: Durable Object classes are neutralised and registered", () => {
       do: [{ binding: "COUNTER", className: "Counter" }],
       services: [],
       crons: [],
+      ratelimiters: [],
       assets: "",
     },
   );

@@ -125,6 +125,7 @@ complete export. Existing output files require `--force`.
   "queues": ["JOBS"],
   "analytics_engine_datasets": ["METRICS"],   // bare name only, no id
   "durable_objects": { "COUNTER": "Counter" },
+  "ratelimiters": [{ "binding": "API", "limit": 100, "period": 60 }], // env.API.limit({ key })
   "outbound": ["api.example.com"],
   "triggers": { "crons": ["*/5 * * * *"] },
   "assets": { "directory": "public", "binding": "ASSETS", "run_sprout_first": ["/api/*"] }
