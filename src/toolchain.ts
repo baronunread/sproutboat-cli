@@ -91,7 +91,7 @@ async function zigComplete(dir: string, key: ZigPlatform, expectedArchive: strin
       platform?: string;
       archiveSha256?: string;
       binarySha256?: string;
-      cxxValidated?: boolean;
+      cValidated?: boolean;
     };
     const bin = resolve(dir, "zig");
     return (
@@ -99,7 +99,7 @@ async function zigComplete(dir: string, key: ZigPlatform, expectedArchive: strin
       manifest.platform === key &&
       manifest.archiveSha256 === expectedArchive &&
       manifest.binarySha256 !== undefined &&
-      manifest.cxxValidated !== undefined &&
+      manifest.cValidated !== undefined &&
       (await sha256File(bin)) === manifest.binarySha256
     );
   } catch {
@@ -107,15 +107,15 @@ async function zigComplete(dir: string, key: ZigPlatform, expectedArchive: strin
   }
 }
 
-/** Confirm the downloaded compiler can link the C++ target Porffor emits. */
-async function validateZigCxx(bin: string, root: string): Promise<void> {
-  const stage = resolve(root, `.zig-cxx-probe-${process.pid}-${crypto.randomUUID()}`);
+/** Confirm the downloaded compiler can produce the C target Sproutboat builds. */
+async function validateZigTarget(bin: string, root: string): Promise<void> {
+  const stage = resolve(root, `.zig-c-probe-${process.pid}-${crypto.randomUUID()}`);
   try {
     await mkdir(stage);
-    const source = resolve(stage, "main.cpp");
+    const source = resolve(stage, "main.c");
     const out = resolve(stage, "probe");
     await writeFile(source, "int main() { return 0; }\n");
-    const child = Bun.spawn([bin, "c++", "-target", "x86_64-linux-musl", "-static", source, "-o", out], {
+    const child = Bun.spawn([bin, "cc", "-target", "x86_64-linux-musl", "-static", source, "-o", out], {
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -123,7 +123,7 @@ async function validateZigCxx(bin: string, root: string): Promise<void> {
     if (code !== 0 || !existsSync(out))
       throw new ZigToolchainError(
         "compiler",
-        `pinned Zig cannot link a linux-x86_64-musl C++ binary: ${stderr.trim() || `exit ${code}`}\n` +
+        `pinned Zig cannot link a linux-x86_64-musl C binary: ${stderr.trim() || `exit ${code}`}\n` +
           "Set SPROUTBOAT_ZIG to a working Zig binary, then run `sproutboat toolchain doctor`.",
       );
   } finally {
@@ -221,7 +221,7 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
     const bin = resolve(stage, "zig");
     if (!existsSync(bin)) throw new ZigToolchainError("archive", "Zig archive did not contain a `zig` binary");
     await chmod(bin, 0o755);
-    if (options.validate !== false) await validateZigCxx(bin, root);
+    if (options.validate !== false) await validateZigTarget(bin, root);
     await writeFile(
       resolve(stage, ".sproutboat-complete"),
       JSON.stringify({
@@ -229,7 +229,7 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
         platform: key,
         archiveSha256: actual,
         binarySha256: await sha256File(bin),
-        cxxValidated: options.validate !== false,
+        cValidated: options.validate !== false,
       }),
       { mode: 0o444 },
     );
