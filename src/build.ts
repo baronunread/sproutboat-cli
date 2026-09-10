@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 import { walkAssets, type AssetManifest } from "./assets";
 import { resourceRefs, type SproutboatConfig } from "./config";
 import { ensureSqliteObject } from "./sqlite";
-import { ensureBearssl } from "./bearssl";
+import { sqliteStamp } from "./sqlite";
+import { bearsslStamp, ensureBearssl } from "./bearssl";
 import { compileSprout, type Transport } from "./compile";
 import {
   ARTIFACT_SCHEMA_VERSION,
@@ -70,7 +71,29 @@ function digest(value: Uint8Array | string): `sha256:${string}` {
 export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   const source = input.source ?? (await readFile(input.sourcePath));
   const sourceHash = digest(source);
-  const artifactId = sourceHash.slice("sha256:".length, 24);
+  const target = input.target ?? "linux-x86_64";
+  const embedded = input.transport === "embedded";
+  // The directory identity must change whenever an input that changes the
+  // generated C or link line changes. A source digest alone reused an artifact
+  // path across compiler pins, targets, and standalone ABI settings.
+  const artifactId = digest(
+    JSON.stringify({
+      sourceHash,
+      target,
+      transport: input.transport ?? "broker",
+      optimize: input.optimize ?? "release",
+      compatibilityDate: input.config.compatibility_date,
+      config: input.config,
+      toolchain: toolchainStamp(),
+      compiler:
+        target === "host"
+          ? `host:${process.env.CC ?? "cc"}`
+          : process.env.SPROUTBOAT_ZIG
+            ? `override:${process.env.SPROUTBOAT_ZIG}`
+            : "managed-zig",
+      native: embedded ? [sqliteStamp(), bearsslStamp()] : [],
+    }),
+  ).slice("sha256:".length, 24);
   const artifactDir = input.outputDirectory ?? resolve(input.projectDir, ".sproutboat/dist", artifactId);
   const sproutPath = resolve(artifactDir, "sprout");
   await mkdir(artifactDir, { recursive: true });
@@ -115,8 +138,6 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   // #15 — an embedded sprout carries its own storage and TLS instead of talking
   // to a broker: SQLite and BearSSL are compiled once per target and added to
   // the link line, and BearSSL's header to the compile line.
-  const embedded = input.transport === "embedded";
-  const target = input.target ?? "linux-x86_64";
   const sqliteObject = embedded ? await ensureSqliteObject({ target, zigBin }) : null;
   const tls = embedded ? await ensureBearssl({ target, zigBin }) : null;
   const extraLink = [...(sqliteObject ? [sqliteObject] : []), ...(tls ? tls.objects : [])];

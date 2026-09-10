@@ -3,19 +3,19 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { ensureZig, ZIG_VERSION, ZigToolchainError } from "./toolchain";
+import { ensureZig, inspectToolchain, ZIG_VERSION, ZigToolchainError } from "./toolchain";
 
 const temporary: string[] = [];
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function fixture(): Promise<{ archive: string; sha256: string }> {
+async function fixture(zig = "#!/bin/sh\necho fixture zig\n"): Promise<{ archive: string; sha256: string }> {
   const root = await mkdtemp(join(tmpdir(), "sb-zig-fixture-"));
   temporary.push(root);
   const source = join(root, `zig-x86_64-linux-${ZIG_VERSION}`);
   await mkdir(source);
-  await writeFile(join(source, "zig"), "#!/bin/sh\necho fixture zig\n");
+  await writeFile(join(source, "zig"), zig);
   const archive = join(root, "zig.tar.xz");
   const tar = Bun.spawn(["tar", "-cJf", archive, "-C", root, basename(source)], { stderr: "pipe" });
   const [code, stderr] = await Promise.all([tar.exited, new Response(tar.stderr).text()]);
@@ -38,6 +38,7 @@ test("Zig acquisition is atomic, shared concurrently, and warm-cache offline", a
     platform: "x86_64-linux" as const,
     url: "fixture",
     expectedSha256: sha256,
+    validate: false,
     fetcher: async () => {
       requests += 1;
       await Bun.sleep(5);
@@ -66,6 +67,7 @@ test("a corrupt Zig cache is replaced from the verified archive", async () => {
     platform: "x86_64-linux" as const,
     url: "fixture",
     expectedSha256: sha256,
+    validate: false,
     fetcher: async () => {
       requests += 1;
       return new Response(Bun.file(archive));
@@ -109,6 +111,53 @@ test("Zig integrity and download failures publish no cache entry", async () => {
   expect(await readdir(cacheRoot)).toEqual([]);
 });
 
+test("an unusable pinned Zig is classified before it can publish a cache", async () => {
+  const { archive, sha256 } = await fixture();
+  const cacheRoot = await mkdtemp(join(tmpdir(), "sb-zig-compiler-"));
+  temporary.push(cacheRoot);
+  const error = await ensureZig({
+    cacheRoot,
+    platform: "x86_64-linux",
+    url: "fixture",
+    expectedSha256: sha256,
+    fetcher: async () => new Response(Bun.file(archive)),
+  }).catch((cause: unknown) => cause);
+  expect(error).toBeInstanceOf(ZigToolchainError);
+  if (!(error instanceof ZigToolchainError)) throw error;
+  expect(error.kind).toBe("compiler");
+  expect((await readdir(cacheRoot)).some((name) => name.startsWith("zig-"))).toBe(false);
+});
+
+test("managed Zig validation exercises the C cross-compiler Sproutboat uses", async () => {
+  const { archive, sha256 } = await fixture(`#!/bin/sh
+test "$1" = cc || exit 8
+while test "$#" -gt 0; do
+  if test "$1" = -o; then
+    shift
+    : > "$1"
+    exit 0
+  fi
+  shift
+done
+exit 9
+`);
+  const cacheRoot = await mkdtemp(join(tmpdir(), "sb-zig-c-"));
+  temporary.push(cacheRoot);
+  const bin = await ensureZig({
+    cacheRoot,
+    platform: "x86_64-linux",
+    url: "fixture",
+    expectedSha256: sha256,
+    fetcher: async () => new Response(Bun.file(archive)),
+  });
+  expect(await Bun.file(bin).exists()).toBe(true);
+  // SAFETY: this manifest was written by the cache acquisition under test.
+  const manifest = JSON.parse(
+    await readFile(join(cacheRoot, `zig-${ZIG_VERSION}-x86_64-linux`, ".sproutboat-complete"), "utf8"),
+  ) as { cValidated?: boolean };
+  expect(manifest.cValidated).toBe(true);
+});
+
 test("an interrupted Zig lock is recovered", async () => {
   const { archive, sha256 } = await fixture();
   const cacheRoot = await mkdtemp(join(tmpdir(), "sb-zig-lock-"));
@@ -122,8 +171,19 @@ test("an interrupted Zig lock is recovered", async () => {
     platform: "x86_64-linux",
     url: "fixture",
     expectedSha256: sha256,
+    validate: false,
     fetcher: async () => new Response(Bun.file(archive)),
   });
   expect(await readFile(bin, "utf8")).toContain("fixture zig");
   expect((await readdir(cacheRoot)).some((name) => name.endsWith(".lock"))).toBe(false);
+});
+
+test("toolchain doctor inspection is non-mutating and identifies every managed cache", () => {
+  const report = inspectToolchain();
+  expect(report.host).toBe(`${process.arch}/${process.platform}`);
+  expect(report.porffor.version).toContain("alpha-4");
+  expect(report.zig.version).toBe(ZIG_VERSION);
+  expect(report.sqlite.path).toContain("sqlite-");
+  expect(report.bearssl.path).toContain("bearssl-");
+  expect(report.prerequisites.tar).not.toBeUndefined();
 });

@@ -12,7 +12,9 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 // @ts-expect-error Bun's file loader returns the embedded asset path in a compiled executable.
 import embeddedUwsArchive from "../vendor/uwebsockets-360c276d-musl.tar.xz" with { type: "file" };
+import { BEARSSL_VERSION } from "./bearssl";
 import { cachedPorfforRoot, PORFFOR_CHANNEL, PORFFOR_COMMIT } from "./porffor-toolchain";
+import { SQLITE_VERSION } from "./sqlite";
 
 export const ZIG_VERSION = "0.16.0";
 
@@ -56,7 +58,7 @@ function platformKey(): ZigPlatform {
 
 export class ZigToolchainError extends Error {
   constructor(
-    readonly kind: "download" | "integrity" | "archive" | "cache" | "unsupported",
+    readonly kind: "download" | "integrity" | "archive" | "cache" | "compiler" | "unsupported",
     message: string,
   ) {
     super(message);
@@ -70,6 +72,8 @@ export type EnsureZigOptions = {
   expectedSha256?: string;
   fetcher?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   timeoutMs?: number;
+  /** Test hook: release acquisition always validates the cross-C++ toolchain. */
+  validate?: boolean;
 };
 
 async function sha256File(path: string): Promise<string> {
@@ -87,6 +91,7 @@ async function zigComplete(dir: string, key: ZigPlatform, expectedArchive: strin
       platform?: string;
       archiveSha256?: string;
       binarySha256?: string;
+      cValidated?: boolean;
     };
     const bin = resolve(dir, "zig");
     return (
@@ -94,10 +99,35 @@ async function zigComplete(dir: string, key: ZigPlatform, expectedArchive: strin
       manifest.platform === key &&
       manifest.archiveSha256 === expectedArchive &&
       manifest.binarySha256 !== undefined &&
+      manifest.cValidated !== undefined &&
       (await sha256File(bin)) === manifest.binarySha256
     );
   } catch {
     return false;
+  }
+}
+
+/** Confirm the downloaded compiler can produce the C target Sproutboat builds. */
+async function validateZigTarget(bin: string, root: string): Promise<void> {
+  const stage = resolve(root, `.zig-c-probe-${process.pid}-${crypto.randomUUID()}`);
+  try {
+    await mkdir(stage);
+    const source = resolve(stage, "main.c");
+    const out = resolve(stage, "probe");
+    await writeFile(source, "int main() { return 0; }\n");
+    const child = Bun.spawn([bin, "cc", "-target", "x86_64-linux-musl", "-static", source, "-o", out], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    if (code !== 0 || !existsSync(out))
+      throw new ZigToolchainError(
+        "compiler",
+        `pinned Zig cannot link a linux-x86_64-musl C binary: ${stderr.trim() || `exit ${code}`}\n` +
+          "Set SPROUTBOAT_ZIG to a working Zig binary, then run `sproutboat toolchain doctor`.",
+      );
+  } finally {
+    await rm(stage, { recursive: true, force: true });
   }
 }
 
@@ -171,7 +201,9 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
     await rm(dir, { recursive: true, force: true });
     await mkdir(stage);
     const archive = resolve(stage, "zig.tar.xz");
-    await downloadZig(url, archive, options.fetcher ?? fetch, options.timeoutMs ?? 30_000);
+    // Zig's pinned archive is about 50 MB. Keep the fetch bounded while
+    // allowing a cold download to complete on ordinary consumer connections.
+    await downloadZig(url, archive, options.fetcher ?? fetch, options.timeoutMs ?? 120_000);
     const actual = await sha256File(archive);
     if (actual !== expected)
       throw new ZigToolchainError(
@@ -189,6 +221,7 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
     const bin = resolve(stage, "zig");
     if (!existsSync(bin)) throw new ZigToolchainError("archive", "Zig archive did not contain a `zig` binary");
     await chmod(bin, 0o755);
+    if (options.validate !== false) await validateZigTarget(bin, root);
     await writeFile(
       resolve(stage, ".sproutboat-complete"),
       JSON.stringify({
@@ -196,6 +229,7 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
         platform: key,
         archiveSha256: actual,
         binarySha256: await sha256File(bin),
+        cValidated: options.validate !== false,
       }),
       { mode: 0o444 },
     );
@@ -205,6 +239,71 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
     await rm(stage, { recursive: true, force: true });
     await rm(lock, { recursive: true, force: true });
   }
+}
+
+export type ToolchainDoctor = {
+  host: `${string}/${string}`;
+  cacheRoot: string;
+  porffor: { version: string; path: string; override: string | null; present: boolean };
+  zig: {
+    version: string;
+    platform: ZigPlatform | null;
+    path: string | null;
+    override: string | null;
+    present: boolean;
+  };
+  sqlite: { version: string; path: string; present: boolean };
+  bearssl: { version: string; path: string; present: boolean };
+  prerequisites: { cc: string | null; ar: string | null; tar: string | null; xcrun: string | null; sdk: string | null };
+};
+
+/** Inspect the selected toolchain without downloading, compiling, or mutating a cache. */
+export function inspectToolchain(): ToolchainDoctor {
+  const cacheRoot = resolve(process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? resolve(homedir(), ".cache/sproutboat"));
+  const porfforOverride = process.env.SPROUTBOAT_PORFFOR_DIR ? resolve(process.env.SPROUTBOAT_PORFFOR_DIR) : null;
+  const zigOverride = process.env.SPROUTBOAT_ZIG ? resolve(process.env.SPROUTBOAT_ZIG) : null;
+  let platform: ZigPlatform | null = null;
+  try {
+    platform = platformKey();
+  } catch {
+    /* doctor reports an unsupported host instead of throwing before its diagnostics */
+  }
+  const zigPath = zigOverride ?? (platform ? resolve(cacheRoot, `zig-${ZIG_VERSION}-${platform}`, "zig") : null);
+  const porfforPath = porfforOverride ?? cachedPorfforRoot(cacheRoot);
+  const sqlitePath = resolve(cacheRoot, `sqlite-${SQLITE_VERSION}`);
+  const bearsslPath = resolve(cacheRoot, `bearssl-${BEARSSL_VERSION}`);
+  const xcrun = process.platform === "darwin" ? Bun.which("xcrun") : null;
+  const sdk = (() => {
+    if (!xcrun) return null;
+    const probe = Bun.spawnSync([xcrun, "--show-sdk-path"], { stdout: "pipe", stderr: "ignore" });
+    return probe.exitCode === 0 ? probe.stdout.toString().trim() || null : null;
+  })();
+  return {
+    host: `${process.arch}/${process.platform}`,
+    cacheRoot,
+    porffor: {
+      version: porfforVersion(),
+      path: porfforPath,
+      override: porfforOverride,
+      present: existsSync(resolve(porfforPath, "runtime/index.js")),
+    },
+    zig: {
+      version: ZIG_VERSION,
+      platform,
+      path: zigPath,
+      override: zigOverride,
+      present: Boolean(zigPath && existsSync(zigPath)),
+    },
+    sqlite: { version: SQLITE_VERSION, path: sqlitePath, present: existsSync(sqlitePath) },
+    bearssl: { version: BEARSSL_VERSION, path: bearsslPath, present: existsSync(bearsslPath) },
+    prerequisites: {
+      cc: Bun.which(process.env.CC ?? "cc"),
+      ar: Bun.which(process.env.AR ?? "ar"),
+      tar: Bun.which("tar"),
+      xcrun,
+      sdk,
+    },
+  };
 }
 
 function uwsCommitFull(): string {
@@ -226,6 +325,65 @@ export function uwsVendorArchive(short: string): string {
     : resolve(import.meta.dir, "..", "vendor", `uwebsockets-${short}-musl.tar.xz`);
 }
 
+const UWS_REQUIRED = ["src/App.h", "uSockets/uSockets.a"];
+
+async function uwsComplete(dir: string, command?: string[]): Promise<boolean> {
+  try {
+    // SAFETY: this manifest is private data written below. The files it names
+    // are fixed by this module and each recorded digest is recomputed.
+    const manifest = JSON.parse(await readFile(resolve(dir, ".sproutboat-complete"), "utf8")) as {
+      files?: Record<string, string>;
+      command?: string[];
+    };
+    return (
+      (command === undefined || JSON.stringify(manifest.command) === JSON.stringify(command)) &&
+      (
+        await Promise.all(
+          UWS_REQUIRED.map(async (file) => (await sha256File(resolve(dir, file))) === manifest.files?.[file]),
+        )
+      ).every(Boolean)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function writeUwsManifest(dir: string, command?: string[]): Promise<void> {
+  const files = Object.fromEntries(
+    await Promise.all(UWS_REQUIRED.map(async (file) => [file, await sha256File(resolve(dir, file))] as const)),
+  );
+  const manifest = resolve(dir, ".sproutboat-complete");
+  const stage = `${manifest}.${process.pid}.${crypto.randomUUID()}`;
+  await writeFile(stage, JSON.stringify({ files, command }), { mode: 0o444 });
+  await rename(stage, manifest);
+}
+
+/** Serialize cache reconstruction and recover a lock left by an interrupted build. */
+async function withUwsLock<T>(dir: string, action: () => Promise<T>): Promise<T> {
+  await mkdir(dirname(dir), { recursive: true });
+  const lock = `${dir}.lock`;
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    try {
+      await mkdir(lock);
+      break;
+    } catch {
+      if (Date.now() > deadline) throw new UwsUnavailableError(`timed out waiting for uWebSockets cache lock ${lock}`);
+      try {
+        if (Date.now() - (await stat(lock)).mtimeMs > 5 * 60_000) await rm(lock, { recursive: true, force: true });
+      } catch {
+        /* the active publisher released the lock between stat and rm */
+      }
+      await Bun.sleep(25);
+    }
+  }
+  try {
+    return await action();
+  } finally {
+    await rm(lock, { recursive: true, force: true });
+  }
+}
+
 /**
  * Seed `~/.cache/porffor/deps/uWebSockets-<commit>-musl/` with the checked-out,
  * patched, `x86_64-linux-musl`-built uWebSockets tree so Porffor's own
@@ -243,30 +401,33 @@ export async function ensureUWebSockets(): Promise<void> {
   const short = commit.slice(0, 8);
   const depsRoot = resolve(homedir(), ".cache/porffor/deps");
   const dir = resolve(depsRoot, `uWebSockets-${commit}-musl`);
-  if (existsSync(resolve(dir, "src/App.h")) && existsSync(resolve(dir, "uSockets/uSockets.a"))) return;
+  if (await uwsComplete(dir)) return;
 
-  const archive = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(short);
-  if (!existsSync(archive)) {
-    throw new UwsUnavailableError(
-      process.env.SPROUTBOAT_UWS_TARBALL
-        ? `SPROUTBOAT_UWS_TARBALL=${archive} does not exist`
-        : `no vendored uWebSockets archive at ${archive} (porffor pin moved? run \`bun tools/prebuild-uws.ts\`)`,
-    );
-  }
-  if (!process.env.SPROUTBOAT_UWS_TARBALL) {
-    const actual = await sha256File(archive);
-    if (actual !== UWS_TARBALL_SHA256) {
+  await withUwsLock(dir, async () => {
+    if (await uwsComplete(dir)) return;
+    const archive = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(short);
+    if (!existsSync(archive)) {
       throw new UwsUnavailableError(
-        `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+        process.env.SPROUTBOAT_UWS_TARBALL
+          ? `SPROUTBOAT_UWS_TARBALL=${archive} does not exist`
+          : `no vendored uWebSockets archive at ${archive} (porffor pin moved? run \`bun tools/prebuild-uws.ts\`)`,
       );
     }
-  }
-
-  await extractUws(archive, dir);
+    if (!process.env.SPROUTBOAT_UWS_TARBALL) {
+      const actual = await sha256File(archive);
+      if (actual !== UWS_TARBALL_SHA256) {
+        throw new UwsUnavailableError(
+          `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+        );
+      }
+    }
+    await extractUws(archive, dir);
+  });
 }
 
 /** Unpack the vendored source tree into `dir`. */
 async function extractUws(archive: string, dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
   // External programs cannot read Bun's virtual /$bunfs paths. Materialize the
   // embedded release asset inside the destination before handing it to tar.
@@ -281,6 +442,12 @@ async function extractUws(archive: string, dir: string): Promise<void> {
   if (code !== 0) {
     await rm(dir, { recursive: true, force: true });
     throw new UwsUnavailableError(`could not extract vendored uWebSockets: ${err.trim()}`);
+  }
+  try {
+    await writeUwsManifest(dir);
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    throw new UwsUnavailableError(`could not validate vendored uWebSockets: ${String(error)}`);
   }
 }
 
@@ -304,50 +471,53 @@ export async function ensureUWebSocketsHost(): Promise<void> {
   const dir = resolve(homedir(), ".cache/porffor/deps", `uWebSockets-${commit}`);
   const uSockets = resolve(dir, "uSockets");
   const archivePath = resolve(uSockets, "uSockets.a");
-  if (existsSync(resolve(dir, "src/App.h")) && existsSync(archivePath)) return;
-
-  const vendored = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(commit.slice(0, 8));
-  if (!existsSync(vendored)) {
-    throw new UwsUnavailableError(`no vendored uWebSockets archive at ${vendored}`);
-  }
-  if (!process.env.SPROUTBOAT_UWS_TARBALL) {
-    const actual = await sha256File(vendored);
-    if (actual !== UWS_TARBALL_SHA256) {
-      throw new UwsUnavailableError(
-        `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
-      );
-    }
-  }
-  if (!existsSync(resolve(dir, "src/App.h"))) await extractUws(vendored, dir);
-
-  // The archive carries the musl-built uSockets.a. Linking that into a host
-  // binary fails in a way nobody would connect to this, so it goes first.
-  await rm(archivePath, { force: true });
-
-  const sources = ["src/*.c", "src/eventing/*.c", "src/crypto/*.c", "src/io_uring/*.c"];
   const cc = process.env.CC || "cc";
   const ar = process.env.AR || "ar";
-  const compile = Bun.spawn(["sh", "-c", `${cc} -std=c11 -Isrc -DLIBUS_NO_SSL -flto -O3 -c ${sources.join(" ")}`], {
-    cwd: uSockets,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [ccCode, ccErr] = await Promise.all([compile.exited, new Response(compile.stderr).text()]);
-  if (ccCode !== 0) {
-    throw new UwsUnavailableError(
-      `could not compile uSockets with ${cc}: ${ccErr.trim().split("\n").slice(-3).join(" ")}`,
-    );
-  }
+  const command = [cc, ar];
+  if (await uwsComplete(dir, command)) return;
 
-  const archiveStep = Bun.spawn(["sh", "-c", `${ar} rvs uSockets.a *.o`], {
-    cwd: uSockets,
-    stdout: "pipe",
-    stderr: "pipe",
+  await withUwsLock(dir, async () => {
+    if (await uwsComplete(dir, command)) return;
+    const vendored = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(commit.slice(0, 8));
+    if (!existsSync(vendored)) throw new UwsUnavailableError(`no vendored uWebSockets archive at ${vendored}`);
+    if (!process.env.SPROUTBOAT_UWS_TARBALL) {
+      const actual = await sha256File(vendored);
+      if (actual !== UWS_TARBALL_SHA256) {
+        throw new UwsUnavailableError(
+          `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+        );
+      }
+    }
+    await extractUws(vendored, dir);
+
+    // The archive carries the musl-built uSockets.a. Linking that into a host
+    // binary fails in a way nobody would connect to this, so it goes first.
+    await rm(archivePath, { force: true });
+
+    const sources = ["src/*.c", "src/eventing/*.c", "src/crypto/*.c", "src/io_uring/*.c"];
+    const compile = Bun.spawn(["sh", "-c", `${cc} -std=c11 -Isrc -DLIBUS_NO_SSL -flto -O3 -c ${sources.join(" ")}`], {
+      cwd: uSockets,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [ccCode, ccErr] = await Promise.all([compile.exited, new Response(compile.stderr).text()]);
+    if (ccCode !== 0) {
+      throw new UwsUnavailableError(
+        `could not compile uSockets with ${cc}: ${ccErr.trim().split("\n").slice(-3).join(" ")}`,
+      );
+    }
+
+    const archiveStep = Bun.spawn(["sh", "-c", `${ar} rvs uSockets.a *.o`], {
+      cwd: uSockets,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [arCode, arErr] = await Promise.all([archiveStep.exited, new Response(archiveStep.stderr).text()]);
+    if (arCode !== 0 || !existsSync(archivePath)) {
+      throw new UwsUnavailableError(`could not archive uSockets with ${ar}: ${arErr.trim()}`);
+    }
+    await writeUwsManifest(dir, command);
   });
-  const [arCode, arErr] = await Promise.all([archiveStep.exited, new Response(archiveStep.stderr).text()]);
-  if (arCode !== 0 || !existsSync(archivePath)) {
-    throw new UwsUnavailableError(`could not archive uSockets with ${ar}: ${arErr.trim()}`);
-  }
 }
 
 /** Directory holding node_modules/porffor (walks up from this file). */
