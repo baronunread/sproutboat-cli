@@ -20,6 +20,7 @@ import { parseConfig } from "../../src/config";
 import { createBroker, listen } from "../../src/broker";
 import { walkAssets, type AssetManifest } from "../../src/assets";
 import type { JsonValue } from "../../src/json";
+import { ensurePorffor } from "../../src/porffor-toolchain";
 
 /**
  * A port nothing is listening on.
@@ -37,7 +38,7 @@ function freePort(): number {
 
 const HERE = import.meta.dir;
 const CLI = join(HERE, "../..");
-const PORF = join(CLI, "node_modules/porffor/runtime/index.js");
+const PORF = join(await ensurePorffor(), "runtime/index.js");
 
 const workdir = mkdtempSync(join(tmpdir(), "sb-kitchen-"));
 const cleanup: Array<() => void> = [() => rmSync(workdir, { recursive: true, force: true })];

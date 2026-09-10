@@ -19,6 +19,7 @@ import { notifyIfOutdated } from "./update-check";
 import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
 import { pathToFileURL } from "node:url";
+import { inspectToolchain } from "./toolchain";
 
 // A compiled Bun executable is not a general-purpose `bun` command. Porffor
 // is acquired after installation, so run its external ESM launcher through an
@@ -1194,6 +1195,32 @@ function usage(): never {
   process.exit(2);
 }
 
+async function toolchain(args: string[]): Promise<void> {
+  if (args[0] !== "doctor" || args.slice(1).some((arg) => arg !== "--json"))
+    usageError("expected toolchain doctor", "toolchain doctor [--json]");
+  const report = inspectToolchain();
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log(`host: ${report.host}`);
+  console.log(`cache: ${report.cacheRoot}`);
+  console.log(`Porffor: ${report.porffor.version} (${report.porffor.present ? "ready" : "acquired on first build"})`);
+  console.log(`  ${report.porffor.path}${report.porffor.override ? " (override)" : ""}`);
+  console.log(`Zig: ${report.zig.version} (${report.zig.platform ?? "unsupported host"})`);
+  console.log(`  ${report.zig.path ?? "set SPROUTBOAT_ZIG to a supported Zig binary"}`);
+  console.log(
+    `  ${report.zig.present ? "ready" : "acquired on first deployment build"}${report.zig.override ? " (override)" : ""}`,
+  );
+  console.log(
+    `host compiler: ${report.prerequisites.cc ?? "missing: install Xcode Command Line Tools or a C compiler"}`,
+  );
+  console.log(`archiver: ${report.prerequisites.ar ?? "missing: install an archiver"}`);
+  console.log(`archive extractor: ${report.prerequisites.tar ?? "missing: install tar with xz support"}`);
+  if (process.platform === "darwin")
+    console.log(`macOS SDK tools: ${report.prerequisites.xcrun ?? "missing: run xcode-select --install"}`);
+}
+
 const [command, ...args] = process.argv.slice(2);
 if (command === undefined || command === "help" || command === "-h" || command === "--help") help();
 if (command === "--version" || command === "-v") {
@@ -1223,6 +1250,9 @@ switch (command) {
     else await build(directory, hostBuild ? "host" : "linux-x86_64");
     break;
   }
+  case "toolchain":
+    await toolchain(args);
+    break;
   case "login":
     await login(args);
     break;

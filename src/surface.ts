@@ -102,6 +102,15 @@ export const COMMANDS: readonly Command[] = [
     summary:
       "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process.",
   },
+  {
+    name: "toolchain",
+    group: "Develop",
+    emoji: "🩺",
+    args: "doctor [--json]",
+    brief: "doctor",
+    summary:
+      "Report the selected compiler inputs, cache locations, overrides, and host prerequisites without downloading or compiling anything.",
+  },
 
   {
     name: "deploy",
