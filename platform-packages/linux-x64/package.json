@@ -1,6 +1,6 @@
 {
   "name": "@sproutboat/cli-linux-x64",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Sproutboat CLI executable for linux x64",
   "license": "MIT",
   "files": [

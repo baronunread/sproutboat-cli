@@ -9,15 +9,19 @@ Reconstructed from git history on 2026-09-03 for everything through v0.4.11;
 maintained going forward by the `release` skill.
 
 ## [Unreleased]
-### Changed
-- Porffor pin bumped alpha-4 → **alpha-5** (`1f4ae4ae`). Perf and
-  closure/string-allocation fixes upstream; the same `UWS_COMMIT`, so no
-  uWebSockets re-vendor. All `src/patch-porffor.ts` edits still apply.
 
+## [0.10.0] - 2026-09-11
 ### Added
-- `x-sb-remote-addr` / `request.cf.clientIp` in standalone builds, with
-  `SB_TRUSTED_PROXIES` for `X-Forwarded-For` resolution behind a reverse proxy
-  (baronunread/sproutboat#163).
+- Per-platform native CLI: `npm install sproutboat` pulls a prebuilt binary for
+  the host (`@sproutboat/cli-{darwin,linux}-{arm64,x64}`) behind a thin launcher
+  that preserves signals and embeds its own version, so the CLI runs without Bun
+  on `PATH`.
+- Porffor is fetched on the first build, not installed as a dependency: the
+  pinned commit is downloaded into `~/.cache/sproutboat`, SHA-256 verified, and
+  patched there. Installation clones nothing and runs no Git, Make or compiler.
+- `request.cf.clientIp` in standalone builds, from a server-set
+  `x-sb-remote-addr`, with `SB_TRUSTED_PROXIES` for `X-Forwarded-For` resolution
+  behind a reverse proxy (baronunread/sproutboat#163).
 - `env.<D1>.backup(name?)` — an online, integrity-checked single-file snapshot
   of a D1 database via `VACUUM INTO`, on both the embedded and broker transports
   (baronunread/sproutboat#164).
@@ -26,27 +30,44 @@ maintained going forward by the `release` skill.
   fixed-window counter on both transports (baronunread/sproutboat#69).
 - `crypto.subtle` subset: `digest` (SHA-256/384/512) and HMAC
   `importKey` / `sign` / `verify`, backed by reference SHA-2 as inline C so it
-  works on both transports (baronunread/sproutboat#133). No ECDSA/AES yet.
+  works on both transports (baronunread/sproutboat#133). No ECDSA or AES yet.
 - `crypto.scryptVerify(password, salt, expected, { N, r, p })` — a verify-only
   scrypt (RFC 7914) for migrating password hashes made by Node/Bun `scrypt`
   (baronunread/sproutboat#153). Not a blessed KDF for new credentials.
-
-### Performance
-- Embedded transport caches prepared statements per database (FIFO, 32/db)
-  instead of compiling the SQL on every binding op — the op boundary drops from
-  ~0.6 ms to tens of µs (baronunread/sproutboat#155).
-
-### Docs
-- `docs/standalone.md` documents the single-threaded execution model and the
-  `SO_REUSEPORT` multi-process recipe for scaling past one core
-  (baronunread/sproutboat#154). The embedded transport also sets
-  `PRAGMA busy_timeout` so shared-data-dir writers wait instead of failing.
+- `x-sb-cpu-ms`: per-invocation CPU time, carried on the handler response.
 
 ### Fixed
 - `303` (and every other status not in Porffor's table) no longer resets the
   connection on standalone builds (baronunread/sproutboat#156).
 - Handler `console.log` / `console.error` reach stderr, unbuffered, in
   standalone builds instead of vanishing (baronunread/sproutboat#165).
+- `sproutboat dev` no longer leaves the previous sprout running across a
+  rebuild, delivers no triggers to a candidate that failed to start, and cleans
+  up every failed setup path on rebuild and on shutdown.
+- The Zig toolchain cache is hardened against a partial or concurrent download.
+
+### Changed
+- Porffor pin bumped alpha-4 → **alpha-5** (`1f4ae4ae`); the same `UWS_COMMIT`,
+  so no uWebSockets re-vendor.
+- Config parsing, the artifact manifest, the binding broker, the wire assets and
+  the whole native-fetch runtime (prelude + transports) now come from published
+  `@sproutboat/*` packages; the CLI keeps thin re-export shims. The Porffor pin
+  and its source patches moved to `@sproutboat/toolchain`.
+- Broker cron / queue / alarm delivery is gated by a local signal, so only a
+  promoted candidate runs timers.
+
+### Performance
+- Embedded transport caches prepared statements per database (FIFO, 32/db)
+  instead of recompiling the SQL on every binding op — the op boundary drops
+  from ~0.6 ms to tens of µs (baronunread/sproutboat#155).
+- The broker's due-queue and due-alarm polls are indexed.
+
+### Docs
+- `docs/standalone.md` documents the single-threaded execution model and the
+  `SO_REUSEPORT` multi-process recipe for scaling past one core
+  (baronunread/sproutboat#154); the embedded transport also sets
+  `PRAGMA busy_timeout` so shared-data-dir writers wait instead of failing.
+  Also: the client-IP behaviour and backing up D1.
 
 ## [0.9.0] - 2026-09-07
 ### Added
@@ -320,7 +341,9 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.6.0...v0.6.1
