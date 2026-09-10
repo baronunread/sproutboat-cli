@@ -16,3 +16,36 @@ jobs:
       - run: bun run typecheck
       - run: bun run lint
       - run: bun test
+
+  packaged-cli:
+    name: packaged CLI (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS x64
+            runner: macos-13
+          - name: macOS arm64
+            runner: macos-14
+          - name: Linux x64
+            runner: ubuntu-24.04
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run build:cli
+      - name: Exercise the packaged executable with a cold host cache
+        shell: bash
+        run: |
+          platform="$(node -p '`${process.platform}-${process.arch}`')"
+          cli="platform-packages/$platform/bin/sproutboat"
+          test -x "$cli"
+          "$cli" --version
+          HOME="$RUNNER_TEMP/sproutboat-home" \
+          SPROUTBOAT_TOOLCHAIN_CACHE="$RUNNER_TEMP/sproutboat-toolchain" \
+          "$cli" build --target host examples/hello
