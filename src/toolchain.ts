@@ -327,30 +327,34 @@ export function uwsVendorArchive(short: string): string {
 
 const UWS_REQUIRED = ["src/App.h", "uSockets/uSockets.a"];
 
-async function uwsComplete(dir: string): Promise<boolean> {
+async function uwsComplete(dir: string, command?: string[]): Promise<boolean> {
   try {
     // SAFETY: this manifest is private data written below. The files it names
     // are fixed by this module and each recorded digest is recomputed.
     const manifest = JSON.parse(await readFile(resolve(dir, ".sproutboat-complete"), "utf8")) as {
       files?: Record<string, string>;
+      command?: string[];
     };
     return (
-      await Promise.all(
-        UWS_REQUIRED.map(async (file) => (await sha256File(resolve(dir, file))) === manifest.files?.[file]),
-      )
-    ).every(Boolean);
+      (command === undefined || JSON.stringify(manifest.command) === JSON.stringify(command)) &&
+      (
+        await Promise.all(
+          UWS_REQUIRED.map(async (file) => (await sha256File(resolve(dir, file))) === manifest.files?.[file]),
+        )
+      ).every(Boolean)
+    );
   } catch {
     return false;
   }
 }
 
-async function writeUwsManifest(dir: string): Promise<void> {
+async function writeUwsManifest(dir: string, command?: string[]): Promise<void> {
   const files = Object.fromEntries(
     await Promise.all(UWS_REQUIRED.map(async (file) => [file, await sha256File(resolve(dir, file))] as const)),
   );
   const manifest = resolve(dir, ".sproutboat-complete");
   const stage = `${manifest}.${process.pid}.${crypto.randomUUID()}`;
-  await writeFile(stage, JSON.stringify({ files }), { mode: 0o444 });
+  await writeFile(stage, JSON.stringify({ files, command }), { mode: 0o444 });
   await rename(stage, manifest);
 }
 
@@ -439,7 +443,10 @@ export async function ensureUWebSocketsHost(): Promise<void> {
   const dir = resolve(homedir(), ".cache/porffor/deps", `uWebSockets-${commit}`);
   const uSockets = resolve(dir, "uSockets");
   const archivePath = resolve(uSockets, "uSockets.a");
-  if (await uwsComplete(dir)) return;
+  const cc = process.env.CC || "cc";
+  const ar = process.env.AR || "ar";
+  const command = [cc, ar];
+  if (await uwsComplete(dir, command)) return;
 
   const vendored = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(commit.slice(0, 8));
   if (!existsSync(vendored)) {
@@ -460,8 +467,6 @@ export async function ensureUWebSocketsHost(): Promise<void> {
   await rm(archivePath, { force: true });
 
   const sources = ["src/*.c", "src/eventing/*.c", "src/crypto/*.c", "src/io_uring/*.c"];
-  const cc = process.env.CC || "cc";
-  const ar = process.env.AR || "ar";
   const compile = Bun.spawn(["sh", "-c", `${cc} -std=c11 -Isrc -DLIBUS_NO_SSL -flto -O3 -c ${sources.join(" ")}`], {
     cwd: uSockets,
     stdout: "pipe",
@@ -483,7 +488,7 @@ export async function ensureUWebSocketsHost(): Promise<void> {
   if (arCode !== 0 || !existsSync(archivePath)) {
     throw new UwsUnavailableError(`could not archive uSockets with ${ar}: ${arErr.trim()}`);
   }
-  await writeUwsManifest(dir);
+  await writeUwsManifest(dir, command);
 }
 
 /** Directory holding node_modules/porffor (walks up from this file). */

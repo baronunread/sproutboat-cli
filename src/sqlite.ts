@@ -113,18 +113,25 @@ export async function ensureSqliteObject(input: SqliteObjectInput): Promise<stri
   const sourceSha256 = await digest(source);
   const manifestPath = `${objectPath}.sproutboat-complete`;
   const flags = ["-O2", ...SQLITE_DEFINES];
+  const [cmd, prefix] =
+    input.target === "host"
+      ? (["cc", []] as const)
+      : ([input.zigBin ?? "zig", ["cc", "-target", "x86_64-linux-musl"]] as const);
+  const command = [cmd, ...prefix];
   try {
     // SAFETY: the manifest is private data written below. Its source, target,
     // flags, and object digest must all agree before the cached object is used.
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
       sourceSha256?: string;
       target?: string;
+      command?: string[];
       flags?: string[];
       objectSha256?: string;
     };
     if (
       manifest.sourceSha256 === sourceSha256 &&
       manifest.target === input.target &&
+      JSON.stringify(manifest.command) === JSON.stringify(command) &&
       JSON.stringify(manifest.flags) === JSON.stringify(flags) &&
       manifest.objectSha256 === (await digest(objectPath))
     )
@@ -132,18 +139,18 @@ export async function ensureSqliteObject(input: SqliteObjectInput): Promise<stri
   } catch {
     /* compile a verified replacement below */
   }
-  const [cmd, prefix] =
-    input.target === "host"
-      ? (["cc", []] as const)
-      : ([input.zigBin ?? "zig", ["cc", "-target", "x86_64-linux-musl"]] as const);
   const stage = `${objectPath}.${process.pid}.${crypto.randomUUID()}`;
   const result = await run(cmd, [...prefix, "-c", source, "-o", stage, ...flags]);
   if (result.code !== 0) throw new Error(`could not compile SQLite for ${input.target}:\n${result.stderr}`);
   const objectSha256 = await digest(stage);
   const stagedManifest = `${manifestPath}.${process.pid}.${crypto.randomUUID()}`;
-  await writeFile(stagedManifest, JSON.stringify({ sourceSha256, target: input.target, flags, objectSha256 }), {
-    mode: 0o444,
-  });
+  await writeFile(
+    stagedManifest,
+    JSON.stringify({ sourceSha256, target: input.target, command, flags, objectSha256 }),
+    {
+      mode: 0o444,
+    },
+  );
   await rename(stage, objectPath);
   await rename(stagedManifest, manifestPath);
   return objectPath;
