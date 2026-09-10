@@ -7,7 +7,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdir, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 // @ts-expect-error Bun's file loader returns the embedded asset path in a compiled executable.
@@ -17,7 +17,7 @@ import { cachedPorfforRoot, PORFFOR_CHANNEL, PORFFOR_COMMIT } from "./porffor-to
 export const ZIG_VERSION = "0.16.0";
 
 /** The `<arch>-<os>` platforms ziglang.org publishes a tarball for that we pin. */
-type ZigPlatform = "x86_64-linux" | "aarch64-linux" | "x86_64-macos" | "aarch64-macos";
+export type ZigPlatform = "x86_64-linux" | "aarch64-linux" | "x86_64-macos" | "aarch64-macos";
 
 // sha256 of the official ziglang.org tarballs for ZIG_VERSION, keyed by
 // `<arch>-<os>` (the download naming). Bump alongside ZIG_VERSION.
@@ -54,51 +54,157 @@ function platformKey(): ZigPlatform {
   return `${arch}-${os}`;
 }
 
+export class ZigToolchainError extends Error {
+  constructor(
+    readonly kind: "download" | "integrity" | "archive" | "cache" | "unsupported",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export type EnsureZigOptions = {
+  cacheRoot?: string;
+  platform?: ZigPlatform;
+  url?: string;
+  expectedSha256?: string;
+  fetcher?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+  timeoutMs?: number;
+};
+
 async function sha256File(path: string): Promise<string> {
   const hash = createHash("sha256");
   hash.update(await readFile(path));
   return hash.digest("hex");
 }
 
-/** Absolute path to a usable `zig` binary, downloading it on first use. */
-export async function ensureZig(): Promise<string> {
+async function zigComplete(dir: string, key: ZigPlatform, expectedArchive: string): Promise<boolean> {
+  try {
+    // SAFETY: this manifest is private data written below; its values are only
+    // accepted when the immutable identity and binary digest both match.
+    const manifest = JSON.parse(await readFile(resolve(dir, ".sproutboat-complete"), "utf8")) as {
+      version?: string;
+      platform?: string;
+      archiveSha256?: string;
+      binarySha256?: string;
+    };
+    const bin = resolve(dir, "zig");
+    return (
+      manifest.version === ZIG_VERSION &&
+      manifest.platform === key &&
+      manifest.archiveSha256 === expectedArchive &&
+      manifest.binarySha256 !== undefined &&
+      (await sha256File(bin)) === manifest.binarySha256
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function downloadZig(
+  url: string,
+  path: string,
+  fetcher: NonNullable<EnsureZigOptions["fetcher"]>,
+  timeoutMs: number,
+): Promise<void> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetcher(url, { signal: AbortSignal.timeout(timeoutMs) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await writeFile(path, new Uint8Array(await response.arrayBuffer()));
+      return;
+    } catch (error) {
+      last = error;
+    }
+  }
+  throw new ZigToolchainError("download", `could not download pinned Zig from ${url}: ${String(last)}`);
+}
+
+async function waitForZigPublisher(
+  dir: string,
+  lock: string,
+  key: ZigPlatform,
+  expected: string,
+): Promise<string | null> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (await zigComplete(dir, key, expected)) return resolve(dir, "zig");
+    if (!existsSync(lock)) return null;
+    if (Date.now() - (await stat(lock)).mtimeMs > 5 * 60_000) {
+      await rm(lock, { recursive: true, force: true });
+      return null;
+    }
+    await Bun.sleep(25);
+  }
+  throw new ZigToolchainError("cache", `timed out waiting for Zig cache lock ${lock}`);
+}
+
+/** Absolute path to a verified Zig binary, downloading it on first use. */
+export async function ensureZig(options: EnsureZigOptions = {}): Promise<string> {
   const override = process.env.SPROUTBOAT_ZIG;
   if (override) {
-    if (!existsSync(override)) throw new Error(`SPROUTBOAT_ZIG=${override} does not exist`);
+    if (!existsSync(override)) throw new ZigToolchainError("unsupported", `SPROUTBOAT_ZIG=${override} does not exist`);
     return override;
   }
-  const key = platformKey();
-  const home = homedir();
-  const dir = resolve(home, ".cache/sproutboat", `zig-${ZIG_VERSION}`);
-  const bin = resolve(dir, "zig");
-  if (existsSync(bin)) return bin;
-
-  const url = `https://ziglang.org/download/${ZIG_VERSION}/zig-${key}-${ZIG_VERSION}.tar.xz`;
-  const expected = ZIG_SHA256[key];
-  console.log(`Fetching Zig ${ZIG_VERSION} (${key}, one-time)...`);
-  await mkdir(dir, { recursive: true });
-  const archive = resolve(dir, "zig.tar.xz");
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`could not download Zig: ${url} (${response.status})`);
-  await Bun.write(archive, response);
-
-  const actual = await sha256File(archive);
-  if (expected && actual !== expected) {
-    await rm(dir, { recursive: true, force: true });
-    throw new Error(`Zig download sha256 mismatch\n  expected ${expected}\n  got      ${actual}`);
+  const key = options.platform ?? platformKey();
+  const root = resolve(
+    options.cacheRoot ?? process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? resolve(homedir(), ".cache/sproutboat"),
+  );
+  const dir = resolve(root, `zig-${ZIG_VERSION}-${key}`);
+  const expected = options.expectedSha256 ?? ZIG_SHA256[key];
+  if (await zigComplete(dir, key, expected)) return resolve(dir, "zig");
+  await mkdir(root, { recursive: true });
+  const lock = `${dir}.lock`;
+  try {
+    await mkdir(lock);
+  } catch {
+    const published = await waitForZigPublisher(dir, lock, key, expected);
+    if (published) return published;
+    return ensureZig(options);
   }
-
-  // `tar -xJ` (xz) works on macOS bsdtar and GNU tar with xz on PATH.
-  const untar = Bun.spawn(["tar", "-xJf", archive, "-C", dir, "--strip-components=1"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [code, err] = await Promise.all([untar.exited, new Response(untar.stderr).text()]);
-  if (code !== 0) throw new Error(`could not extract Zig (needs \`tar\` with xz support): ${err.trim()}`);
-  await rm(archive, { force: true });
-  if (!existsSync(bin)) throw new Error("Zig archive did not contain a `zig` binary");
-  await chmod(bin, 0o755);
-  return bin;
+  const stage = resolve(root, `.zig-${ZIG_VERSION}-${key}-${process.pid}-${crypto.randomUUID()}`);
+  const url = options.url ?? `https://ziglang.org/download/${ZIG_VERSION}/zig-${key}-${ZIG_VERSION}.tar.xz`;
+  console.log(`Fetching Zig ${ZIG_VERSION} (${key}, one-time)...`);
+  try {
+    if (await zigComplete(dir, key, expected)) return resolve(dir, "zig");
+    await rm(dir, { recursive: true, force: true });
+    await mkdir(stage);
+    const archive = resolve(stage, "zig.tar.xz");
+    await downloadZig(url, archive, options.fetcher ?? fetch, options.timeoutMs ?? 30_000);
+    const actual = await sha256File(archive);
+    if (actual !== expected)
+      throw new ZigToolchainError(
+        "integrity",
+        `Zig archive sha256 mismatch\n  expected ${expected}\n  got      ${actual}`,
+      );
+    const untar = Bun.spawn(["tar", "-xJf", archive, "-C", stage, "--strip-components=1"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, err] = await Promise.all([untar.exited, new Response(untar.stderr).text()]);
+    if (code !== 0)
+      throw new ZigToolchainError("archive", `could not extract Zig (needs \`tar\` with xz support): ${err.trim()}`);
+    await rm(archive, { force: true });
+    const bin = resolve(stage, "zig");
+    if (!existsSync(bin)) throw new ZigToolchainError("archive", "Zig archive did not contain a `zig` binary");
+    await chmod(bin, 0o755);
+    await writeFile(
+      resolve(stage, ".sproutboat-complete"),
+      JSON.stringify({
+        version: ZIG_VERSION,
+        platform: key,
+        archiveSha256: actual,
+        binarySha256: await sha256File(bin),
+      }),
+      { mode: 0o444 },
+    );
+    await rename(stage, dir);
+    return resolve(dir, "zig");
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+    await rm(lock, { recursive: true, force: true });
+  }
 }
 
 function uwsCommitFull(): string {
