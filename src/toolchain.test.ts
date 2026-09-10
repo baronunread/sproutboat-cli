@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { ensureZig, ZIG_VERSION, ZigToolchainError } from "./toolchain";
+import { ensureZig, inspectToolchain, ZIG_VERSION, ZigToolchainError } from "./toolchain";
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -126,4 +126,14 @@ test("an interrupted Zig lock is recovered", async () => {
   });
   expect(await readFile(bin, "utf8")).toContain("fixture zig");
   expect((await readdir(cacheRoot)).some((name) => name.endsWith(".lock"))).toBe(false);
+});
+
+test("toolchain doctor inspection is non-mutating and identifies every managed cache", () => {
+  const report = inspectToolchain();
+  expect(report.host).toBe(`${process.arch}/${process.platform}`);
+  expect(report.porffor.version).toContain("alpha-4");
+  expect(report.zig.version).toBe(ZIG_VERSION);
+  expect(report.sqlite.path).toContain("sqlite-");
+  expect(report.bearssl.path).toContain("bearssl-");
+  expect(report.prerequisites.tar).not.toBeUndefined();
 });
