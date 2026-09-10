@@ -39,7 +39,6 @@
     "./runtime/assets": "./src/assets.ts",
     "./runtime/broker": "./src/broker.ts",
     "./runtime/wrap": "./src/wrap.ts",
-    "./runtime/prelude": "./src/native-fetch-prelude.js",
     "./package.json": "./package.json",
     "./types": "./types/sproutboat.d.ts"
   },

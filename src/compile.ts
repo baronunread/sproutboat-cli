@@ -16,12 +16,16 @@ import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
 import { ensureUWebSockets, ensureUWebSocketsHost, UwsUnavailableError } from "./toolchain";
 import { ensurePorffor } from "./porffor-toolchain";
+// The prelude + transports live in @sproutboat/runtime (next to wrap.ts, which
+// locates them by file URL). `preludePath`/`transportPath` read them from there
+// for a dev build; these text imports bake the same files into the `--compile`
+// binary, where there is no filesystem to read.
 // @ts-expect-error Bun's text loader supplies a string, while TypeScript resolves the JavaScript source itself.
-import embeddedPrelude from "./native-fetch-prelude.js" with { type: "text" };
+import embeddedPrelude from "@sproutboat/runtime/src/native-fetch-prelude.js" with { type: "text" };
 // @ts-expect-error See above.
-import embeddedBrokerTransport from "./transport-broker.js" with { type: "text" };
+import embeddedBrokerTransport from "@sproutboat/runtime/src/transport-broker.js" with { type: "text" };
 // @ts-expect-error See above.
-import embeddedStandaloneTransport from "./transport-embedded.js" with { type: "text" };
+import embeddedStandaloneTransport from "@sproutboat/runtime/src/transport-embedded.js" with { type: "text" };
 import {
   EMPTY_BINDINGS,
   preludePath,
@@ -97,7 +101,9 @@ export async function loadPrelude(transport: Transport = "broker"): Promise<stri
     ? [embeddedPrelude, transport === "embedded" ? embeddedStandaloneTransport : embeddedBrokerTransport]
     : await Promise.all([readFile(preludePath, "utf8"), readFile(transportPath(transport), "utf8")]);
   if (!core.includes(TRANSPORT_MARKER)) {
-    throw new Error("prelude is missing its transport marker — src/native-fetch-prelude.js changed shape");
+    throw new Error(
+      "prelude is missing its transport marker — @sproutboat/runtime/src/native-fetch-prelude.js changed shape",
+    );
   }
   return core.replace(TRANSPORT_MARKER, chosen);
 }
