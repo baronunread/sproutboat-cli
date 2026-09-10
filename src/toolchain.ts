@@ -358,6 +358,32 @@ async function writeUwsManifest(dir: string, command?: string[]): Promise<void> 
   await rename(stage, manifest);
 }
 
+/** Serialize cache reconstruction and recover a lock left by an interrupted build. */
+async function withUwsLock<T>(dir: string, action: () => Promise<T>): Promise<T> {
+  await mkdir(dirname(dir), { recursive: true });
+  const lock = `${dir}.lock`;
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    try {
+      await mkdir(lock);
+      break;
+    } catch {
+      if (Date.now() > deadline) throw new UwsUnavailableError(`timed out waiting for uWebSockets cache lock ${lock}`);
+      try {
+        if (Date.now() - (await stat(lock)).mtimeMs > 5 * 60_000) await rm(lock, { recursive: true, force: true });
+      } catch {
+        /* the active publisher released the lock between stat and rm */
+      }
+      await Bun.sleep(25);
+    }
+  }
+  try {
+    return await action();
+  } finally {
+    await rm(lock, { recursive: true, force: true });
+  }
+}
+
 /**
  * Seed `~/.cache/porffor/deps/uWebSockets-<commit>-musl/` with the checked-out,
  * patched, `x86_64-linux-musl`-built uWebSockets tree so Porffor's own
@@ -377,24 +403,26 @@ export async function ensureUWebSockets(): Promise<void> {
   const dir = resolve(depsRoot, `uWebSockets-${commit}-musl`);
   if (await uwsComplete(dir)) return;
 
-  const archive = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(short);
-  if (!existsSync(archive)) {
-    throw new UwsUnavailableError(
-      process.env.SPROUTBOAT_UWS_TARBALL
-        ? `SPROUTBOAT_UWS_TARBALL=${archive} does not exist`
-        : `no vendored uWebSockets archive at ${archive} (porffor pin moved? run \`bun tools/prebuild-uws.ts\`)`,
-    );
-  }
-  if (!process.env.SPROUTBOAT_UWS_TARBALL) {
-    const actual = await sha256File(archive);
-    if (actual !== UWS_TARBALL_SHA256) {
+  await withUwsLock(dir, async () => {
+    if (await uwsComplete(dir)) return;
+    const archive = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(short);
+    if (!existsSync(archive)) {
       throw new UwsUnavailableError(
-        `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+        process.env.SPROUTBOAT_UWS_TARBALL
+          ? `SPROUTBOAT_UWS_TARBALL=${archive} does not exist`
+          : `no vendored uWebSockets archive at ${archive} (porffor pin moved? run \`bun tools/prebuild-uws.ts\`)`,
       );
     }
-  }
-
-  await extractUws(archive, dir);
+    if (!process.env.SPROUTBOAT_UWS_TARBALL) {
+      const actual = await sha256File(archive);
+      if (actual !== UWS_TARBALL_SHA256) {
+        throw new UwsUnavailableError(
+          `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+        );
+      }
+    }
+    await extractUws(archive, dir);
+  });
 }
 
 /** Unpack the vendored source tree into `dir`. */
@@ -448,47 +476,48 @@ export async function ensureUWebSocketsHost(): Promise<void> {
   const command = [cc, ar];
   if (await uwsComplete(dir, command)) return;
 
-  const vendored = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(commit.slice(0, 8));
-  if (!existsSync(vendored)) {
-    throw new UwsUnavailableError(`no vendored uWebSockets archive at ${vendored}`);
-  }
-  if (!process.env.SPROUTBOAT_UWS_TARBALL) {
-    const actual = await sha256File(vendored);
-    if (actual !== UWS_TARBALL_SHA256) {
+  await withUwsLock(dir, async () => {
+    if (await uwsComplete(dir, command)) return;
+    const vendored = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(commit.slice(0, 8));
+    if (!existsSync(vendored)) throw new UwsUnavailableError(`no vendored uWebSockets archive at ${vendored}`);
+    if (!process.env.SPROUTBOAT_UWS_TARBALL) {
+      const actual = await sha256File(vendored);
+      if (actual !== UWS_TARBALL_SHA256) {
+        throw new UwsUnavailableError(
+          `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+        );
+      }
+    }
+    await extractUws(vendored, dir);
+
+    // The archive carries the musl-built uSockets.a. Linking that into a host
+    // binary fails in a way nobody would connect to this, so it goes first.
+    await rm(archivePath, { force: true });
+
+    const sources = ["src/*.c", "src/eventing/*.c", "src/crypto/*.c", "src/io_uring/*.c"];
+    const compile = Bun.spawn(["sh", "-c", `${cc} -std=c11 -Isrc -DLIBUS_NO_SSL -flto -O3 -c ${sources.join(" ")}`], {
+      cwd: uSockets,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [ccCode, ccErr] = await Promise.all([compile.exited, new Response(compile.stderr).text()]);
+    if (ccCode !== 0) {
       throw new UwsUnavailableError(
-        `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+        `could not compile uSockets with ${cc}: ${ccErr.trim().split("\n").slice(-3).join(" ")}`,
       );
     }
-  }
-  await extractUws(vendored, dir);
 
-  // The archive carries the musl-built uSockets.a. Linking that into a host
-  // binary fails in a way nobody would connect to this, so it goes first.
-  await rm(archivePath, { force: true });
-
-  const sources = ["src/*.c", "src/eventing/*.c", "src/crypto/*.c", "src/io_uring/*.c"];
-  const compile = Bun.spawn(["sh", "-c", `${cc} -std=c11 -Isrc -DLIBUS_NO_SSL -flto -O3 -c ${sources.join(" ")}`], {
-    cwd: uSockets,
-    stdout: "pipe",
-    stderr: "pipe",
+    const archiveStep = Bun.spawn(["sh", "-c", `${ar} rvs uSockets.a *.o`], {
+      cwd: uSockets,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [arCode, arErr] = await Promise.all([archiveStep.exited, new Response(archiveStep.stderr).text()]);
+    if (arCode !== 0 || !existsSync(archivePath)) {
+      throw new UwsUnavailableError(`could not archive uSockets with ${ar}: ${arErr.trim()}`);
+    }
+    await writeUwsManifest(dir, command);
   });
-  const [ccCode, ccErr] = await Promise.all([compile.exited, new Response(compile.stderr).text()]);
-  if (ccCode !== 0) {
-    throw new UwsUnavailableError(
-      `could not compile uSockets with ${cc}: ${ccErr.trim().split("\n").slice(-3).join(" ")}`,
-    );
-  }
-
-  const archiveStep = Bun.spawn(["sh", "-c", `${ar} rvs uSockets.a *.o`], {
-    cwd: uSockets,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [arCode, arErr] = await Promise.all([archiveStep.exited, new Response(archiveStep.stderr).text()]);
-  if (arCode !== 0 || !existsSync(archivePath)) {
-    throw new UwsUnavailableError(`could not archive uSockets with ${ar}: ${arErr.trim()}`);
-  }
-  await writeUwsManifest(dir, command);
 }
 
 /** Directory holding node_modules/porffor (walks up from this file). */
