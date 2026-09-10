@@ -61,11 +61,11 @@
     "kitchen-sink:standalone": "bun examples/kitchen-sink/harness-standalone.ts"
   },
   "dependencies": {
-    "@sproutboat/artifact": "file:../sproutboat-packages/packages/artifact",
-    "@sproutboat/assets": "file:../sproutboat-packages/packages/assets",
-    "@sproutboat/config": "file:../sproutboat-packages/packages/config",
-    "@sproutboat/runtime": "file:../sproutboat-packages/packages/runtime",
-    "@sproutboat/wire": "file:../sproutboat-packages/packages/wire",
+    "@sproutboat/artifact": "^0.2.0",
+    "@sproutboat/assets": "^0.2.0",
+    "@sproutboat/config": "^0.2.0",
+    "@sproutboat/runtime": "^0.2.0",
+    "@sproutboat/wire": "^0.2.0",
     "esbuild": "^0.28.2"
   },
   "devDependencies": {

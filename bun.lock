@@ -5,11 +5,11 @@
     "": {
       "name": "@sproutboat/cli",
       "dependencies": {
-        "@sproutboat/artifact": "file:../sproutboat-packages/packages/artifact",
-        "@sproutboat/assets": "file:../sproutboat-packages/packages/assets",
-        "@sproutboat/config": "file:../sproutboat-packages/packages/config",
-        "@sproutboat/runtime": "file:../sproutboat-packages/packages/runtime",
-        "@sproutboat/wire": "file:../sproutboat-packages/packages/wire",
+        "@sproutboat/artifact": "^0.2.0",
+        "@sproutboat/assets": "^0.2.0",
+        "@sproutboat/config": "^0.2.0",
+        "@sproutboat/runtime": "^0.2.0",
+        "@sproutboat/wire": "^0.2.0",
         "esbuild": "^0.28.2",
       },
       "devDependencies": {
@@ -159,15 +159,15 @@
 
     "@oxlint/plugins": ["@oxlint/plugins@1.81.0", "", {}, "sha512-HhD8kd3r6XpelZkhxhRty/po8V6yK1VV63Eq4kSsOS2IoHUywG3DV2EX+z/ZHw46aLI74Y6aA604NRiAqLKW9w=="],
 
-    "@sproutboat/artifact": ["@sproutboat/artifact@file:../sproutboat-packages/packages/artifact", {}],
+    "@sproutboat/artifact": ["@sproutboat/artifact@0.2.0", "", {}, "sha512-lDJz0YGByMZX5x9JAf6Co07y6dPMT3/aR7QnBvvEQHSlOkyhgyaVBV7Gi9kscv8nDAFoO/wENjJyryxdyFhcWQ=="],
 
-    "@sproutboat/assets": ["@sproutboat/assets@file:../sproutboat-packages/packages/assets", {}],
+    "@sproutboat/assets": ["@sproutboat/assets@0.2.0", "", {}, "sha512-jxY3oJ1P8Z8j6rumJHxFDmHFXMHfOmO9+lIpiNjIA9NQ0cna4hPAfWCp8fcd/QcXR+vtoBk1PGWeR+zJYBkgYg=="],
 
-    "@sproutboat/config": ["@sproutboat/config@file:../sproutboat-packages/packages/config", {}],
+    "@sproutboat/config": ["@sproutboat/config@0.2.0", "", {}, "sha512-8GFMRF+ESr9d3wVFR43A2sLiJGYYoIxdUhLYagOh4F0vXJFLIvts+PbzZFH4VJhLfsgY1RHiypNVsQgVuJwJYA=="],
 
-    "@sproutboat/runtime": ["@sproutboat/runtime@file:../sproutboat-packages/packages/runtime", {}],
+    "@sproutboat/runtime": ["@sproutboat/runtime@0.2.0", "", {}, "sha512-6tr8wedeN2uOedKSAsjpFObc34ZSNgYxQVCmGPFyOi6E7WljxppeThPmFCFiW5UDn3KY/UDOZeyM+7iHgdqm+A=="],
 
-    "@sproutboat/wire": ["@sproutboat/wire@file:../sproutboat-packages/packages/wire", {}],
+    "@sproutboat/wire": ["@sproutboat/wire@0.2.0", "", { "dependencies": { "@sproutboat/assets": "^0.2.0" } }, "sha512-0MiuRftsYxaMYIHlvqIJL1ndZS6215YryUpl3CLs0h7gwlG5cx7ve1OGciNwC+USjp6os6S+I1WNPHIanH5sxg=="],
 
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 
@@ -242,7 +242,6 @@
     "oxfmt": ["oxfmt@0.66.0", "", { "dependencies": { "tinypool": "2.1.0" }, "optionalDependencies": { "@oxfmt/binding-android-arm-eabi": "0.66.0", "@oxfmt/binding-android-arm64": "0.66.0", "@oxfmt/binding-darwin-arm64": "0.66.0", "@oxfmt/binding-darwin-x64": "0.66.0", "@oxfmt/binding-freebsd-x64": "0.66.0", "@oxfmt/binding-linux-arm-gnueabihf": "0.66.0", "@oxfmt/binding-linux-arm-musleabihf": "0.66.0", "@oxfmt/binding-linux-arm64-gnu": "0.66.0", "@oxfmt/binding-linux-arm64-musl": "0.66.0", "@oxfmt/binding-linux-ppc64-gnu": "0.66.0", "@oxfmt/binding-linux-riscv64-gnu": "0.66.0", "@oxfmt/binding-linux-riscv64-musl": "0.66.0", "@oxfmt/binding-linux-s390x-gnu": "0.66.0", "@oxfmt/binding-linux-x64-gnu": "0.66.0", "@oxfmt/binding-linux-x64-musl": "0.66.0", "@oxfmt/binding-openharmony-arm64": "0.66.0", "@oxfmt/binding-win32-arm64-msvc": "0.66.0", "@oxfmt/binding-win32-ia32-msvc": "0.66.0", "@oxfmt/binding-win32-x64-msvc": "0.66.0" }, "peerDependencies": { "svelte": "^5.0.0", "vite-plus": "*" }, "optionalPeers": ["svelte", "vite-plus"], "bin": { "oxfmt": "bin/oxfmt" } }, "sha512-FfvqR8RFtV6JJpRrpkfqyVCQ7HDvZ/VriWFx7veftCgL1B5ZO9qNr+1rvPieycMQnNfVG0PWyJQiy7p0hq1I5w=="],
 
     "oxlint": ["oxlint@1.81.0", "", { "optionalDependencies": { "@oxlint/binding-android-arm-eabi": "1.81.0", "@oxlint/binding-android-arm64": "1.81.0", "@oxlint/binding-darwin-arm64": "1.81.0", "@oxlint/binding-darwin-x64": "1.81.0", "@oxlint/binding-freebsd-x64": "1.81.0", "@oxlint/binding-linux-arm-gnueabihf": "1.81.0", "@oxlint/binding-linux-arm-musleabihf": "1.81.0", "@oxlint/binding-linux-arm64-gnu": "1.81.0", "@oxlint/binding-linux-arm64-musl": "1.81.0", "@oxlint/binding-linux-ppc64-gnu": "1.81.0", "@oxlint/binding-linux-riscv64-gnu": "1.81.0", "@oxlint/binding-linux-riscv64-musl": "1.81.0", "@oxlint/binding-linux-s390x-gnu": "1.81.0", "@oxlint/binding-linux-x64-gnu": "1.81.0", "@oxlint/binding-linux-x64-musl": "1.81.0", "@oxlint/binding-openharmony-arm64": "1.81.0", "@oxlint/binding-win32-arm64-msvc": "1.81.0", "@oxlint/binding-win32-ia32-msvc": "1.81.0", "@oxlint/binding-win32-x64-msvc": "1.81.0" }, "peerDependencies": { "oxlint-tsgolint": ">=7.0.2001", "vite-plus": "*" }, "optionalPeers": ["oxlint-tsgolint", "vite-plus"], "bin": { "oxlint": "bin/oxlint" } }, "sha512-HyrJYqeoOCL0iqaLEzGewGT48ZX99P3hxYh8udAF9RGGIghSamkXE4ClUyBpEDNqasamThgmlPbuMOe7SAZmHg=="],
-
 
     "tinypool": ["tinypool@2.1.0", "", {}, "sha512-Pugqs6M0m7Lv1I7FtxN4aoyToKg1C4tu+/381vH35y8oENM/Ai7f7C4StcoK4/+BSw9ebcS8jRiVrORFKCALLw=="],
 
