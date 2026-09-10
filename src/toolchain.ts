@@ -173,7 +173,9 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
     await rm(dir, { recursive: true, force: true });
     await mkdir(stage);
     const archive = resolve(stage, "zig.tar.xz");
-    await downloadZig(url, archive, options.fetcher ?? fetch, options.timeoutMs ?? 30_000);
+    // Zig's pinned archive is about 50 MB. Keep the fetch bounded while
+    // allowing a cold download to complete on ordinary consumer connections.
+    await downloadZig(url, archive, options.fetcher ?? fetch, options.timeoutMs ?? 120_000);
     const actual = await sha256File(archive);
     if (actual !== expected)
       throw new ZigToolchainError(
