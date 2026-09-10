@@ -286,6 +286,32 @@ export function uwsVendorArchive(short: string): string {
     : resolve(import.meta.dir, "..", "vendor", `uwebsockets-${short}-musl.tar.xz`);
 }
 
+const UWS_REQUIRED = ["src/App.h", "uSockets/uSockets.a"];
+
+async function uwsComplete(dir: string): Promise<boolean> {
+  try {
+    // SAFETY: this manifest is private data written below. The files it names
+    // are fixed by this module and each recorded digest is recomputed.
+    const manifest = JSON.parse(await readFile(resolve(dir, ".sproutboat-complete"), "utf8")) as {
+      files?: Record<string, string>;
+    };
+    return (
+      await Promise.all(
+        UWS_REQUIRED.map(async (file) => (await sha256File(resolve(dir, file))) === manifest.files?.[file]),
+      )
+    ).every(Boolean);
+  } catch {
+    return false;
+  }
+}
+
+async function writeUwsManifest(dir: string): Promise<void> {
+  const files = Object.fromEntries(
+    await Promise.all(UWS_REQUIRED.map(async (file) => [file, await sha256File(resolve(dir, file))] as const)),
+  );
+  await writeFile(resolve(dir, ".sproutboat-complete"), JSON.stringify({ files }), { mode: 0o444 });
+}
+
 /**
  * Seed `~/.cache/porffor/deps/uWebSockets-<commit>-musl/` with the checked-out,
  * patched, `x86_64-linux-musl`-built uWebSockets tree so Porffor's own
@@ -303,7 +329,7 @@ export async function ensureUWebSockets(): Promise<void> {
   const short = commit.slice(0, 8);
   const depsRoot = resolve(homedir(), ".cache/porffor/deps");
   const dir = resolve(depsRoot, `uWebSockets-${commit}-musl`);
-  if (existsSync(resolve(dir, "src/App.h")) && existsSync(resolve(dir, "uSockets/uSockets.a"))) return;
+  if (await uwsComplete(dir)) return;
 
   const archive = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(short);
   if (!existsSync(archive)) {
@@ -327,6 +353,7 @@ export async function ensureUWebSockets(): Promise<void> {
 
 /** Unpack the vendored source tree into `dir`. */
 async function extractUws(archive: string, dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
   // External programs cannot read Bun's virtual /$bunfs paths. Materialize the
   // embedded release asset inside the destination before handing it to tar.
@@ -341,6 +368,12 @@ async function extractUws(archive: string, dir: string): Promise<void> {
   if (code !== 0) {
     await rm(dir, { recursive: true, force: true });
     throw new UwsUnavailableError(`could not extract vendored uWebSockets: ${err.trim()}`);
+  }
+  try {
+    await writeUwsManifest(dir);
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    throw new UwsUnavailableError(`could not validate vendored uWebSockets: ${String(error)}`);
   }
 }
 
@@ -364,7 +397,7 @@ export async function ensureUWebSocketsHost(): Promise<void> {
   const dir = resolve(homedir(), ".cache/porffor/deps", `uWebSockets-${commit}`);
   const uSockets = resolve(dir, "uSockets");
   const archivePath = resolve(uSockets, "uSockets.a");
-  if (existsSync(resolve(dir, "src/App.h")) && existsSync(archivePath)) return;
+  if (await uwsComplete(dir)) return;
 
   const vendored = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(commit.slice(0, 8));
   if (!existsSync(vendored)) {
@@ -378,7 +411,7 @@ export async function ensureUWebSocketsHost(): Promise<void> {
       );
     }
   }
-  if (!existsSync(resolve(dir, "src/App.h"))) await extractUws(vendored, dir);
+  await extractUws(vendored, dir);
 
   // The archive carries the musl-built uSockets.a. Linking that into a host
   // binary fails in a way nobody would connect to this, so it goes first.
@@ -408,6 +441,7 @@ export async function ensureUWebSocketsHost(): Promise<void> {
   if (arCode !== 0 || !existsSync(archivePath)) {
     throw new UwsUnavailableError(`could not archive uSockets with ${ar}: ${arErr.trim()}`);
   }
+  await writeUwsManifest(dir);
 }
 
 /** Directory holding node_modules/porffor (walks up from this file). */
