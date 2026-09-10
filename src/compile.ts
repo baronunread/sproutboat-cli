@@ -7,12 +7,21 @@
  * One-time per machine: the uWebSockets tree Porffor links is unpacked into
  * ~/.cache/porffor/deps/. `ensureUWebSockets()` extracts the prebuilt archive
  * shipped in `vendor/` so this needs no `git` or `make`; if that archive is
- * unusable it falls back to Porffor's own git + make path (needs both on PATH).
+ * unusable it stops with its specific integrity or archive error. Contributors
+ * may explicitly opt into Porffor's source fallback.
  */
+import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
-import { ensureUWebSockets, ensureUWebSocketsHost, porfforRoot, UwsUnavailableError } from "./toolchain";
+import { ensureUWebSockets, ensureUWebSocketsHost, UwsUnavailableError } from "./toolchain";
+import { ensurePorffor } from "./porffor-toolchain";
+// @ts-expect-error Bun's text loader supplies a string, while TypeScript resolves the JavaScript source itself.
+import embeddedPrelude from "./native-fetch-prelude.js" with { type: "text" };
+// @ts-expect-error See above.
+import embeddedBrokerTransport from "./transport-broker.js" with { type: "text" };
+// @ts-expect-error See above.
+import embeddedStandaloneTransport from "./transport-embedded.js" with { type: "text" };
 import {
   EMPTY_BINDINGS,
   preludePath,
@@ -22,6 +31,7 @@ import {
   type Bindings,
   type Transport,
 } from "./wrap";
+const PACKAGED = import.meta.url.includes("/$bunfs/");
 export type { Transport } from "./wrap";
 
 export {
@@ -83,7 +93,9 @@ export type CompileInput = {
  * `native-fetch-prelude.js` alone yields a module with no `__sbCall` at all.
  */
 export async function loadPrelude(transport: Transport = "broker"): Promise<string> {
-  const [core, chosen] = await Promise.all([readFile(preludePath, "utf8"), readFile(transportPath(transport), "utf8")]);
+  const [core, chosen] = PACKAGED
+    ? [embeddedPrelude, transport === "embedded" ? embeddedStandaloneTransport : embeddedBrokerTransport]
+    : await Promise.all([readFile(preludePath, "utf8"), readFile(transportPath(transport), "utf8")]);
   if (!core.includes(TRANSPORT_MARKER)) {
     throw new Error("prelude is missing its transport marker — src/native-fetch-prelude.js changed shape");
   }
@@ -125,7 +137,8 @@ export function porfforArgs(
 
 /** Compile `sourcePath` to a native binary at `outPath` (mode 0555). */
 export async function compileSprout(input: CompileInput): Promise<void> {
-  await ensurePorfforPatched();
+  const porffor = await ensurePorffor();
+  await ensurePorfforPatched(porffor);
 
   // Seed the Porffor uWebSockets cache from the prebuilt archive in `vendor/` so
   // the first build needs no `git` / `make`. The two targets keep separate
@@ -136,11 +149,12 @@ export async function compileSprout(input: CompileInput): Promise<void> {
     else await ensureUWebSockets();
   } catch (error) {
     if (!(error instanceof UwsUnavailableError)) throw error;
+    if (process.env.SPROUTBOAT_BUILD_UWS_FROM_SOURCE !== "1") throw error;
     const haveGit = Bun.which("git");
     const haveMake = Bun.which("make");
     if (haveGit && haveMake) {
       console.warn(
-        `prebuilt uWebSockets unusable (${error.message.split("\n")[0]}); falling back to git + make (slower, one-time)`,
+        `prebuilt uWebSockets unusable (${error.message.split("\n")[0]}); explicit source build uses git + make`,
       );
     } else {
       const missing = [!haveGit && "git", !haveMake && "make"].filter(Boolean).join(" and ");
@@ -178,23 +192,24 @@ export async function compileSprout(input: CompileInput): Promise<void> {
     ),
   );
 
-  const porffor = porfforRoot();
   const launcher = resolve(porffor, "runtime/index.js");
-  // Porffor shells bare `zig` and `esbuild`; put both on PATH for the child.
   // A host build never shells `zig`, so it has no zigBin to contribute.
-  const binDir = resolve(porffor, "../.bin");
   const zigDir = input.zigBin ? `${dirname(input.zigBin)}:` : "";
-  const path = `${zigDir}${binDir}:${process.env.PATH ?? ""}`;
+  const packagedEsbuild = resolve(dirname(process.execPath), "esbuild");
+  const esbuild = existsSync(packagedEsbuild) ? packagedEsbuild : Bun.which("esbuild");
+  if (!esbuild)
+    throw new Error("the packaged esbuild executable is missing; reinstall the Sproutboat platform package");
+  const path = `${zigDir}${dirname(esbuild)}:${process.env.PATH ?? ""}`;
+  const command = PACKAGED
+    ? [process.execPath, "__porffor", launcher]
+    : [process.execPath, resolve(import.meta.dir, "main.ts"), "__porffor", launcher];
 
-  const child = Bun.spawn(
-    [process.execPath, launcher, ...porfforArgs(generatedPath, input.outPath, input.target, input.optimize)],
-    {
-      cwd: outDir,
-      stdout: "pipe",
-      stderr: "pipe",
-      env: compileEnv(path, input.extraLink, input.extraCflags),
-    },
-  );
+  const child = Bun.spawn([...command, ...porfforArgs(generatedPath, input.outPath, input.target, input.optimize)], {
+    cwd: outDir,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: compileEnv(path, input.extraLink, input.extraCflags),
+  });
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;

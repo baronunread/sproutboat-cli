@@ -18,6 +18,19 @@ import { helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "
 import { notifyIfOutdated } from "./update-check";
 import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
+import { pathToFileURL } from "node:url";
+
+// A compiled Bun executable is not a general-purpose `bun` command. Porffor
+// is acquired after installation, so run its external ESM launcher through an
+// explicit private mode inside the packaged runtime.
+const internalModeAt = process.argv.slice(1, 3).indexOf("__porffor") + 1;
+if (internalModeAt > 0) {
+  const launcher = process.argv[internalModeAt + 1];
+  if (!launcher) throw new Error("internal Porffor mode requires a launcher path");
+  process.argv.splice(1, internalModeAt + 1, launcher);
+  await import(pathToFileURL(launcher).href);
+  process.exit(0);
+}
 
 const defaultApiUrl = "https://dashboard.sproutboat.com";
 

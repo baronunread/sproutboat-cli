@@ -1,5 +1,5 @@
 /** Build one platform package executable. npm's tiny root launcher resolves it. */
-import { mkdir } from "node:fs/promises";
+import { chmod, copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const platform = process.platform === "darwin" ? "darwin" : process.platform === "linux" ? "linux" : null;
@@ -33,3 +33,12 @@ const child = Bun.spawn(
   },
 );
 if ((await child.exited) !== 0) process.exit(1);
+let esbuild: string;
+try {
+  esbuild = Bun.resolveSync(`@esbuild/${platform}-${arch}/bin/esbuild`, import.meta.dir);
+} catch {
+  throw new Error("matching esbuild binary is missing; run bun install before building a platform package");
+}
+const packagedEsbuild = resolve(packageDir, "bin", "esbuild");
+await copyFile(esbuild, packagedEsbuild);
+await chmod(packagedEsbuild, 0o755);

@@ -16,7 +16,11 @@ type Command = { code: number; stdout: string; stderr: string };
 async function run(command: string, args: string[], cwd: string, env: Record<string, string> = {}): Promise<Command> {
   const child = Bun.spawn([command, ...args], {
     cwd,
-    env: { ...process.env, ...env },
+    env: {
+      ...process.env,
+      NPM_CONFIG_CACHE: process.env.NPM_CONFIG_CACHE ?? join(tmpdir(), `sproutboat-npm-cache-${process.pid}`),
+      ...env,
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -71,7 +75,7 @@ async function fixtures(): Promise<{
       version: release,
       os: [process.platform],
       cpu: [process.arch],
-      files: ["bin/sproutboat"],
+      files: ["bin/sproutboat", "bin/esbuild"],
     }),
   );
   await writeFile(
@@ -122,7 +126,7 @@ test("root optional dependencies and platform package constraints cover the rele
       version: manifest.version,
       os: [platform],
       cpu: [arch],
-      files: ["bin/sproutboat"],
+      files: ["bin/sproutboat", "bin/esbuild"],
     });
   }
 });

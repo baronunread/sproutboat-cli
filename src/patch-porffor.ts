@@ -14,7 +14,6 @@
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { porfforRoot } from "./toolchain";
 
 // Each edit below is independent and idempotent, with its own marker: a file
 // patched by an older version of this file must still receive the newer edits.
@@ -79,11 +78,11 @@ const BODY_INJECT = `static size_t sb_request_body_max(void) {
 #define REQUEST_BODY_MAX_BYTES sb_request_body_max()`;
 const BODY_MARKER = "sb_request_body_max";
 
-let done = false;
+const done = new Set<string>();
 
 /** The uWebSockets shim source, which is where the body limit lives. */
-async function patchBodyLimit(): Promise<void> {
-  const file = resolve(porfforRoot(), "compiler/uwebsockets.js");
+async function patchBodyLimit(root: string): Promise<void> {
+  const file = resolve(root, "compiler/uwebsockets.js");
   const src = await readFile(file, "utf8");
   if (src.includes(BODY_MARKER)) return;
   if (!src.includes(BODY_ANCHOR)) {
@@ -95,8 +94,8 @@ async function patchBodyLimit(): Promise<void> {
   await writeFile(file, src.replace(BODY_ANCHOR, BODY_INJECT));
 }
 
-async function patchCompilerArgs(): Promise<void> {
-  const file = resolve(porfforRoot(), "compiler/index.js");
+async function patchCompilerArgs(root: string): Promise<void> {
+  const file = resolve(root, "compiler/index.js");
   let src = await readFile(file, "utf8");
   let changed = false;
   for (const [marker, anchor, inject, what] of [
@@ -122,14 +121,15 @@ async function patchCompilerArgs(): Promise<void> {
   if (changed) await writeFile(file, src);
 }
 
-export async function ensurePorfforPatched(): Promise<void> {
-  if (done) return;
-  await patchCompilerArgs();
-  await patchBodyLimit();
-  const file = resolve(porfforRoot(), "compiler/render.js");
+export async function ensurePorfforPatched(root?: string): Promise<void> {
+  const target = root ?? (await import("./toolchain")).porfforRoot();
+  if (done.has(target)) return;
+  await patchCompilerArgs(target);
+  await patchBodyLimit(target);
+  const file = resolve(target, "compiler/render.js");
   const src = await readFile(file, "utf8");
   if (src.includes(ENV_MARKER)) {
-    done = true;
+    done.add(target);
     return;
   }
   const anchorAt = src.indexOf(ANCHOR);
@@ -140,5 +140,5 @@ export async function ensurePorfforPatched(): Promise<void> {
     );
   }
   await writeFile(file, src.slice(0, anchorAt + ANCHOR.length) + ENV_INJECT + src.slice(anchorAt + ANCHOR.length));
-  done = true;
+  done.add(target);
 }

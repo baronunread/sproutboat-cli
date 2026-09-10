@@ -6,3 +6,4 @@ dist/
 *.tgz
 bin/platform/
 platform-packages/*/bin/sproutboat
+platform-packages/*/bin/esbuild

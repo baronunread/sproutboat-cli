@@ -207,6 +207,18 @@ export const ENV_VARS: readonly EnvVar[] = [
   { name: "AR", purpose: "Archiver used to assemble uSockets.a for a host build (default `ar`)." },
   { name: "SPROUTBOAT_COMPILE_TIMEOUT_MS", purpose: "Porffor compile timeout in ms (default 600000)." },
   {
+    name: "SPROUTBOAT_TOOLCHAIN_CACHE",
+    purpose: "Managed Porffor and compiler cache root (default ~/.cache/sproutboat).",
+  },
+  {
+    name: "SPROUTBOAT_PORFFOR_DIR",
+    purpose: "Contributor override for an existing Porffor source checkout. Required files are validated before use.",
+  },
+  {
+    name: "SPROUTBOAT_BUILD_UWS_FROM_SOURCE",
+    purpose: "Set to 1 to explicitly allow the contributor-only Git and Make uWebSockets fallback.",
+  },
+  {
     name: "SPROUTBOAT_CLI_VERSION",
     purpose: "CLI version embedded by the release executable build. Not normally set by users.",
   },

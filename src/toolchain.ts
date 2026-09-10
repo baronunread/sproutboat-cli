@@ -10,6 +10,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
+// @ts-expect-error Bun's file loader returns the embedded asset path in a compiled executable.
+import embeddedUwsArchive from "../vendor/uwebsockets-360c276d-musl.tar.xz" with { type: "file" };
+import { cachedPorfforRoot, PORFFOR_CHANNEL, PORFFOR_COMMIT } from "./porffor-toolchain";
 
 export const ZIG_VERSION = "0.16.0";
 
@@ -25,17 +28,12 @@ const ZIG_SHA256 = {
   "aarch64-macos": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
 } satisfies Record<ZigPlatform, string>;
 
-// Pinned Porffor identity — must match the `porffor` entry in package.json
-// (`github:CanadaHonk/porffor#alpha-4`, commit a415d19). PORFFOR_VERSION overrides.
+// Pinned Porffor identity comes from porffor-toolchain.ts. PORFFOR_VERSION overrides.
 // When bumping this pin (#55): run the monorepo's `bun run diff` against the
 // frozen reference handlers and update its COMPAT.md for any new mismatch before
 // releasing — the alpha compiler's output can shift between pins. Checked by
 // hand at bump time, not in CI.
-const PORFFOR_CHANNEL = "alpha-4";
-const PORFFOR_COMMIT = "a415d19";
-
-// uWebSockets commit Porffor alpha-4 fetches for the native-fetch server. Read
-// from node_modules/porffor at build time; this is the fallback for the stamp.
+// uWebSockets commit Porffor alpha-4 fetches for the native-fetch server.
 const UWS_COMMIT = "360c276d";
 const UWS_COMMIT_FULL = "360c276d609d59af56ae6932adb95154ace9f15f";
 
@@ -117,7 +115,9 @@ export class UwsUnavailableError extends Error {}
 
 /** Path to the vendored prebuilt archive for the given short commit. */
 export function uwsVendorArchive(short: string): string {
-  return resolve(import.meta.dir, "..", "vendor", `uwebsockets-${short}-musl.tar.xz`);
+  return short === UWS_COMMIT_FULL.slice(0, 8)
+    ? embeddedUwsArchive
+    : resolve(import.meta.dir, "..", "vendor", `uwebsockets-${short}-musl.tar.xz`);
 }
 
 /**
@@ -162,11 +162,16 @@ export async function ensureUWebSockets(): Promise<void> {
 /** Unpack the vendored source tree into `dir`. */
 async function extractUws(archive: string, dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
-  const untar = Bun.spawn(["tar", "-xJf", archive, "-C", dir, "--strip-components=1"], {
+  // External programs cannot read Bun's virtual /$bunfs paths. Materialize the
+  // embedded release asset inside the destination before handing it to tar.
+  const readableArchive = archive.includes("/$bunfs/") ? resolve(dir, ".sproutboat-uwebsockets.tar.xz") : archive;
+  if (readableArchive !== archive) await Bun.write(readableArchive, Bun.file(archive));
+  const untar = Bun.spawn(["tar", "-xJf", readableArchive, "-C", dir, "--strip-components=1"], {
     stdout: "pipe",
     stderr: "pipe",
   });
   const [code, err] = await Promise.all([untar.exited, new Response(untar.stderr).text()]);
+  if (readableArchive !== archive) await rm(readableArchive, { force: true });
   if (code !== 0) {
     await rm(dir, { recursive: true, force: true });
     throw new UwsUnavailableError(`could not extract vendored uWebSockets: ${err.trim()}`);
@@ -241,12 +246,14 @@ export async function ensureUWebSocketsHost(): Promise<void> {
 
 /** Directory holding node_modules/porffor (walks up from this file). */
 export function porfforRoot(start = import.meta.dir): string {
+  const managed = cachedPorfforRoot();
+  if (existsSync(resolve(managed, "runtime/index.js"))) return managed;
   let dir = start;
   for (;;) {
     const candidate = resolve(dir, "node_modules/porffor");
     if (existsSync(resolve(candidate, "runtime/index.js"))) return candidate;
     const parent = dirname(dir);
-    if (parent === dir) throw new Error("node_modules/porffor not found — run `bun install`");
+    if (parent === dir) return managed;
     dir = parent;
   }
 }

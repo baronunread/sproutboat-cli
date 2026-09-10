@@ -4,7 +4,8 @@
   "description": "Sproutboat CLI executable for linux x64",
   "license": "MIT",
   "files": [
-    "bin/sproutboat"
+    "bin/sproutboat",
+    "bin/esbuild"
   ],
   "os": [
     "linux"

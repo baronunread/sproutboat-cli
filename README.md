@@ -26,6 +26,12 @@ runtime exports remain in the root package for Bun-based platform integrations.
 Nothing is needed on the machine that *runs* a sprout: that gets a static
 binary.
 
+The first build downloads the pinned Porffor source into
+`~/.cache/sproutboat`, verifies its SHA-256, applies Sproutboat's compiler
+patches there, and publishes the cache entry atomically. Installation itself
+does not clone Porffor or invoke Git, Make, or a compiler. Warm-cache builds can
+run offline.
+
 ```sh
 npm exec sproutboat init hello
 cd hello
