@@ -52,6 +52,7 @@ Ops:
 - `ae.query`
 - `ae.write`
 - `assets.get`
+- `d1.backup`
 - `d1.batch`
 - `d1.exec`
 - `d1.query`

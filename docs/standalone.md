@@ -20,6 +20,7 @@ not:
 
 - `PORT`: the port to listen on.
 - `SB_DATA_DIR` or `SPROUTBOAT_DATA`: where state lives.
+- `SB_TRUSTED_PROXIES`: trusted reverse-proxy CIDRs, for the client IP (below).
 - **Secrets**: from the environment, or `<data>/secrets.json`.
 
 All three arrive through the environment, and none of them through flags: a
@@ -39,15 +40,44 @@ crashing on the first request that needs it.
 <name>.data/
   store.sqlite          kv · r2 · mq · do_storage · do_alarm · ae
   d1/<binding>.sqlite   one file per D1 database
+  backups/<file>        snapshots written by env.<D1>.backup()
 ```
 
 D1 stays separate on purpose: it runs user-supplied SQL, so a handler's
 `CREATE TABLE kv (...)` would otherwise collide with the platform's own tables.
 WAL mode adds `-wal` and `-shm` beside `store.sqlite`.
 
+### Backing up D1
+
+`env.<D1>.backup(name?)` — a Sproutboat extension, not in Workers — writes a
+consistent single-file snapshot of that database to `backups/`, with no
+downtime (SQLite holds a read transaction for the copy) and no WAL sidecars.
+It reopens the copy and runs `PRAGMA integrity_check` before returning
+`{ path, bytes }`, so a bad backup fails at the call, not on restore. `name`
+must be a plain filename; anything else gets a timestamped default. Wire it to
+an admin route and copy `backups/` off the box; restore by putting the file
+back at `d1/<binding>.sqlite` on a stopped binary.
+
 The layout is identical to what `sproutboat dev` writes, which is what lets one
 conformance suite run against both the broker and this binary and mean
 something.
+
+## Client IP
+
+`request.cf.clientIp` is the connection's remote address. A client-sent
+`x-sb-remote-addr` header is dropped before the handler runs — the server owns
+that name — so with the binary exposed directly the value cannot be forged.
+
+Behind a reverse proxy the connection comes from the proxy, so set
+`SB_TRUSTED_PROXIES` to a comma-separated list of the proxy's addresses, as
+CIDRs or bare IPs (`SB_TRUSTED_PROXIES=127.0.0.1,10.0.0.0/8`). When the peer is
+one of those, `clientIp` becomes the right-most `X-Forwarded-For` entry that is
+not itself a trusted address; with the list unset or the peer not in it,
+`X-Forwarded-For` is ignored entirely. Your proxy must *overwrite*
+`X-Forwarded-For`, not append — appenders let a visitor prepend a fake hop.
+
+IPv4-mapped IPv6 peers (`::ffff:1.2.3.4`) are folded to the dotted form. CIDR
+ranges are IPv4; an IPv6 proxy must be listed as a bare address.
 
 ## What differs from a deployed sprout
 

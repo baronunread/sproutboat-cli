@@ -9,6 +9,29 @@ Reconstructed from git history on 2026-09-03 for everything through v0.4.11;
 maintained going forward by the `release` skill.
 
 ## [Unreleased]
+### Changed
+- Porffor pin bumped alpha-4 → **alpha-5** (`1f4ae4ae`). Perf and
+  closure/string-allocation fixes upstream; the same `UWS_COMMIT`, so no
+  uWebSockets re-vendor. All `src/patch-porffor.ts` edits still apply.
+
+### Added
+- `x-sb-remote-addr` / `request.cf.clientIp` in standalone builds, with
+  `SB_TRUSTED_PROXIES` for `X-Forwarded-For` resolution behind a reverse proxy
+  (baronunread/sproutboat#163).
+- `env.<D1>.backup(name?)` — an online, integrity-checked single-file snapshot
+  of a D1 database via `VACUUM INTO`, on both the embedded and broker transports
+  (baronunread/sproutboat#164).
+
+### Performance
+- Embedded transport caches prepared statements per database (FIFO, 32/db)
+  instead of compiling the SQL on every binding op — the op boundary drops from
+  ~0.6 ms to tens of µs (baronunread/sproutboat#155).
+
+### Fixed
+- `303` (and every other status not in Porffor's table) no longer resets the
+  connection on standalone builds (baronunread/sproutboat#156).
+- Handler `console.log` / `console.error` reach stderr, unbuffered, in
+  standalone builds instead of vanishing (baronunread/sproutboat#165).
 
 ## [0.9.0] - 2026-09-07
 ### Added

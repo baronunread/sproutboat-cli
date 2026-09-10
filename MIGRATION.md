@@ -77,14 +77,23 @@ CI never links.
 **Direction is one-way:** nothing in `sproutboat-cli/src/` may import from the
 monorepo. The CLI is the library; the monorepo is its client.
 
-## Pinned versions (bump together)
+## Pinned versions
 
-- `src/toolchain.ts`: `ZIG_VERSION` + its `ZIG_SHA256` table,
-  `PORFFOR_CHANNEL` / `PORFFOR_COMMIT` (must match `porffor` in `package.json`),
-  and `UWS_COMMIT_FULL` + `UWS_TARBALL_SHA256` (rebuild via
-  `bun tools/prebuild-uws.ts` / the `uws-prebuild` workflow when the porffor pin
-  moves).
-- `package.json`: `porffor` (`github:CanadaHonk/porffor#alpha-4`), `esbuild`.
+- **Porffor** — one place: `@sproutboat/toolchain/src/pin.ts`
+  (`PORFFOR_CHANNEL` / `PORFFOR_COMMIT_FULL` / `PORFFOR_ARCHIVE_SHA256`). The CLI
+  and the monorepo both `ensurePorffor()` from that package, which fetches the
+  commit into `~/.cache/sproutboat`, verifies the sha (`shasum -a 256` of
+  `codeload.github.com/CanadaHonk/porffor/tar.gz/<commit>`) and applies every
+  patch from `@sproutboat/toolchain/src/patch.ts`. `sproutboat-cli/src/{porffor-toolchain,patch-porffor}.ts`
+  are re-export shims; the monorepo has no `porffor` npm dep and no local patch
+  script any more.
+- `sproutboat-cli/src/toolchain.ts`: `ZIG_VERSION` + its `ZIG_SHA256` table, and
+  `UWS_COMMIT_FULL` + `UWS_TARBALL_SHA256`. When the Porffor pin moves, check
+  `UWS_COMMIT` in the new `compiler/uwebsockets.js`; if it changed, rebuild the
+  vendored archive via `bun tools/prebuild-uws.ts` / the `uws-prebuild` workflow.
+  (alpha-4 → alpha-5 kept the same `UWS_COMMIT`, so no re-vendor.)
+- `SURFACE.md` carries the provenance stamp — regenerate with `bun run surface`.
 
-The monorepo pins `porffor` to the **same** specifier. They must stay identical
-or Bun installs two Porffor checkouts.
+Bumping the pin: edit `pin.ts`, publish `@sproutboat/toolchain`, then
+`bun update @sproutboat/toolchain` in the CLI and the monorepo, and re-run both
+test + conformance suites.

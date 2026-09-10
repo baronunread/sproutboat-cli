@@ -2,19 +2,28 @@
 
 ## Local patch
 
-`src/patch-porffor.ts` — an idempotent 2-line in-place edit of Porffor's
-`compiler/render.js`. Makes the generated native-fetch server read its listen
-port from `$PORT` at runtime, falling back to the compiled `port:` value.
+`src/patch-porffor.ts` — idempotent, marker-guarded in-place edits of Porffor's
+generated C. Each is independent and re-applied on every build:
 
-Run from the build path (`compileWorker`), not a `postinstall` hook: package
-managers block dependency lifecycle scripts by default, so a published
-`postinstall` would silently not run.
+- `compiler/render.js` — the native-fetch server reads its listen port from
+  `$PORT` at runtime (falling back to the compiled `port:`), and routes handler
+  `console` output to stderr, unbuffered (#165).
+- `compiler/index.js` — `SB_EXTRA_LINK` / `SB_EXTRA_CFLAGS` splice points so a
+  standalone build can link SQLite / include `<bearssl.h>` (#15).
+- `compiler/uwebsockets.js` — configurable request-body limit (#56), the #156
+  status-line fix, and the #163 `x-sb-remote-addr` synthetic header — all below.
 
-This is the only thing keeping the CLI on the Porffor **source** dep
-(`github:CanadaHonk/porffor#alpha-4`) instead of the prebuilt release binary
-(`porffor-<host>.tar.gz`, ~2 MB, same commit). The prebuilt binary has no
-`render.js` to patch. If the change below lands upstream, switch to the prebuilt
-binary and drop both the source dep and the patch step.
+The pin lives in `src/porffor-toolchain.ts` (`PORFFOR_CHANNEL` /
+`PORFFOR_COMMIT_FULL`), currently **alpha-5** (`1f4ae4ae`). Patches are applied
+from the build path, not a `postinstall` hook: package managers block dependency
+lifecycle scripts by default, so a published `postinstall` would silently not
+run.
+
+This patch step is the only thing keeping the CLI on Porffor **source**
+(`github:CanadaHonk/porffor#<channel>`) rather than the prebuilt release binary
+(`porffor-<host>.tar.gz`, ~2 MB, same commit) — the prebuilt binary has no
+`render.js` to patch. If every edit below lands upstream, switch to the prebuilt
+binary and drop the patch step.
 
 Porffor's `AI_POLICY`: disclose AI use, and don't paste LLM prose — rewrite the
 draft below in your own words before filing. File as an **issue**, not a PR
@@ -26,7 +35,7 @@ draft below in your own words before filing. File as an **issue**, not a PR
 
 Nothing upstream covers this: searched their issues for port, getenv,
 process.env, argv and native fetch, all open and closed. Checked against
-`main` at `a415d194`, which is the commit we pin.
+`alpha-5` @ `1f4ae4ae`, which is the commit we pin.
 
 Porffor's `AI_POLICY` asks that AI use is disclosed and that LLM prose is not
 pasted. Rewrite the below in your own words before filing, and file it as an
@@ -37,7 +46,7 @@ over a `PORT` special case.
 
 **Title:** native-fetch: a compiled server cannot be told its port
 
-**Version:** `main` @ `a415d194`, `porf native`, `export default { fetch }`.
+**Version:** `alpha-5` @ `1f4ae4ae`, `porf native`, `export default { fetch }`.
 
 ### Problem
 
@@ -97,6 +106,93 @@ value.
    port.
 
 Happy to send either as a PR if one of the shapes is acceptable.
+
+---
+
+## #156 — `lookup_status_line()` resets the connection for unlisted codes
+
+**Version:** `alpha-5` @ `1f4ae4ae`, `compiler/uwebsockets.js`, native-fetch build.
+
+`lookup_status_line(i32 status)` is a `switch` mapping status codes to reason
+strings for `res->writeStatus()`. Its `default` returns an empty
+`std::string_view`, so any code not in the switch — 303, 206, 300, 305, 402,
+451, … — produces `writeStatus({})`, a malformed status line, and the client
+sees a connection reset (`curl` reports `000`). Only the embedded/standalone
+response path is affected; a deployed sprout's Response travels as frame JSON
+and the broker's own HTTP stack serializes the status line.
+
+**Local patch** (`src/patch-porffor.ts`, `patchUwebsockets`): widen the return
+type to `std::string` and make `default` synthesize `"<code> Status"` from the
+number, so every code produces a well-formed line. Add `case 303: return "303
+See Other";` for the common one's real phrase. The sole caller feeds the result
+straight to `writeStatus`, which copies synchronously, so returning by value is
+safe.
+
+**Upstream shape** (rewrite before filing, per `AI_POLICY`; file as an issue):
+the `default` case should still yield a syntactically valid status line rather
+than an empty one — either a synthesized `"<code> \r\n"` or the full IANA table.
+A silent connection reset for a valid HTTP status is the worst failure mode.
+
+Repro: `porf native` a handler that returns `new Response("", { status: 303 })`
+and `curl` it — connection reset. `302`/`307` are fine.
+
+---
+
+## #165 — native-fetch drops handler `console` output when stdout is not a TTY
+
+**Version:** `alpha-5` @ `1f4ae4ae`, `compiler/render.js`, native-fetch build.
+
+A handler's `console.log` / `console.error` reaches `__Porffor_printString`,
+which writes to **stdout** via `printf`. When stdout is a pipe or a file (a
+service manager, a container, anything but an interactive terminal) the C
+runtime makes it fully buffered, and the native-fetch server loop never
+returns, so `fflush` / `exit`-time flush never happens. The output is simply
+lost — no error, nothing on stdout or stderr, during the run or after a clean
+signal. Porffor's own banner and diagnostics go to stderr, so only the
+handler's logs disappear.
+
+**Local patch** (`src/patch-porffor.ts`, `patchRenderJs`): in
+`porf_native_fetch_runtime_init`, `dup2(2, 1)` to route stdout at the handler's
+`console` to stderr, and `setvbuf(stdout, NULL, _IONBF, 0)` so records appear as
+they happen.
+
+**Upstream shape** (rewrite before filing, per `AI_POLICY`; file as an issue):
+the native-fetch server should flush stdout (line-buffered at least), or send
+`console` to stderr as most server runtimes do. A long-lived server that
+silently swallows every log line until it exits is a sharp edge for anyone
+running a compiled handler under a supervisor.
+
+Repro: `porf native` a handler with `console.log("x")` in `fetch`, run it with
+stdout redirected to a file, hit it — the file stays empty.
+
+---
+
+## #163 — a native-fetch handler cannot see the connection's remote address
+
+**Version:** `alpha-5` @ `1f4ae4ae`, `compiler/uwebsockets.js`, native-fetch build.
+
+`collect_headers()` takes only `uWS::HttpRequest*`, and nothing else about the
+connection reaches the handler. `uWS::HttpResponse::getRemoteAddressAsText()`
+has the peer address right there, but the handler has no way to it — so every
+app behind a proxy hand-rolls `X-Forwarded-For` parsing, and every app in front
+of one has no client IP at all. workerd (`request.cf`), `Deno.serve`
+(`info.remoteAddr`) and `Bun.serve` (`server.requestIP`) all expose it.
+
+**Local patch** (`src/patch-porffor.ts`, the `HDR_*` entries): `collect_headers`
+grows a `res` argument and appends one synthetic request header,
+`x-sb-remote-addr: <res->getRemoteAddressAsText()>`, after dropping any inbound
+header of that name. The prelude reads it into `request.cf.clientIp`, folds
+IPv4-mapped IPv6, and resolves it against `SB_TRUSTED_PROXIES` +
+`X-Forwarded-For`.
+
+**Upstream shape** (rewrite before filing, per `AI_POLICY`; file as an issue):
+expose the remote address to a native-fetch handler — on `request` (a
+documented field, or `request.cf` for workerd parity), or as a second argument
+to `fetch`. The IPv4-mapped-IPv6 form uWS returns for v4 clients on a
+dual-stack socket is worth normalising there too.
+
+Repro: `porf native` any `export default { fetch }` — there is no property or
+argument carrying the client's IP.
 
 ---
 
@@ -160,6 +256,12 @@ upstream lands theirs.
 Not filed yet — the reproducer below is small and reliable but has not been
 reduced to a language construct, and #145's own thread shows the maintainer
 would rather have the construct than a library.
+
+**Still reproduces on alpha-5** (`1f4ae4ae`), unchanged: the reduced
+`$constructor` snippet below builds and then dies with the same
+`Uncaught TypeError: Cannot read property of undefined` at init, server never
+binds. alpha-5's slot-based closure-env rewrite and loop-capture fixes did not
+touch it. So bumping the pin does not unblock zod / better-auth.
 
 zod matters more than any one library: `better-auth`, and a large slice of
 everything else, depends on it. It is the gate in front of most of npm.
