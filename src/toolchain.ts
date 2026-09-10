@@ -207,6 +207,58 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
   }
 }
 
+export type ToolchainDoctor = {
+  host: `${string}/${string}`;
+  cacheRoot: string;
+  porffor: { version: string; path: string; override: string | null; present: boolean };
+  zig: {
+    version: string;
+    platform: ZigPlatform | null;
+    path: string | null;
+    override: string | null;
+    present: boolean;
+  };
+  prerequisites: { cc: string | null; ar: string | null; tar: string | null; xcrun: string | null };
+};
+
+/** Inspect the selected toolchain without downloading, compiling, or mutating a cache. */
+export function inspectToolchain(): ToolchainDoctor {
+  const cacheRoot = resolve(process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? resolve(homedir(), ".cache/sproutboat"));
+  const porfforOverride = process.env.SPROUTBOAT_PORFFOR_DIR ? resolve(process.env.SPROUTBOAT_PORFFOR_DIR) : null;
+  const zigOverride = process.env.SPROUTBOAT_ZIG ? resolve(process.env.SPROUTBOAT_ZIG) : null;
+  let platform: ZigPlatform | null = null;
+  try {
+    platform = platformKey();
+  } catch {
+    /* doctor reports an unsupported host instead of throwing before its diagnostics */
+  }
+  const zigPath = zigOverride ?? (platform ? resolve(cacheRoot, `zig-${ZIG_VERSION}-${platform}`, "zig") : null);
+  const porfforPath = porfforOverride ?? cachedPorfforRoot(cacheRoot);
+  return {
+    host: `${process.arch}/${process.platform}`,
+    cacheRoot,
+    porffor: {
+      version: porfforVersion(),
+      path: porfforPath,
+      override: porfforOverride,
+      present: existsSync(resolve(porfforPath, "runtime/index.js")),
+    },
+    zig: {
+      version: ZIG_VERSION,
+      platform,
+      path: zigPath,
+      override: zigOverride,
+      present: Boolean(zigPath && existsSync(zigPath)),
+    },
+    prerequisites: {
+      cc: Bun.which(process.env.CC ?? "cc"),
+      ar: Bun.which(process.env.AR ?? "ar"),
+      tar: Bun.which("tar"),
+      xcrun: process.platform === "darwin" ? Bun.which("xcrun") : null,
+    },
+  };
+}
+
 function uwsCommitFull(): string {
   try {
     const src = readFileSync(resolve(porfforRoot(), "compiler/uwebsockets.js"), "utf8");
