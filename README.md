@@ -8,6 +8,11 @@ https://sproutboat.com
 The CLI for [Sproutboat](https://github.com/baronunread/sproutboat). Compiles a
 `fetch` handler to a native binary and ships it to any Sproutboat control plane.
 
+## Issues
+
+Tracked centrally in [baronunread/sproutboat](https://github.com/baronunread/sproutboat/issues)
+(label `area:cli`). Please file there.
+
 ## Overview
 
 Wrangler-shaped, MIT licensed. `build` and `deploy` cross-compile your handler

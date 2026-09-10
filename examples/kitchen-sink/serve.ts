@@ -10,7 +10,7 @@
 import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { wrapNativeFetchHandler, type Bindings } from "../../src/compile";
+import { preludePath, wrapNativeFetchHandler, type Bindings } from "../../src/compile";
 import { parseConfig } from "../../src/config";
 import { createBroker, listen } from "../../src/broker";
 import { walkAssets, type AssetManifest } from "../../src/assets";
@@ -71,7 +71,7 @@ if (c.assets) {
   writeFileSync(join(workdir, "assets.json"), JSON.stringify(assetManifest, null, 2));
 }
 
-const prelude = readFileSync(join(CLI, "src/native-fetch-prelude.js"), "utf8");
+const prelude = readFileSync(preludePath, "utf8");
 const gen = join(workdir, "sprout.generated.js");
 const bin = join(workdir, "sprout.bin");
 writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"), "utf8"), prelude, vars, bindings));

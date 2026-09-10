@@ -19,9 +19,12 @@ instead.**
 | `./runtime/assets` | `services/edge/src/main.ts`, `tests/broker.test.ts` |
 | `./runtime/broker` | spawned by `services/supervisor/src/run.ts` via `import.meta.resolve` |
 | `./runtime/wrap` | `tools/compile.ts` (which re-exports it for its own importers) |
-| `./runtime/prelude` | read as text via `preludePath` from `./runtime/wrap` — never imported |
 
-Each export points at a raw `.ts` (or the `.js` prelude); there is no build step
+The prelude and transports are not exported: they live in `@sproutboat/runtime`
+(next to `wrap.ts`, which resolves them by file URL). Read them as text via
+`preludePath` / `transportPath` from `./runtime/wrap`.
+
+Each export points at a raw `.ts`; there is no build step
 and no `.d.ts` — the source is the types. Bun's runtime and `tsc`
 (`moduleResolution: "bundler"`) both follow the map.
 

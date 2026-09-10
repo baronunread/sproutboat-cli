@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { BASELINE_COMPATIBILITY_DATE, porfforArgs, wrapNativeFetchHandler } from "./compile";
+import { BASELINE_COMPATIBILITY_DATE, porfforArgs, preludePath, wrapNativeFetchHandler } from "./compile";
 import { DEPLOY_TARGET, hostTarget, validateManifest } from "./manifest";
 
 test("wrap: injects prelude + env, keeps the handler body verbatim", () => {
@@ -99,7 +99,7 @@ test("wrap: Durable Object classes are neutralised and registered", () => {
 });
 
 test("prelude: crypto is CSPRNG-backed, no Math.random downgrade", async () => {
-  const prelude = await Bun.file(new URL("./native-fetch-prelude.js", import.meta.url)).text();
+  const prelude = await Bun.file(preludePath).text();
   // the OS entropy path is wired end to end
   expect(prelude).toContain("static int sb_os_random(");
   expect(prelude).toContain('open("/dev/urandom"');
