@@ -36,7 +36,11 @@ const BEARSSL_SHA256 = "6705bba1714961b41a728dfc5debbe348d2966c117649392f8c8139e
 const CACERT_URL = "https://curl.se/ca/cacert.pem";
 const CACERT_SHA256 = "f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9";
 
-const cacheDir = (): string => resolve(homedir(), ".cache/sproutboat", `bearssl-${BEARSSL_VERSION}`);
+const cacheDir = (): string =>
+  resolve(
+    process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? resolve(homedir(), ".cache/sproutboat"),
+    `bearssl-${BEARSSL_VERSION}`,
+  );
 
 export type BearsslInput = {
   target: "linux-x86_64" | "host";

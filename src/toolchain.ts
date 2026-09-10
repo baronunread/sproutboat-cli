@@ -12,7 +12,9 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 // @ts-expect-error Bun's file loader returns the embedded asset path in a compiled executable.
 import embeddedUwsArchive from "../vendor/uwebsockets-360c276d-musl.tar.xz" with { type: "file" };
+import { BEARSSL_VERSION } from "./bearssl";
 import { cachedPorfforRoot, PORFFOR_CHANNEL, PORFFOR_COMMIT } from "./porffor-toolchain";
+import { SQLITE_VERSION } from "./sqlite";
 
 export const ZIG_VERSION = "0.16.0";
 
@@ -218,6 +220,8 @@ export type ToolchainDoctor = {
     override: string | null;
     present: boolean;
   };
+  sqlite: { version: string; path: string; present: boolean };
+  bearssl: { version: string; path: string; present: boolean };
   prerequisites: { cc: string | null; ar: string | null; tar: string | null; xcrun: string | null };
 };
 
@@ -234,6 +238,8 @@ export function inspectToolchain(): ToolchainDoctor {
   }
   const zigPath = zigOverride ?? (platform ? resolve(cacheRoot, `zig-${ZIG_VERSION}-${platform}`, "zig") : null);
   const porfforPath = porfforOverride ?? cachedPorfforRoot(cacheRoot);
+  const sqlitePath = resolve(cacheRoot, `sqlite-${SQLITE_VERSION}`);
+  const bearsslPath = resolve(cacheRoot, `bearssl-${BEARSSL_VERSION}`);
   return {
     host: `${process.arch}/${process.platform}`,
     cacheRoot,
@@ -250,6 +256,8 @@ export function inspectToolchain(): ToolchainDoctor {
       override: zigOverride,
       present: Boolean(zigPath && existsSync(zigPath)),
     },
+    sqlite: { version: SQLITE_VERSION, path: sqlitePath, present: existsSync(sqlitePath) },
+    bearssl: { version: BEARSSL_VERSION, path: bearsslPath, present: existsSync(bearsslPath) },
     prerequisites: {
       cc: Bun.which(process.env.CC ?? "cc"),
       ar: Bun.which(process.env.AR ?? "ar"),
