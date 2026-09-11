@@ -15,7 +15,7 @@ mini app, run it on a Pi, later `sproutboat deploy` it.
 ## Runtime surface
 
 Everything a project declares — KV and D1 names, buckets, queues, DO classes,
-cron expressions, the outbound allowlist, `vars` — compiles in. Three things do
+cron expressions, the outbound allowlist, `vars` — compiles in. Four things do
 not:
 
 - `PORT`: the port to listen on.
@@ -23,7 +23,7 @@ not:
 - `SB_TRUSTED_PROXIES`: trusted reverse-proxy CIDRs, for the client IP (below).
 - **Secrets**: from the environment, or `<data>/secrets.json`.
 
-All three arrive through the environment, and none of them through flags: a
+All four arrive through the environment, and none of them through flags: a
 native-fetch binary never sees `argv`, because Porffor's runtime init calls
 `porf_init(0, NULL)`. That suits systemd and docker, which set environment
 variables anyway.
@@ -62,6 +62,14 @@ The layout is identical to what `sproutboat dev` writes, which is what lets one
 conformance suite run against both the broker and this binary and mean
 something.
 
+`sproutboat dev` talks to the same broker transport a deployed sprout does,
+over a local SQLite state dir. Every binding op behaves the same in all three
+places (dev, this binary, deployed). That includes rate limiters and
+`request.cf.clientIp` with `SB_TRUSTED_PROXIES`, which the dev server passes
+through from your own environment. The only differences are the ones under
+"What differs from a deployed sprout" below, and each is a property of the
+standalone binary, not of dev.
+
 ## Client IP
 
 `request.cf.clientIp` is the connection's remote address. A client-sent
@@ -81,10 +89,6 @@ ranges are IPv4; an IPv6 proxy must be listed as a bare address.
 
 ## What differs from a deployed sprout
 
-- **Outbound `fetch()` speaks `http://` only.** TLS needs a certificate store
-  plus a crypto stack; an https call says so instead of failing obscurely. See
-  "Talking to https services" below — a local proxy covers this, which is why
-  a TLS stack in the binary is not on the roadmap.
 - **Service bindings do not exist.** They call another deployment through an
   edge, which a standalone binary lacks.
 - **Triggers stay internal.** Cron ticks, queue batches and DO alarms run on

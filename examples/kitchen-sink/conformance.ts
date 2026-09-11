@@ -178,11 +178,22 @@ export async function runConformance(
     h,
   );
 
-  // rate limiter (#69): a unique key gets `limit` successes then a failure.
+  // rate limiter (#69): a unique key gets `limit` successes then a failure, and
+  // every reply carries resetAt (epoch ms) so a 429 can send Retry-After.
   const rlKey = "conf-" + Date.now();
   const rl = [];
-  for (let i = 0; i < 4; i++) rl.push(obj((await jget("/throttle?key=" + rlKey)).body).success);
+  const rlResets = [];
+  for (let i = 0; i < 4; i++) {
+    const res = obj((await jget("/throttle?key=" + rlKey)).body);
+    rl.push(res.success);
+    rlResets.push(Number(res.resetAt));
+  }
   check("ratelimit: THROTTLE allows 3 then blocks the 4th", JSON.stringify(rl) === "[true,true,true,false]", rl);
+  check(
+    "ratelimit: every reply carries resetAt within one period ahead",
+    rlResets.every((t) => t > Date.now() && t <= Date.now() + 61 * 1000),
+    rlResets,
+  );
 
   // DO alarms (#125): viewing a note debounces an alarm a second out, whose
   // handler rolls the count up into D1. Poll, because the whole point is that

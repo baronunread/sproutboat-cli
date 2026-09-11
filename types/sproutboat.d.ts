@@ -182,9 +182,13 @@ declare global {
    * A rate-limiter binding (#69). `limit` and `period` are fixed in
    * sproutboat.jsonc; `limit({ key })` counts one call against a fixed window
    * and reports whether the key is still under the cap.
+   *
+   * `resetAt` is epoch milliseconds for when the window rolls and the count
+   * clears — the same for a hit or a miss. Turn a rejection into a header with
+   * `Retry-After: Math.ceil((resetAt - Date.now()) / 1000)`.
    */
   interface RateLimit {
-    limit(options: { key: string }): { success: boolean };
+    limit(options: { key: string }): { success: boolean; resetAt: number };
   }
 
   // ------------------------------------ Crypto

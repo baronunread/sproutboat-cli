@@ -1,6 +1,6 @@
 {
   "name": "@sproutboat/cli-darwin-arm64",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Sproutboat CLI executable for darwin arm64",
   "license": "MIT",
   "files": [

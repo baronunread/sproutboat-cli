@@ -10,6 +10,30 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-09-11
+### Added
+- Rate-limiter result carries `resetAt`: `env.<NAME>.limit({ key })` now returns
+  `{ success, resetAt }`, where `resetAt` is epoch ms for when the fixed window
+  rolls, so a `429` can send an accurate `Retry-After`
+  (baronunread/sproutboat#69). Additive; callers reading only `success` are
+  unaffected.
+
+### Changed
+- `@sproutboat/runtime` and `@sproutboat/wire` bumped to `^0.5.0`; they carry
+  the `resetAt` value the rate-limiter type now declares.
+
+### Docs
+- `docs/standalone.md`: dropped the stale "outbound `fetch()` speaks `http://`
+  only" bullet. Standalone binaries link BearSSL and verify HTTPS against the
+  Mozilla root set (see "TLS, in both directions"). Added a
+  dev/standalone/deployed parity note: every binding op, rate limiters and
+  `request.cf.clientIp` with `SB_TRUSTED_PROXIES` included, behaves the same
+  under `sproutboat dev` as in a standalone binary and a deployed sprout.
+- `capability-http-sync-v0.md`: documented async handlers. `fetch` may return a
+  promise it creates (not a `.then()`-chained one, which hangs); async responses
+  omit `x-sb-cpu-ms`; `crypto.subtle` digest/sign/verify are async in signature
+  only over synchronous inline C, so per-request hashing costs no I/O.
+
 ## [0.10.2] - 2026-09-11
 ### Fixed
 - The one-time Zig download no longer depends on ziglang.org being reachable.
@@ -370,7 +394,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.9.0...v0.10.0

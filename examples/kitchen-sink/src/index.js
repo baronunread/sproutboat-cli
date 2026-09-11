@@ -183,9 +183,17 @@ export default {
     }
 
     // GET /throttle -> rate-limiter binding (#69). limit 3 / 60s per key.
+    // resetAt (epoch ms) turns a rejection into an accurate Retry-After.
     if (path === "/throttle") {
       const r = env.THROTTLE.limit({ key: url.searchParams.get("key") || "test" });
-      return json({ success: r.success });
+      if (!r.success) {
+        const retry = Math.max(1, Math.ceil((r.resetAt - Date.now()) / 1000));
+        return new Response(JSON.stringify({ success: false, resetAt: r.resetAt }), {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": String(retry) },
+        });
+      }
+      return json({ success: true, resetAt: r.resetAt });
     }
 
     // GET /quote -> outbound fetch (host from env.QUOTE_URL must be allowlisted)
