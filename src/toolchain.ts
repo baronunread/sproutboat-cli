@@ -295,6 +295,39 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
   }
 }
 
+/** `cc [args...]`/`cxx [args...]`/`ar [args...]`, each as `[bin, ...leadingArgs]`
+ *  ready to spread before a call's own arguments. */
+export type HostCompiler = { cc: string[]; cxx: string[]; ar: string[]; usingZig: boolean };
+
+/**
+ * The C/C++/archiver toolchain for a **host** build (`dev`, `build --target
+ * host`, and every host-native object BearSSL/SQLite/uWebSockets compile).
+ *
+ * Prefers whatever the machine already has — no download, and unchanged
+ * behavior for every developer with Xcode Command Line Tools / build-essential
+ * installed. Falls back to the pinned Zig (already vendored for the musl
+ * cross-target) as a cross-compiler pointed at this same host, so the packaged
+ * CLI needs no system C toolchain at all — Zig ships a real native codegen
+ * backend for the host triple, not just cross-musl.
+ */
+export async function resolveHostCompiler(): Promise<HostCompiler> {
+  const cc = process.env.CC;
+  const cxx = process.env.CXX;
+  const ar = process.env.AR;
+  const haveCc = Boolean(cc || Bun.which("cc"));
+  const haveAr = Boolean(ar || Bun.which("ar"));
+  if (haveCc && haveAr) return { cc: [cc || "cc"], cxx: [cxx || "c++"], ar: [ar || "ar"], usingZig: false };
+  const zigBin = await ensureZig();
+  const [arch, os] = platformKey().split("-");
+  const triple = os === "macos" ? `${arch}-macos` : `${arch}-linux-gnu`;
+  return {
+    cc: [zigBin, "cc", "-target", triple],
+    cxx: [zigBin, "c++", "-target", triple],
+    ar: [zigBin, "ar"],
+    usingZig: true,
+  };
+}
+
 export type ToolchainDoctor = {
   host: `${string}/${string}`;
   cacheRoot: string;
@@ -525,9 +558,8 @@ export async function ensureUWebSocketsHost(): Promise<void> {
   const dir = resolve(homedir(), ".cache/porffor/deps", `uWebSockets-${commit}`);
   const uSockets = resolve(dir, "uSockets");
   const archivePath = resolve(uSockets, "uSockets.a");
-  const cc = process.env.CC || "cc";
-  const ar = process.env.AR || "ar";
-  const command = [cc, ar];
+  const { cc, ar, usingZig } = await resolveHostCompiler();
+  const command = [cc.join(" "), ar.join(" ")];
   if (await uwsComplete(dir, command)) return;
 
   await withUwsLock(dir, async () => {
@@ -549,26 +581,28 @@ export async function ensureUWebSocketsHost(): Promise<void> {
     await rm(archivePath, { force: true });
 
     const sources = ["src/*.c", "src/eventing/*.c", "src/crypto/*.c", "src/io_uring/*.c"];
-    const compile = Bun.spawn(["sh", "-c", `${cc} -std=c11 -Isrc -DLIBUS_NO_SSL -flto -O3 -c ${sources.join(" ")}`], {
-      cwd: uSockets,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    // Zig's cc needs `-fuse-ld=lld` wired up for LTO at link time; this is a
+    // `-c`-only compile step with no link, so LTO just isn't worth chasing here.
+    const flto = usingZig ? "" : "-flto ";
+    const compile = Bun.spawn(
+      ["sh", "-c", `${command[0]} -std=c11 -Isrc -DLIBUS_NO_SSL ${flto}-O3 -c ${sources.join(" ")}`],
+      { cwd: uSockets, stdout: "pipe", stderr: "pipe" },
+    );
     const [ccCode, ccErr] = await Promise.all([compile.exited, new Response(compile.stderr).text()]);
     if (ccCode !== 0) {
       throw new UwsUnavailableError(
-        `could not compile uSockets with ${cc}: ${ccErr.trim().split("\n").slice(-3).join(" ")}`,
+        `could not compile uSockets with ${command[0]}: ${ccErr.trim().split("\n").slice(-3).join(" ")}`,
       );
     }
 
-    const archiveStep = Bun.spawn(["sh", "-c", `${ar} rvs uSockets.a *.o`], {
+    const archiveStep = Bun.spawn(["sh", "-c", `${command[1]} rvs uSockets.a *.o`], {
       cwd: uSockets,
       stdout: "pipe",
       stderr: "pipe",
     });
     const [arCode, arErr] = await Promise.all([archiveStep.exited, new Response(archiveStep.stderr).text()]);
     if (arCode !== 0 || !existsSync(archivePath)) {
-      throw new UwsUnavailableError(`could not archive uSockets with ${ar}: ${arErr.trim()}`);
+      throw new UwsUnavailableError(`could not archive uSockets with ${command[1]}: ${arErr.trim()}`);
     }
     await writeUwsManifest(dir, command);
   });

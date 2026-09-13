@@ -216,9 +216,17 @@ export const ENV_VARS: readonly EnvVar[] = [
   {
     name: "CC",
     purpose:
-      "C compiler used to build uSockets for a host build (default `cc`). A host build needs one regardless: it is what Porffor compiles its own generated C with.",
+      "C compiler for a host build (default `cc` if present, else the vendored Zig cross-compiler targeting this host).",
   },
-  { name: "AR", purpose: "Archiver used to assemble uSockets.a for a host build (default `ar`)." },
+  {
+    name: "CXX",
+    purpose:
+      "C++ compiler for a host build's native-fetch link step (default `c++` if present, else the vendored Zig cross-compiler targeting this host).",
+  },
+  {
+    name: "AR",
+    purpose: "Archiver used to assemble uSockets.a for a host build (default `ar` if present, else Zig's).",
+  },
   { name: "SPROUTBOAT_COMPILE_TIMEOUT_MS", purpose: "Porffor compile timeout in ms (default 600000)." },
   {
     name: "SPROUTBOAT_TOOLCHAIN_CACHE",

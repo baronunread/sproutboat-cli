@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { ensureZig, inspectToolchain, ZIG_VERSION, ZigToolchainError } from "./toolchain";
+import { ensureZig, inspectToolchain, resolveHostCompiler, ZIG_VERSION, ZigToolchainError } from "./toolchain";
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -56,6 +56,34 @@ test("Zig acquisition is atomic, shared concurrently, and warm-cache offline", a
       throw new Error("offline fetch must not run");
     },
   });
+});
+
+test("resolveHostCompiler prefers CC/AR overrides and never touches Zig for them", async () => {
+  const originalCc = process.env.CC;
+  const originalCxx = process.env.CXX;
+  const originalAr = process.env.AR;
+  process.env.CC = "/does/not/exist/cc";
+  process.env.CXX = "/does/not/exist/c++";
+  process.env.AR = "/does/not/exist/ar";
+  try {
+    // Presence, not existence, is what gates the fallback (matches every other
+    // override in this file) — a bogus but *set* CC/AR must still short-circuit
+    // before ensureZig ever runs, which a hang or network call here would betray.
+    const compiler = await resolveHostCompiler();
+    expect(compiler).toEqual({
+      cc: ["/does/not/exist/cc"],
+      cxx: ["/does/not/exist/c++"],
+      ar: ["/does/not/exist/ar"],
+      usingZig: false,
+    });
+  } finally {
+    if (originalCc === undefined) delete process.env.CC;
+    else process.env.CC = originalCc;
+    if (originalCxx === undefined) delete process.env.CXX;
+    else process.env.CXX = originalCxx;
+    if (originalAr === undefined) delete process.env.AR;
+    else process.env.AR = originalAr;
+  }
 });
 
 test("a corrupt Zig cache is replaced from the verified archive", async () => {

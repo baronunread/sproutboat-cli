@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
-import { ensureUWebSockets, ensureUWebSocketsHost, UwsUnavailableError } from "./toolchain";
+import { ensureUWebSockets, ensureUWebSocketsHost, resolveHostCompiler, UwsUnavailableError } from "./toolchain";
 import { ensurePorffor } from "./porffor-toolchain";
 // The prelude + transports live in @sproutboat/runtime (next to wrap.ts, which
 // locates them by file URL). `preludePath`/`transportPath` read them from there
@@ -109,11 +109,20 @@ export async function loadPrelude(transport: Transport = "broker"): Promise<stri
 }
 
 /** Child env for the Porffor run. `SB_EXTRA_LINK` is read by the patched link
- *  step (#15) and is absent entirely for a normal build. */
-function compileEnv(path: string, extraLink?: string[], extraCflags?: string[]) {
+ *  step (#15) and is absent entirely for a normal build. `cc`/`cxx` override
+ *  Porffor's own `CC`/`CXX` read for a **host** build (musl builds hardcode
+ *  `zig cc` themselves and ignore both). */
+function compileEnv(
+  path: string,
+  extraLink?: string[],
+  extraCflags?: string[],
+  compiler?: { cc: string[]; cxx: string[] },
+) {
   const link = extraLink && extraLink.length > 0 ? extraLink.join(" ") : undefined;
   const cflags = extraCflags && extraCflags.length > 0 ? extraCflags.join(" ") : undefined;
-  return { ...process.env, PATH: path, SB_EXTRA_LINK: link, SB_EXTRA_CFLAGS: cflags };
+  const env = { ...process.env, PATH: path, SB_EXTRA_LINK: link, SB_EXTRA_CFLAGS: cflags };
+  if (compiler) return { ...env, CC: compiler.cc.join(" "), CXX: compiler.cxx.join(" ") };
+  return env;
 }
 
 /**
@@ -130,6 +139,7 @@ export function porfforArgs(
   outPath: string,
   target: CompileInput["target"],
   optimize: CompileInput["optimize"],
+  usingZig = false,
 ): string[] {
   const args = ["native", generatedPath, "-o", outPath];
   if (target !== "host") args.push("--musl");
@@ -138,6 +148,10 @@ export function porfforArgs(
   // three times faster to compile, so dev takes it and everything else does
   // not: a deployable artifact is never built with it.
   if (optimize === "dev" && target === "host") args.push("-O0");
+  // Porffor defaults LTO on for a non-musl link. Zig's cc needs `-fuse-ld=lld`
+  // wired up for that, which nothing here does, so turn it off rather than
+  // fail every host build that falls back to Zig for its C toolchain.
+  if (usingZig) args.push("--no-flto");
   return args;
 }
 
@@ -199,8 +213,11 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   );
 
   const launcher = resolve(porffor, "runtime/index.js");
-  // A host build never shells `zig`, so it has no zigBin to contribute.
+  // A musl build shells `zig` bare (Porffor hardcodes the literal command), so
+  // it needs its dir on PATH; a host build passes its compiler via CC/CXX
+  // below instead and has no zigBin to contribute here.
   const zigDir = input.zigBin ? `${dirname(input.zigBin)}:` : "";
+  const hostCompiler = input.target === "host" ? await resolveHostCompiler() : undefined;
   // The per-platform binary ships esbuild next to it; a compiled build finds it
   // there. Running from the npm package under Bun, `process.execPath` is Bun
   // itself and `npm i -g` puts no dependency `.bin` on PATH, so resolve the
@@ -221,12 +238,15 @@ export async function compileSprout(input: CompileInput): Promise<void> {
     ? [process.execPath, "__porffor", launcher]
     : [process.execPath, resolve(import.meta.dir, "main.ts"), "__porffor", launcher];
 
-  const child = Bun.spawn([...command, ...porfforArgs(generatedPath, input.outPath, input.target, input.optimize)], {
-    cwd: outDir,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: compileEnv(path, input.extraLink, input.extraCflags),
-  });
+  const child = Bun.spawn(
+    [...command, ...porfforArgs(generatedPath, input.outPath, input.target, input.optimize, hostCompiler?.usingZig)],
+    {
+      cwd: outDir,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: compileEnv(path, input.extraLink, input.extraCflags, hostCompiler),
+    },
+  );
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;

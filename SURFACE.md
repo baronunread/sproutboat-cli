@@ -43,8 +43,9 @@ usage: sproutboat <init [name] | check [project-dir] | types [project-dir] | dev
 | `SPROUTBOAT_ZIG` | Path to a Zig binary to use instead of downloading the pinned one. |
 | `SPROUTBOAT_ZIG_URL` | URL to download the pinned Zig tarball from, instead of a Zig community mirror. The sha256 is still enforced. |
 | `SPROUTBOAT_UWS_TARBALL` | Path to a uWebSockets source tarball to seed the Porffor cache with, instead of the one vendored in the package. Both targets are seeded from it. |
-| `CC` | C compiler used to build uSockets for a host build (default `cc`). A host build needs one regardless: it is what Porffor compiles its own generated C with. |
-| `AR` | Archiver used to assemble uSockets.a for a host build (default `ar`). |
+| `CC` | C compiler for a host build (default `cc` if present, else the vendored Zig cross-compiler targeting this host). |
+| `CXX` | C++ compiler for a host build's native-fetch link step (default `c++` if present, else the vendored Zig cross-compiler targeting this host). |
+| `AR` | Archiver used to assemble uSockets.a for a host build (default `ar` if present, else Zig's). |
 | `SPROUTBOAT_COMPILE_TIMEOUT_MS` | Porffor compile timeout in ms (default 600000). |
 | `SPROUTBOAT_TOOLCHAIN_CACHE` | Managed Porffor and compiler cache root (default ~/.cache/sproutboat). |
 | `SPROUTBOAT_PORFFOR_DIR` | Contributor override for an existing Porffor source checkout. Required files are validated before use. |

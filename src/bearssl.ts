@@ -19,6 +19,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { resolveHostCompiler } from "./toolchain";
 
 export const BEARSSL_VERSION = "0.6";
 const BEARSSL_URL = `https://bearssl.org/bearssl-${BEARSSL_VERSION}.tar.gz`;
@@ -85,9 +86,18 @@ export type BearsslBuild = {
   objects: string[];
 };
 
-const run = (cmd: string, args: string[], cwd?: string): Promise<{ code: number; stderr: string }> =>
+const run = (
+  cmd: string,
+  args: string[],
+  cwd?: string,
+  env?: Record<string, string | undefined>,
+): Promise<{ code: number; stderr: string }> =>
   new Promise((done) => {
-    const child = spawn(cmd, args, { cwd, stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(cmd, args, {
+      cwd,
+      stdio: ["ignore", "ignore", "pipe"],
+      env: env ? { ...process.env, ...env } : undefined,
+    });
     let stderr = "";
     child.stderr.on("data", (chunk) => (stderr += String(chunk)));
     child.on("close", (code) => done({ code: code ?? 1, stderr }));
@@ -167,7 +177,8 @@ async function sources(tree: string): Promise<string[]> {
 async function trustAnchorTool(tree: string): Promise<string> {
   const tool = resolve(tree, "build/brssl");
   if (existsSync(tool)) return tool;
-  const make = await run("make", ["-j8", "build/brssl"], tree);
+  const { cc } = await resolveHostCompiler();
+  const make = await run("make", ["-j8", "build/brssl"], tree, { CC: cc.join(" ") });
   if (!existsSync(tool)) throw new Error(`could not build brssl: ${make.stderr}`);
   return tool;
 }
@@ -233,10 +244,10 @@ export async function ensureBearssl(input: BearsslInput): Promise<BearsslBuild> 
   const tree = await sourceTree();
   const includeDir = resolve(tree, "inc");
   const objDir = resolve(cacheDir(), `obj-${input.target}`);
-  const [cc, prefix] =
+  const [cc, ...prefix] =
     input.target === "host"
-      ? (["cc", []] as const)
-      : ([input.zigBin ?? "zig", ["cc", "-target", "x86_64-linux-musl"]] as const);
+      ? (await resolveHostCompiler()).cc
+      : [input.zigBin ?? "zig", "cc", "-target", "x86_64-linux-musl"];
   const includes = [includeDir, resolve(tree, "src")];
   const sourceFiles = await sources(tree);
   const anchors = await trustAnchorSource(tree);

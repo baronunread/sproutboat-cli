@@ -16,6 +16,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
+import { resolveHostCompiler } from "./toolchain";
 
 export const SQLITE_VERSION = "3.50.4";
 
@@ -147,10 +148,10 @@ export async function ensureSqliteObject(input: SqliteObjectInput): Promise<stri
   const sourceSha256 = await digest(source);
   const manifestPath = `${objectPath}.sproutboat-complete`;
   const flags = ["-O2", ...SQLITE_DEFINES];
-  const [cmd, prefix] =
+  const [cmd, ...prefix] =
     input.target === "host"
-      ? (["cc", []] as const)
-      : ([input.zigBin ?? "zig", ["cc", "-target", "x86_64-linux-musl"]] as const);
+      ? (await resolveHostCompiler()).cc
+      : [input.zigBin ?? "zig", "cc", "-target", "x86_64-linux-musl"];
   const command = [cmd, ...prefix];
   const validCache = async (): Promise<boolean> => {
     try {
