@@ -91,7 +91,42 @@ const EXAMPLES = {
     const api = await (await fetch(base + "/api/time")).json();
     ok("run_sprout_first gives /api to the handler", !Number.isNaN(Date.parse(String(api.now))), api);
   },
+
+  analytics: async (base, ok) => {
+    await fetch(base + "/", { method: "POST", body: '{"path":"/pricing"}' });
+    const rows = await (await fetch(base + "/")).json();
+    ok(
+      "query returns the recorded point",
+      rows.some((r: { blobs: string[] }) => r.blobs[0] === "/pricing"),
+      rows,
+    );
+  },
+
+  "outbound-fetch": async (base, ok) => {
+    ok("fetches the allowlisted host", (await text(base + "/")).startsWith("example.com answered with 200"));
+    ok("blocks a host not on the allowlist", (await fetch(base + "/blocked")).status === 403);
+  },
+
+  ratelimit: async (base, ok) => {
+    let last = 200;
+    for (let i = 0; i < 4; i++) last = (await fetch(base + "/limited")).status;
+    ok("the 4th request over the limit is a 429", last === 429);
+  },
+
+  "vars-secrets": async (base, ok) => {
+    ok(
+      "reads the baked-in var and the injected secret",
+      (await text(base + "/")) === "hej, your key ends in ...-key\n",
+    );
+  },
 } satisfies Record<string, Check>;
+
+// Everything else spawns with just PORT/SB_DATA_DIR; vars-secrets also needs
+// its one declared secret, which a standalone binary reads from the process
+// environment rather than anything sproutboat.jsonc can supply.
+const EXTRA_ENV = {
+  "vars-secrets": { API_KEY: "demo-key" },
+} satisfies Partial<Record<Name, Record<string, string>>>;
 
 type Name = keyof typeof EXAMPLES;
 const isName = (v: string): v is Name => Object.hasOwn(EXAMPLES, v);
@@ -130,7 +165,7 @@ for (const name of names) {
   const port = freePort();
   const child = Bun.spawn([built.outPath], {
     stdio: ["ignore", "ignore", "pipe"],
-    env: { ...process.env, PORT: String(port), SB_DATA_DIR: join(workdir, "data") },
+    env: { ...process.env, ...EXTRA_ENV[name], PORT: String(port), SB_DATA_DIR: join(workdir, "data") },
   });
   const base = `http://127.0.0.1:${port}`;
 

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "ratelimit",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-11",
+  "ratelimiters": [{ "binding": "API", "limit": 3, "period": 60 }],
+}
