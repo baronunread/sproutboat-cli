@@ -10,6 +10,22 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-13
+### Fixed
+- Bumped `@sproutboat/runtime` to `^0.6.2`, picking up a fix for a handler
+  calling `.text()`/`.json()` on a `Response` built from raw wire bytes (the
+  assets binding, outbound `fetch()`, or a service-binding `fetch()`) getting
+  the bytes back undecoded instead of as real UTF-8 text
+  (baronunread/sproutboat#181).
+
+### Changed
+- Added the 4 missing binding examples (`analytics`, `outbound-fetch`,
+  `ratelimit`, `vars-secrets`) referenced live by the site's bindings page,
+  and wired them into `examples/smoke.ts`.
+- Corrected `vars-secrets`' doc comment: a standalone binary does not refuse
+  to start when a declared secret is missing; it starts fine and only throws
+  on first use of the missing secret.
+
 ## [0.11.0] - 2026-09-13
 ### Added
 - `sproutboat toolchain doctor [--json]`: reports the whole toolchain's state
@@ -443,7 +459,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.3...v0.11.0
 [0.10.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.1...v0.10.2
