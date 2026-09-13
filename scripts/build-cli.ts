@@ -1,45 +1,109 @@
-/** Build one platform package executable. npm's tiny root launcher resolves it. */
+/**
+ * Build platform package executable(s). npm's tiny root launcher resolves one
+ * of these at install time.
+ *
+ * Default (no args): build the host's own target only — what CI's per-platform
+ * matrix runners want, one native build each, no cross-compilation involved.
+ *
+ * `--all`: cross-compile all four targets from this one machine (`bun build
+ * --compile` can target any `bun-<os>-<arch>` regardless of host — verified
+ * against real Linux/macOS output, not just docs). For a maintainer building
+ * every platform package locally without waiting on CI.
+ */
 import { chmod, copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const platform = process.platform === "darwin" ? "darwin" : process.platform === "linux" ? "linux" : null;
-const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : null;
-if (!platform || !arch) throw new Error(`unsupported release host ${process.platform}/${process.arch}`);
-const packageDir = resolve(import.meta.dir, "..", "platform-packages", `${platform}-${arch}`);
-const out = resolve(packageDir, "bin", "sproutboat");
-await mkdir(resolve(out, ".."), { recursive: true });
-// SAFETY: package.json is this release's manifest and npm requires its version.
-const version = ((await Bun.file(resolve(import.meta.dir, "..", "package.json")).json()) as { version: string })
-  .version;
-// SAFETY: every checked-in platform package manifest owns a required string version.
-const platformVersion = ((await Bun.file(resolve(packageDir, "package.json")).json()) as { version: string }).version;
-if (platformVersion !== version)
-  throw new Error(`platform package version ${platformVersion} does not match root ${version}`);
-const child = Bun.spawn(
-  [
-    process.execPath,
-    "build",
-    "--compile",
-    "--target=bun",
-    `--define:process.env.SPROUTBOAT_CLI_VERSION=${JSON.stringify(version)}`,
-    "--outfile",
-    out,
-    "src/main.ts",
-  ],
-  {
-    cwd: resolve(import.meta.dir, ".."),
-    stdout: "inherit",
-    stderr: "inherit",
-  },
-);
-if ((await child.exited) !== 0) process.exit(1);
-let esbuild: string;
-try {
-  esbuild = Bun.resolveSync(`@esbuild/${platform}-${arch}/bin/esbuild`, import.meta.dir);
-} catch {
-  throw new Error("matching esbuild binary is missing; run bun install before building a platform package");
+type Target = { platform: "darwin" | "linux"; arch: "arm64" | "x64"; bunTarget: string };
+
+const TARGETS: Target[] = [
+  { platform: "darwin", arch: "arm64", bunTarget: "bun-darwin-arm64" },
+  { platform: "darwin", arch: "x64", bunTarget: "bun-darwin-x64" },
+  { platform: "linux", arch: "arm64", bunTarget: "bun-linux-arm64" },
+  { platform: "linux", arch: "x64", bunTarget: "bun-linux-x64" },
+];
+
+function hostTarget(): Target {
+  const platform = process.platform === "darwin" ? "darwin" : process.platform === "linux" ? "linux" : null;
+  const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : null;
+  if (!platform || !arch) throw new Error(`unsupported release host ${process.platform}/${process.arch}`);
+  const match = TARGETS.find((t) => t.platform === platform && t.arch === arch);
+  if (!match) throw new Error(`no target entry for ${platform}/${arch}`);
+  return match;
 }
-const packagedEsbuild = resolve(packageDir, "bin", "esbuild");
-await copyFile(esbuild, packagedEsbuild);
-await copyFile(resolve(import.meta.dir, "..", "THIRD_PARTY_NOTICES.md"), resolve(packageDir, "THIRD_PARTY_NOTICES.md"));
-await chmod(packagedEsbuild, 0o755);
+
+const root = resolve(import.meta.dir, "..");
+
+/** esbuild ships one binary per platform (`@esbuild/<os>-<arch>`); a cross
+ * target's copy is never installed locally (npm/bun refuse it — the package
+ * declares `os`/`cpu` and gets skipped for any other host), so fetch that
+ * platform's tarball from the registry instead, same shape as ensureZig's
+ * prebuilt-archive fetches. */
+async function esbuildBinaryFor(target: Target): Promise<string> {
+  const host = hostTarget();
+  if (target.platform === host.platform && target.arch === host.arch) {
+    try {
+      return Bun.resolveSync(`@esbuild/${target.platform}-${target.arch}/bin/esbuild`, import.meta.dir);
+    } catch {
+      throw new Error("host esbuild binary is missing; run bun install first");
+    }
+  }
+  // SAFETY: package.json is this repo's own manifest, with a required esbuild dependency entry.
+  const pkg = (await Bun.file(resolve(root, "package.json")).json()) as { dependencies: { esbuild: string } };
+  const version = pkg.dependencies.esbuild.replace(/^[\^~]/, "");
+  const name = `${target.platform}-${target.arch}`;
+  const cacheDir = resolve(
+    process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? `${process.env.HOME}/.cache/sproutboat`,
+    `esbuild-${version}-${name}`,
+  );
+  const cached = resolve(cacheDir, "esbuild");
+  if (await Bun.file(cached).exists()) return cached;
+  const res = await fetch(`https://registry.npmjs.org/@esbuild/${name}/-/${name}-${version}.tgz`);
+  if (!res.ok) throw new Error(`could not fetch @esbuild/${name}@${version}: HTTP ${res.status}`);
+  const tarPath = resolve(cacheDir, "esbuild.tgz");
+  await mkdir(cacheDir, { recursive: true });
+  await Bun.write(tarPath, await res.arrayBuffer());
+  const untar = Bun.spawn(["tar", "-xzf", tarPath, "-C", cacheDir, "--strip-components=2", "package/bin/esbuild"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [code, err] = await Promise.all([untar.exited, new Response(untar.stderr).text()]);
+  if (code !== 0) throw new Error(`could not extract @esbuild/${name}: ${err.trim()}`);
+  await chmod(cached, 0o755);
+  return cached;
+}
+
+async function buildOne(target: Target): Promise<void> {
+  const packageDir = resolve(root, "platform-packages", `${target.platform}-${target.arch}`);
+  const out = resolve(packageDir, "bin", "sproutboat");
+  await mkdir(resolve(out, ".."), { recursive: true });
+  // SAFETY: package.json is this release's manifest and npm requires its version.
+  const version = ((await Bun.file(resolve(root, "package.json")).json()) as { version: string }).version;
+  // SAFETY: every checked-in platform package manifest owns a required string version.
+  const platformVersion = ((await Bun.file(resolve(packageDir, "package.json")).json()) as { version: string }).version;
+  if (platformVersion !== version)
+    throw new Error(`platform package version ${platformVersion} does not match root ${version}`);
+  console.log(`building ${target.platform}-${target.arch}...`);
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "build",
+      "--compile",
+      `--target=${target.bunTarget}`,
+      `--define:process.env.SPROUTBOAT_CLI_VERSION=${JSON.stringify(version)}`,
+      "--outfile",
+      out,
+      "src/main.ts",
+    ],
+    { cwd: root, stdout: "inherit", stderr: "inherit" },
+  );
+  if ((await child.exited) !== 0) throw new Error(`compile failed for ${target.platform}-${target.arch}`);
+  const esbuild = await esbuildBinaryFor(target);
+  const packagedEsbuild = resolve(packageDir, "bin", "esbuild");
+  await copyFile(esbuild, packagedEsbuild);
+  await copyFile(resolve(root, "THIRD_PARTY_NOTICES.md"), resolve(packageDir, "THIRD_PARTY_NOTICES.md"));
+  await chmod(packagedEsbuild, 0o755);
+  await chmod(out, 0o755);
+}
+
+const all = process.argv.includes("--all");
+for (const target of all ? TARGETS : [hostTarget()]) await buildOne(target);
