@@ -172,7 +172,7 @@ async function up() {
 }
 await up();
 
-await runConformance(base, TOKEN, check, { skipBinaryAssetCheck: true });
+await runConformance(base, TOKEN, check);
 
 console.log(`\n${passed} checks passed — every binding exercised end to end.`);
 for (const c2 of cleanup.reverse())

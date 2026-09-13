@@ -37,14 +37,6 @@ export type ConformanceOptions = {
    * worker-to-worker call through, so the build refuses the binding outright.
    */
   skipServices?: boolean;
-  /**
-   * Skip the binary-asset byte-preservation check. Currently failing for real
-   * (baronunread/sproutboat#176): #172's UTF-8 fix conflicts with this
-   * transport's byte-preserving contract for binary assets, both riding the
-   * same `bytestring` representation. Not a harness bug — a real regression,
-   * tracked separately so it doesn't block unrelated verification.
-   */
-  skipBinaryAssetCheck?: boolean;
 };
 
 export async function runConformance(
@@ -81,17 +73,14 @@ export async function runConformance(
     "assets: unknown GET falls back to the SPA shell (200)",
     spa.status === 200 && (await spa.text()).includes("<h1>Sproutboat Notes"),
   );
-  // #176 — currently failing for real: the #172 UTF-8 fix and this transport's
-  // byte-preserving contract for binary assets are in direct conflict (both
-  // ride the same `bytestring` representation, indistinguishable at the point
-  // that conflict bites). Not something to patch blind; see the issue.
-  if (!options.skipBinaryAssetCheck) {
-    const binaryAsset = new Uint8Array(await (await fetch(base + "/binary-fixture.bin")).arrayBuffer());
-    check(
-      "assets: binary bytes are unchanged",
-      binaryAsset.length === 256 && binaryAsset.every((byte, index) => byte === index),
-    );
-  }
+  // #176: a reserved x-sb-raw-body response header tells the C write path to
+  // pass an asset's bytes through untouched instead of re-encoding them as if
+  // they were a JS string a handler built (porf_native_fetch_read_raw_bytes).
+  const binaryAsset = new Uint8Array(await (await fetch(base + "/binary-fixture.bin")).arrayBuffer());
+  check(
+    "assets: binary bytes are unchanged",
+    binaryAsset.length === 256 && binaryAsset.every((byte, index) => byte === index),
+  );
 
   // KV (login -> whoami)
   const login = await jget("/login", { method: "POST" });
