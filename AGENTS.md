@@ -29,6 +29,14 @@ website's support table links to these, so a broken one makes the table lie.
 ruled out. Read it before working around something: Proxy, Web Crypto, streams
 and the zod init crash are all recorded there with issue numbers.
 
+A finished draft in that file, even one with a verified repro, is not
+authorization to open it on the real `CanadaHonk/porffor` tracker. Filing
+there is outward-facing and effectively irreversible, so always stop and ask
+a human first, immediately before the `gh issue create` call, even if told
+earlier in the conversation to "file it." An agent skipped that check once
+(baronunread/sproutboat, 2026-09-13) and the issue had to be closed with an
+apology; don't repeat it.
+
 When reducing a compiler bug, delete the binary before every compile and bind
 port 0 for a free port. A stale binary answering for a failed build, or a port
 collision with a leftover server, has produced false conclusions here twice.
