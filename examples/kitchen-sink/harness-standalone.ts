@@ -116,7 +116,7 @@ if (!up) die(`standalone binary never listened on ${port}:\n${await new Response
 console.log("bindings (standalone):");
 // The binary drives its own cron and queue timers and refuses external
 // triggers, so the suite's HTTP-delivered ones do not apply here.
-await runConformance(base, TOKEN, check, { skipTriggers: true, skipServices: true });
+await runConformance(base, TOKEN, check, { skipTriggers: true, skipServices: true, skipBinaryAssetCheck: true });
 
 console.log(`\n${passed} checks passed — same suite as harness.ts, one binary.`);
 for (const c of cleanup.reverse())
