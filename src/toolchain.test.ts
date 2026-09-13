@@ -121,6 +121,7 @@ test("Zig falls back across community mirrors to ziglang.org", async () => {
     cacheRoot,
     platform: "x86_64-linux",
     expectedSha256: sha256,
+    validate: false, // testing mirror fallback, not the fake fixture's ability to compile
     fetcher: async (input) => {
       const url = String(input);
       seen.push(url);
@@ -148,6 +149,7 @@ test("the legacy unsuffixed Zig cache directory is removed", async () => {
     platform: "x86_64-linux",
     url: "fixture",
     expectedSha256: sha256,
+    validate: false, // testing legacy-cache cleanup, not the fake fixture's ability to compile
     fetcher: async () => new Response(Bun.file(archive)),
   });
   expect(existsSync(legacy)).toBe(false);
@@ -223,7 +225,7 @@ test("an interrupted Zig lock is recovered", async () => {
 test("toolchain doctor inspection is non-mutating and identifies every managed cache", () => {
   const report = inspectToolchain();
   expect(report.host).toBe(`${process.arch}/${process.platform}`);
-  expect(report.porffor.version).toContain("alpha-4");
+  expect(report.porffor.version).toContain("alpha-5");
   expect(report.zig.version).toBe(ZIG_VERSION);
   expect(report.sqlite.path).toContain("sqlite-");
   expect(report.bearssl.path).toContain("bearssl-");
