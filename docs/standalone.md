@@ -87,15 +87,26 @@ not itself a trusted address; with the list unset or the peer not in it,
 IPv4-mapped IPv6 peers (`::ffff:1.2.3.4`) are folded to the dotted form. CIDR
 ranges are IPv4; an IPv6 proxy must be listed as a bare address.
 
-## Known issue: `Date.prototype.toISOString` inside an async handler
+## Known issue: an async handler can livelock at 100% CPU
 
-Calling `.toISOString()` on a `Date` from inside an `async` function that has
-already resumed past an `await` livelocks the process at 100% CPU after a few
-requests (upstream Porffor, alpha-5; tracked as
-[#168](https://github.com/baronunread/sproutboat/issues/168)). Sync-only
-handlers are unaffected. Until it's fixed upstream, use `Date.now()` (plus
-your own calendar math if you need a formatted string) instead of
-`toISOString()`/`toJSON()` anywhere in an async request path.
+Any `fetch` handler whose result resolves a promise with a plain object —
+returning a `Response` from an `async` function is the common shape, so this
+is not a rare pattern — can wedge the process at 100% CPU after a handful of
+requests, with no error and no log line (upstream Porffor, alpha-5; tracked
+as [#168](https://github.com/baronunread/sproutboat/issues/168)). Root cause:
+a duck-typing check for `.then` walks the resolved value's prototype chain
+and, under certain allocator conditions, never finds the terminator — an
+infinite spin, not a slow leak. Onset is allocator-dependent, so it does not
+reproduce reliably from run to run, and it is *not* specific to any one API —
+an earlier version of this note said to avoid `Date.prototype.toISOString()`,
+which only ever correlated with one specific repro, not the actual trigger.
+Sync-only handlers are unaffected, since nothing ever resolves a promise.
+
+There is no confirmed reliable workaround yet — the exact trigger condition
+(which allocator states produce the stale byte) isn't pinned down, so neither
+is a safe subset of `async`/`await` usage to recommend. Track
+[#168](https://github.com/baronunread/sproutboat/issues/168) for updates
+rather than relying on any workaround here.
 
 ## What differs from a deployed sprout
 
