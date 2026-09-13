@@ -1,0 +1,81 @@
+name: release-platform-packages
+on:
+  push:
+    tags: ["v*"]
+
+# Publishes the 4 @sproutboat/cli-<os>-<arch> packages on a vX.Y.Z tag whose
+# number matches package.json -- one native runner per platform, same matrix
+# ci.yml's packaged-cli job already builds and smoke-tests on every push.
+#
+# Auth is npm Trusted Publishing (OIDC) -- no token secret. One-time setup on
+# npmjs.com, per package: @sproutboat/cli-<os>-<arch> -> Settings -> Trusted
+# Publisher -> GitHub Actions, with user baronunread, repo sproutboat-cli,
+# workflow release-platform-packages.yml. Provenance is generated
+# automatically; the repo must stay public.
+jobs:
+  publish:
+    if: github.repository == 'baronunread/sproutboat-cli'
+    name: publish (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS x64
+            runner: macos-13
+            dir: darwin-x64
+          - name: macOS arm64
+            runner: macos-14
+            dir: darwin-arm64
+          - name: Linux x64
+            runner: ubuntu-24.04
+            dir: linux-x64
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+            dir: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      id-token: write # OIDC token for Trusted Publishing + provenance
+    steps:
+      - uses: actions/checkout@v7
+      - name: tag matches package.json version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          test "$tag" = "$pkg" || { echo "tag $tag != package.json $pkg"; exit 1; }
+          plat="$(node -p "require('./platform-packages/${{ matrix.dir }}/package.json').version")"
+          test "$tag" = "$plat" || { echo "tag $tag != platform-packages/${{ matrix.dir }} $plat"; exit 1; }
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest # Trusted Publishing needs npm >= 11.5.1
+      - run: bun install --frozen-lockfile
+      - run: bun run build:cli
+      - name: Exercise the packaged executable with a cold host cache
+        shell: bash
+        run: |
+          cli="platform-packages/${{ matrix.dir }}/bin/sproutboat"
+          test -x "$cli"
+          "$cli" --version
+          HOME="$RUNNER_TEMP/sproutboat-home" \
+          SPROUTBOAT_TOOLCHAIN_CACHE="$RUNNER_TEMP/sproutboat-toolchain" \
+          "$cli" build --target host examples/hello
+          sprout="$(find examples/hello/.sproutboat/dist -type f -name sprout -print -quit)"
+          test -x "$sprout"
+          PORT=8791 "$sprout" >"$RUNNER_TEMP/sprout.log" 2>&1 &
+          sprout_pid=$!
+          trap 'kill "$sprout_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:8791/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/sprout.log"
+          exit 1
+      - name: publish
+        working-directory: platform-packages/${{ matrix.dir }}
+        run: npm publish
