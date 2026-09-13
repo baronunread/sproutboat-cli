@@ -1,36 +1,34 @@
 #!/usr/bin/env node
-// npm selects the packaged executable for this host when it is installed; that
-// is a native single-file binary that needs no Bun. When it is absent (it is
-// not published yet — see issue #134), fall back to running the TypeScript
-// entry point with Bun, which is how the CLI shipped through v0.9.0.
+// npm resolves exactly one @sproutboat/cli-<os>-<arch> optionalDependency for
+// this host at install time (#134); this launcher just execs that native
+// single-file binary. No Bun, no fallback: a platform with no published
+// binary means npm skipped that optional dependency, and require.resolve
+// below fails with a clear "package not found" rather than a silent one.
 const { spawn } = require("node:child_process");
-const { join } = require("node:path");
 
 const platform = process.platform === "darwin" ? "darwin" : process.platform === "linux" ? "linux" : null;
 const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : null;
 
-let command;
-let args;
-let viaBun = false;
-try {
-  if (!platform || !arch) throw new Error(`unsupported host ${process.platform}/${process.arch}`);
-  command = require.resolve(`@sproutboat/cli-${platform}-${arch}/bin/sproutboat`);
-  args = process.argv.slice(2);
-} catch {
-  viaBun = true;
-  // SPROUTBOAT_BUN is an escape hatch for an unusual install; otherwise PATH.
-  command = process.env.SPROUTBOAT_BUN || "bun";
-  args = [join(__dirname, "..", "src", "main.ts"), ...process.argv.slice(2)];
+if (!platform || !arch) {
+  console.error(`sproutboat: unsupported host ${process.platform}/${process.arch}`);
+  process.exit(1);
 }
 
-const child = spawn(command, args, { stdio: "inherit", windowsHide: true });
+let command;
+try {
+  command = require.resolve(`@sproutboat/cli-${platform}-${arch}/bin/sproutboat`);
+} catch {
+  console.error(
+    `sproutboat: no native build installed for ${platform}-${arch}. ` +
+      `Reinstall sproutboat, or install @sproutboat/cli-${platform}-${arch} directly.`,
+  );
+  process.exit(1);
+}
+
+const child = spawn(command, process.argv.slice(2), { stdio: "inherit", windowsHide: true });
 
 child.once("error", (error) => {
-  if (viaBun && error.code === "ENOENT") {
-    console.error("sproutboat: this build needs Bun on PATH. Install it: https://bun.sh");
-  } else {
-    console.error(`sproutboat: could not start: ${error.message}`);
-  }
+  console.error(`sproutboat: could not start: ${error.message}`);
   process.exit(1);
 });
 

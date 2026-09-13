@@ -62,13 +62,6 @@ async function fixtures(): Promise<{
   await mkdir(join(platformPackage, "bin"), { recursive: true });
   await mkdir(tarballs);
   await cp(join(root, "bin", "sproutboat.cjs"), join(rootPackage, "bin", "sproutboat.cjs"));
-  // A stand-in for src/main.ts, so the "no platform package" fallback has an
-  // entry point to reach with Bun. Prints its args, echoes exit code.
-  await mkdir(join(rootPackage, "src"), { recursive: true });
-  await writeFile(
-    join(rootPackage, "src", "main.ts"),
-    'const a = process.argv.slice(2);\nconsole.log("from-src " + a.join(" "));\nif (a[0] === "exit") process.exit(Number(a[1]));\n',
-  );
   await writeFile(
     join(rootPackage, "package.json"),
     JSON.stringify({
@@ -117,12 +110,12 @@ test("root npm pack excludes platform binaries and retains runtime exports", asy
   expect(files.some((file) => file.includes("platform/") || file.includes("platform-packages/"))).toBe(false);
 }, 120000);
 
-test("platform package manifests stay consistent with the release matrix", async () => {
-  // The per-platform binaries are not published yet (#134); the launcher falls
-  // back to Bun without them. The manifests are kept ready so the release that
-  // publishes them, and re-adds `optionalDependencies`, is a single change.
+test("platform package manifests, and the root's optionalDependencies pin on them, stay version-consistent", async () => {
   // SAFETY: package manifests in this repository are JSON owned by this test.
-  const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string };
+  const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
+    version: string;
+    optionalDependencies: Record<string, string>;
+  };
   for (const [platform, arch] of [
     ["darwin", "arm64"],
     ["darwin", "x64"],
@@ -142,6 +135,10 @@ test("platform package manifests stay consistent with the release matrix", async
       files: ["bin/sproutboat", "bin/esbuild", "bin/zig.tar.xz", "THIRD_PARTY_NOTICES.md"],
     });
     expect(existsSync(join(root, "platform-packages", `${platform}-${arch}`, "THIRD_PARTY_NOTICES.md"))).toBe(true);
+    // A version bump that forgets these leaves npm resolving a stale, possibly
+    // unpublished platform package for every install -- this is the release
+    // step's own version-bump commit failing loudly instead.
+    expect(manifest.optionalDependencies[name]).toBe(manifest.version);
   }
 });
 
@@ -212,26 +209,17 @@ test("launcher uses the platform binary when present and forwards a signal", asy
   expect(await child.exited).toBe(77);
 });
 
-test("launcher falls back to Bun on src/main.ts when no platform package is installed", async () => {
+test("launcher fails clearly, not silently, when no platform package is installed", async () => {
   if (!node) throw new Error("node is required for package tests");
   const fixture = await fixtures();
   const project = join(fixture.directory, "no-platform");
   await mkdir(project);
-  // Root only, no @sproutboat/cli-* alongside it: require.resolve fails -> Bun.
+  // Root only, no @sproutboat/cli-* alongside it: require.resolve fails.
   const installed = join(project, "node_modules", "sproutboat");
   await cp(join(fixture.directory, "root"), installed, { recursive: true });
   const launcher = join(installed, "bin", "sproutboat.cjs");
 
-  const ran = await run(node, [launcher, "hello", "world"], project);
-  expect(ran).toMatchObject({ code: 0, stdout: "from-src hello world\n" });
-  const exited = await run(node, [launcher, "exit", "23"], project);
-  expect(exited.code).toBe(23);
-
-  // No Bun on PATH -> a clear message, not a stack trace.
-  const noBun = await run(node, [launcher], project, {
-    PATH: dirname(node),
-    SPROUTBOAT_BUN: "definitely-not-a-real-bun",
-  });
-  expect(noBun.code).toBe(1);
-  expect(noBun.stderr).toContain("needs Bun on PATH");
-}, 120000);
+  const ran = await run(node, [launcher], project);
+  expect(ran.code).toBe(1);
+  expect(ran.stderr).toContain("no native build installed");
+});
