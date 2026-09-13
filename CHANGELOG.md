@@ -10,6 +10,55 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-13
+### Added
+- `sproutboat toolchain doctor [--json]`: reports the whole toolchain's state
+  at a glance — Zig, Porffor, SQLite, BearSSL, and uWebSockets
+  versions/paths/presence, plus C compiler/archiver/SDK prerequisites.
+- Self-contained platform packages (baronunread/sproutboat#134, #166):
+  `@sproutboat/cli-<os>-<arch>` now ships a vendored, sha256-verified Zig
+  archive and the patched Porffor source alongside the native binary. A fresh
+  install's first build needs no network for either.
+- `optionalDependencies` restored on the root package: `npm install
+  sproutboat` resolves the real native binary for your platform again.
+- `scripts/build-cli.ts --all`: cross-compiles all four platform binaries
+  from one machine, for a maintainer building a full release without
+  waiting on CI.
+
+### Fixed
+- Host builds (`build --target host`, `dev`, `build --standalone`) no longer
+  require a system C compiler. They prefer one when present; when none is
+  found, they fall back to the vendored Zig cross-compiler targeting the
+  host itself — covering uWebSockets/SQLite/BearSSL's own object compiles
+  and Porffor's final link alike.
+- Zig is validated right after download (confirmed to actually link the
+  linux-x86_64-musl target) instead of failing unexplained mid-build.
+- Native dependency caches (Zig, SQLite, BearSSL, uWebSockets) are locked
+  during publication and rebuild, and keyed by compiler identity — a
+  concurrent build or a stale/corrupted cache entry can no longer be
+  silently reused.
+- Non-ASCII Latin-1-range strings emitted as raw bytes under
+  `charset=utf-8` (baronunread/sproutboat#172), fixed upstream and pulled in
+  via the `@sproutboat/runtime`/`@sproutboat/toolchain` bump.
+- Binary static assets and proxied bodies corrupted by the #172 fix itself
+  (baronunread/sproutboat#176), fixed upstream and pulled in via the same
+  bump.
+- A capability check rejected any code declaring a local `process()` member,
+  blocking `zod` (baronunread/sproutboat#132), fixed upstream and pulled in
+  via the same bump.
+
+### Removed
+- The Bun-fallback launcher: `bin/sproutboat.cjs` no longer runs
+  `src/main.ts` under `bun` when no platform binary is installed — the
+  platform binaries are guaranteed present now that they're published and
+  self-contained.
+
+### Docs
+- `docs/standalone.md`: documents the `toISOString()`-after-async-resume
+  livelock (baronunread/sproutboat#168) and its `Date.now()` workaround;
+  corrects an earlier note that wrongly called it `Date`-specific.
+- Release provenance notices published alongside toolchain diagnostics.
+
 ## [0.10.3] - 2026-09-11
 ### Added
 - Rate-limiter result carries `resetAt`: `env.<NAME>.limit({ key })` now returns
@@ -394,7 +443,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.3...v0.11.0
 [0.10.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.0...v0.10.1
