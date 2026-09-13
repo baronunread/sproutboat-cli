@@ -6,6 +6,7 @@
   "files": [
     "bin/sproutboat",
     "bin/esbuild",
+    "bin/zig.tar.xz",
     "THIRD_PARTY_NOTICES.md"
   ],
   "os": [

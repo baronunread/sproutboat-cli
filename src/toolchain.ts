@@ -248,21 +248,40 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
   const stage = resolve(root, `.zig-${ZIG_VERSION}-${key}-${process.pid}-${crypto.randomUUID()}`);
   const fetcher = options.fetcher ?? fetch;
   const sourceUrl = options.url ?? process.env.SPROUTBOAT_ZIG_URL;
-  const urls = sourceUrl ? [sourceUrl] : await zigDownloadUrls(key, fetcher, options.timeoutMs ?? 30_000);
-  console.log(`Fetching Zig ${ZIG_VERSION} (${key}, one-time)...`);
+  // A platform package ships its own host's Zig archive right beside the CLI
+  // executable (scripts/build-cli.ts stages it there at publish time, the same
+  // compressed .tar.xz an ordinary download would fetch), so a packaged
+  // install needs no network for Zig -- same pattern as the vendored
+  // uWebSockets archive. Only the default, no-`platform`/no-`url` call (every
+  // real caller) takes this path; build-cli.ts's own cross-target fetches and
+  // this file's tests always pass one of those and go straight to the network.
+  const vendored =
+    options.platform === undefined && !sourceUrl ? resolve(dirname(process.execPath), "zig.tar.xz") : null;
+  const usingVendored = vendored !== null && existsSync(vendored);
+  console.log(
+    usingVendored
+      ? `Extracting vendored Zig ${ZIG_VERSION} (${key}, one-time)...`
+      : `Fetching Zig ${ZIG_VERSION} (${key}, one-time)...`,
+  );
   try {
     if (await zigComplete(dir, key, expected)) return resolve(dir, "zig");
     await rm(dir, { recursive: true, force: true });
     await mkdir(stage);
     const archive = resolve(stage, "zig.tar.xz");
-    // Zig's pinned archive is about 50 MB. Keep the fetch bounded while
-    // allowing a cold download to complete on ordinary consumer connections.
-    await downloadZig(urls, archive, fetcher, options.timeoutMs ?? 120_000);
+    if (usingVendored) {
+      // SAFETY: usingVendored is only true when `vendored` is the non-null path just checked.
+      await Bun.write(archive, Bun.file(vendored!));
+    } else {
+      // Zig's pinned archive is about 50 MB. Keep the fetch bounded while
+      // allowing a cold download to complete on ordinary consumer connections.
+      const urls = sourceUrl ? [sourceUrl] : await zigDownloadUrls(key, fetcher, options.timeoutMs ?? 30_000);
+      await downloadZig(urls, archive, fetcher, options.timeoutMs ?? 120_000);
+    }
     const actual = await sha256File(archive);
     if (actual !== expected)
       throw new ZigToolchainError(
         "integrity",
-        `Zig archive sha256 mismatch\n  expected ${expected}\n  got      ${actual}`,
+        `${usingVendored ? "vendored " : ""}Zig archive sha256 mismatch\n  expected ${expected}\n  got      ${actual}`,
       );
     const untar = Bun.spawn(["tar", "-xJf", archive, "-C", stage, "--strip-components=1"], {
       stdout: "pipe",
@@ -293,6 +312,36 @@ export async function ensureZig(options: EnsureZigOptions = {}): Promise<string>
     await rm(stage, { recursive: true, force: true });
     await rm(lock, { recursive: true, force: true });
   }
+}
+
+/**
+ * The verified, compressed Zig archive for `platform` -- not extracted, not
+ * necessarily this host's own. `scripts/build-cli.ts` uses this to fetch and
+ * stage another platform's archive into that platform's package for `--all`,
+ * where `ensureZig` itself cannot help: it extracts, validates, and caches for
+ * *this* host only, none of which makes sense for a foreign target's binary.
+ * Cached at `<cacheRoot>/zig-archive-<version>-<platform>.tar.xz` so a repeat
+ * `--all` run does not re-download all four.
+ */
+export async function ensureZigArchive(platform: ZigPlatform, cacheRoot?: string): Promise<string> {
+  const root = resolve(cacheRoot ?? process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? resolve(homedir(), ".cache/sproutboat"));
+  const archive = resolve(root, `zig-archive-${ZIG_VERSION}-${platform}.tar.xz`);
+  const expected = ZIG_SHA256[platform];
+  if (existsSync(archive) && (await sha256File(archive)) === expected) return archive;
+  await mkdir(root, { recursive: true });
+  const stage = `${archive}.${process.pid}.${crypto.randomUUID()}`;
+  const urls = await zigDownloadUrls(platform, fetch, 30_000);
+  await downloadZig(urls, stage, fetch, 120_000);
+  const actual = await sha256File(stage);
+  if (actual !== expected) {
+    await rm(stage, { force: true });
+    throw new ZigToolchainError(
+      "integrity",
+      `Zig archive sha256 mismatch\n  expected ${expected}\n  got      ${actual}`,
+    );
+  }
+  await rename(stage, archive);
+  return archive;
 }
 
 /** `cc [args...]`/`cxx [args...]`/`ar [args...]`, each as `[bin, ...leadingArgs]`

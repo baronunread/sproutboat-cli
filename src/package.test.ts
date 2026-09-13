@@ -139,7 +139,7 @@ test("platform package manifests stay consistent with the release matrix", async
       version: manifest.version,
       os: [platform],
       cpu: [arch],
-      files: ["bin/sproutboat", "bin/esbuild", "THIRD_PARTY_NOTICES.md"],
+      files: ["bin/sproutboat", "bin/esbuild", "bin/zig.tar.xz", "THIRD_PARTY_NOTICES.md"],
     });
     expect(existsSync(join(root, "platform-packages", `${platform}-${arch}`, "THIRD_PARTY_NOTICES.md"))).toBe(true);
   }

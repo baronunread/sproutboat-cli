@@ -12,14 +12,15 @@
  */
 import { chmod, copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { ensureZigArchive, type ZigPlatform } from "../src/toolchain";
 
-type Target = { platform: "darwin" | "linux"; arch: "arm64" | "x64"; bunTarget: string };
+type Target = { platform: "darwin" | "linux"; arch: "arm64" | "x64"; bunTarget: string; zigPlatform: ZigPlatform };
 
 const TARGETS: Target[] = [
-  { platform: "darwin", arch: "arm64", bunTarget: "bun-darwin-arm64" },
-  { platform: "darwin", arch: "x64", bunTarget: "bun-darwin-x64" },
-  { platform: "linux", arch: "arm64", bunTarget: "bun-linux-arm64" },
-  { platform: "linux", arch: "x64", bunTarget: "bun-linux-x64" },
+  { platform: "darwin", arch: "arm64", bunTarget: "bun-darwin-arm64", zigPlatform: "aarch64-macos" },
+  { platform: "darwin", arch: "x64", bunTarget: "bun-darwin-x64", zigPlatform: "x86_64-macos" },
+  { platform: "linux", arch: "arm64", bunTarget: "bun-linux-arm64", zigPlatform: "aarch64-linux" },
+  { platform: "linux", arch: "x64", bunTarget: "bun-linux-x64", zigPlatform: "x86_64-linux" },
 ];
 
 function hostTarget(): Target {
@@ -100,6 +101,13 @@ async function buildOne(target: Target): Promise<void> {
   const esbuild = await esbuildBinaryFor(target);
   const packagedEsbuild = resolve(packageDir, "bin", "esbuild");
   await copyFile(esbuild, packagedEsbuild);
+  // The compressed archive (~50 MB), not the ~400 MB extracted install: Zig's
+  // lib/ carries libc/libc++ sources for every target it can cross-compile to,
+  // which only matters once, on extract. `ensureZig` (src/toolchain.ts) looks
+  // for this file next to the running executable before ever hitting the
+  // network, and extracts it into the ordinary toolchain cache on first use --
+  // same shape as the vendored uWebSockets archive.
+  await copyFile(await ensureZigArchive(target.zigPlatform), resolve(packageDir, "bin", "zig.tar.xz"));
   await copyFile(resolve(root, "THIRD_PARTY_NOTICES.md"), resolve(packageDir, "THIRD_PARTY_NOTICES.md"));
   await chmod(packagedEsbuild, 0o755);
   await chmod(out, 0o755);

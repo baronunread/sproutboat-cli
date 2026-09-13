@@ -7,3 +7,4 @@ dist/
 bin/platform/
 platform-packages/*/bin/sproutboat
 platform-packages/*/bin/esbuild
+platform-packages/*/bin/zig.tar.xz
