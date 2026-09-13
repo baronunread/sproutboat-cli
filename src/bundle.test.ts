@@ -49,6 +49,57 @@ test("#89: a Node API reached through a dependency is still rejected", async () 
   }
 });
 
+/**
+ * #132 — zod v4 declares its own `process(schema, ctx)`. A bare `\bprocess\b`
+ * match flagged that local binding as readily as the Node global, refusing
+ * any handler that merely imports zod. A platform API is always reached
+ * through a member access or `new`; a local function call is neither.
+ */
+test("#132: a locally-declared process() is not the Node global", () => {
+  const result = validateHttpSyncSource(
+    `function process(x) { return x; }\nvar d={fetch(){return new Response(String(process({})));}};export{d as default};`,
+  );
+  expect(result.ok).toBe(true);
+});
+
+test("#132: process.env, Bun/Deno globals, and new Buffer are still rejected", () => {
+  for (const snippet of [
+    `var d={fetch(){return new Response(process.env.HOME);}};export{d as default};`,
+    `var d={fetch(){return new Response(Bun.file('x').size);}};export{d as default};`,
+    `var d={fetch(){return new Response(Deno.env.get('x'));}};export{d as default};`,
+    `var d={fetch(){return new Response(Buffer.from('x'));}};export{d as default};`,
+    `var d={fetch(){return new Response(new Buffer('x'));}};export{d as default};`,
+  ]) {
+    const result = validateHttpSyncSource(snippet);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.errors.join(" ")).toContain("Node, Bun, and Deno APIs");
+  }
+});
+
+// A real bundle comment ended "...unique to this process. The id is..." —
+// the sentence-ending period after the word, not member access, still
+// matched an earlier version of this fix's own regex.
+test("#132: 'process.' at the end of a sentence is not member access", () => {
+  const result = validateHttpSyncSource(
+    `// a comment unique to this process. The rest follows.\nvar d={fetch(){return new Response("ok");}};export{d as default};`,
+  );
+  expect(result.ok).toBe(true);
+});
+
+test("#132: node: only means something as a specifier-shaped string, not any substring", () => {
+  // Shaped like an import specifier -- still rejected.
+  expect(
+    validateHttpSyncSource(`var d={fetch(){return new Response(require("node:fs"));}};export{d as default};`).ok,
+  ).toBe(false);
+  // Mid-sentence mention in an ordinary string a dependency happens to build -- not a specifier, must pass.
+  expect(
+    validateHttpSyncSource(
+      `var msg="see node:fs docs";var d={fetch(){return new Response(msg);}};export{d as default};`,
+    ).ok,
+  ).toBe(true);
+});
+
 test("#89: an unresolvable import names the specifier that failed", async () => {
   const dir = project({
     "src/index.js": `import { x } from "./missing.js";\nexport default { fetch() { return new Response(x); } };`,

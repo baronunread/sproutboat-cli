@@ -6,8 +6,10 @@
 generated C. Each is independent and re-applied on every build:
 
 - `compiler/render.js` — the native-fetch server reads its listen port from
-  `$PORT` at runtime (falling back to the compiled `port:`), and routes handler
-  `console` output to stderr, unbuffered (#165).
+  `$PORT` at runtime (falling back to the compiled `port:`), routes handler
+  `console` output to stderr unbuffered (#165), and UTF-8 encodes the
+  `bytestring` (Latin-1-range) branch of `porf_native_fetch_read_value` instead
+  of copying its code units onto the wire raw (#172).
 - `compiler/index.js` — `SB_EXTRA_LINK` / `SB_EXTRA_CFLAGS` splice points so a
   standalone build can link SQLite / include `<bearssl.h>` (#15).
 - `compiler/uwebsockets.js` — configurable request-body limit (#56), the #156
@@ -196,6 +198,37 @@ argument carrying the client's IP.
 
 ---
 
+## #172 — `bytestring` values go out raw instead of UTF-8 encoded
+
+**Version:** `alpha-5` @ `1f4ae4ae`, `compiler/render.js`, native-fetch build.
+
+`porf_native_fetch_read_value()` is where a response body, header name, or
+header value crosses from Porffor's internal string representation to the
+bytes uWS writes on the socket. Its `${TYPES.string}` (UTF-16) branch correctly
+encodes each unit to UTF-8. Its `${TYPES.bytestring}` branch — the
+Latin-1-range representation Porffor uses whenever every code point fits one
+byte, which most JS strings do — instead copies the raw code units straight
+into `*out_buf`, no encoding at all. A code unit in `0x00-0x7F` happens to be
+identical in both encodings, so plain ASCII output looks fine; anything in
+`0x80-0xFF` (`é`, `ñ`, `€`'s constituent bytes, any accented Latin text) reaches
+the client as the raw Latin-1 byte instead of its 2-byte UTF-8 encoding —
+mojibake regardless of what `Content-Type` charset the handler declares.
+
+**Local patch** (`src/patch-porffor.ts` / `@sproutboat/toolchain`'s
+`patchRenderJs`): give the `bytestring` branch the same treatment as its
+`string` sibling three lines down — walk the units, emit each as 1 or 2 UTF-8
+bytes depending on whether it's below `0x80`, into a `malloc`'d buffer handed
+back through the existing `out_owned` (freed by the caller, same as the
+`string` branch already relies on).
+
+**Upstream shape** (rewrite before filing, per `AI_POLICY`; file as an issue):
+`porf_native_fetch_read_value`'s `bytestring` branch should UTF-8 encode like
+its `string` branch does, not copy raw. Distinguishing "value that happens to
+fit one byte per unit" from "value that is already UTF-8 bytes" is an internal
+representation detail; nothing about the wire protocol should leak it.
+
+---
+
 ## Upstream issues we depend on
 
 Filed and tracked at `CanadaHonk/porffor`. None of these are things to fix
@@ -255,7 +288,9 @@ Web Crypto.
 
 ## Open finding: zod compiles, then dies at module init
 
-Not filed yet — the reproducer below is small and reliable but has not been
+Tracked as baronunread/sproutboat#175 (independently re-reproduced there,
+2026-09-13, past the capability-check fix in #132). Not filed upstream at
+Porffor yet — the reproducer below is small and reliable but has not been
 reduced to a language construct, and #145's own thread shows the maintainer
 would rather have the construct than a library.
 
@@ -326,3 +361,70 @@ Reduce with a runner that deletes the binary before each compile and binds port
 stale `out.bin` answered for a compile that had failed to bundle, and a random
 port collided with a server left over from a previous case. Two rounds of
 conclusions had to be thrown away.
+
+---
+
+## `Date.prototype.toISOString` livelocks a resumed async turn
+
+**Version:** `alpha-5` @ `1f4ae4ae`, `porf native`, native-fetch standalone build,
+darwin-arm64 host target. Tracked downstream as
+[sproutboat#168](https://github.com/baronunread/sproutboat/issues/168), confirmed
+reproducing against the pinned commit 2026-09-12.
+
+### Problem
+
+An `async` handler that calls `.toISOString()` on a `Date` after resuming from
+an `await` pins the process at 100% CPU forever after a handful of requests
+(3-13 in local runs; every subsequent connection times out, `CLOSE_WAIT`
+sockets pile up). No error, no log line, no crash — the process just stops
+dispatching.
+
+Bisected one ingredient at a time against a 40-line repro (async session-gate
+handler, cookie parsing, JSON response, one `await`, one `console.error` log
+line per request). Everything below passes 30-200x hammered:
+
+microtask count, nesting depth, D1 writes, allocation volume, `console.error`
+alone, `JSON.stringify` alone, `headers.get` alone, `new URL`, env bindings
+passed through async functions, ratelimit ops, tight `await`/HMAC churn,
+`Date.now()`. Swapping the log line's `new Date().toISOString()` for
+`Date.now()` (epoch millis) is the only change that turns a reliably-wedging
+build into a reliably-clean one.
+
+So the fault is specific to `Date.prototype.toISOString` (or the `Date`
+formatting path underneath it, shared by `toJSON`/`toUTCString`) called from a
+handler frame that has already resumed once — sync-only handlers calling the
+same method never wedge.
+
+### Repro
+
+```js
+async function inner(request) { return new Response('ok'); }
+async function outer(request) {
+  const res = await inner(request);   // <- resume point
+  console.error(JSON.stringify({ time: new Date().toISOString() }));
+  return res;
+}
+export default { fetch: (request) => outer(request) };
+```
+
+```
+porf native handler.js -o handler && PORT=8080 ./handler
+# hammer it: curl loop wedges the process within ~10 requests, 100% CPU, no output
+```
+
+### Related, found during the same isolation pass (filing separately or noting here)
+
+- An `async` function that does a bare `return somePromise` (no `await`) never
+  resolves the outer call — every async helper has to resolve to a plain value
+  before returning, promise adoption doesn't happen.
+- `sproutboat build` still emits a binary when the source has a duplicate
+  `const` declaration (a hard `SyntaxError` everywhere else); it prints the
+  redeclaration error and writes `dist/` output anyway.
+
+### Harness note
+
+Reproduce with a *sequential* request loop (`for` + `curl`, one connection at a
+time) against a standalone/native-fetch build, not `porf run`/dev mode — the
+wedge is specific to the compiled native-fetch server's resumed-continuation
+path. Needs a fresh data dir and process per attempt; a stale process from an
+earlier build will happily answer and mask the result.

@@ -87,6 +87,16 @@ not itself a trusted address; with the list unset or the peer not in it,
 IPv4-mapped IPv6 peers (`::ffff:1.2.3.4`) are folded to the dotted form. CIDR
 ranges are IPv4; an IPv6 proxy must be listed as a bare address.
 
+## Known issue: `Date.prototype.toISOString` inside an async handler
+
+Calling `.toISOString()` on a `Date` from inside an `async` function that has
+already resumed past an `await` livelocks the process at 100% CPU after a few
+requests (upstream Porffor, alpha-5; tracked as
+[#168](https://github.com/baronunread/sproutboat/issues/168)). Sync-only
+handlers are unaffected. Until it's fixed upstream, use `Date.now()` (plus
+your own calendar math if you need a formatted string) instead of
+`toISOString()`/`toJSON()` anywhere in an async request path.
+
 ## What differs from a deployed sprout
 
 - **Service bindings do not exist.** They call another deployment through an
