@@ -74,8 +74,8 @@ declare global {
     httpMetadata: R2HttpMetadata;
     customMetadata?: Record<string, string>;
     /**
-     * The object as a string. An object is held whole in memory on the way in
-     * and on the way out, so keep them small.
+     * The object as a string. A get holds the object whole in memory, so keep
+     * downloads small until native download tickets are available.
      *
      * `new Response(obj.body, ...)` corrupts any non-ASCII/binary content: the
      * runtime cannot tell these bytes apart from a string a handler built, so
@@ -114,8 +114,25 @@ declare global {
     cursor?: string;
   }
 
+  interface R2UploadedPart {
+    partNumber: number;
+    etag: string;
+  }
+
+  interface R2MultipartUpload {
+    key: string;
+    uploadId: string;
+    uploadPart(partNumber: number, value: string): R2UploadedPart;
+    complete(parts: R2UploadedPart[]): R2ObjectHead;
+    abort(): void;
+  }
+
   interface R2Bucket {
     put(key: string, value: string, options?: R2PutOptions): void;
+    /** Starts a resumable upload whose individual parts stay memory-bounded. */
+    createMultipartUpload(key: string, options?: R2PutOptions): R2MultipartUpload;
+    /** Reconstructs a multipart handle after storing its key and upload id. */
+    resumeMultipartUpload(key: string, uploadId: string): R2MultipartUpload;
     get(key: string): R2Object | null;
     /** Metadata without the body. */
     head(key: string): R2ObjectHead | null;
