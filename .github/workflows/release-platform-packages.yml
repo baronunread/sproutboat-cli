@@ -20,9 +20,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Cross-built on the arm64 image, not on macos-13: GitHub's only x64
+          # macOS pool routinely leaves this leg queued for 30+ minutes while
+          # every other leg finishes in about a minute, and it has blocked whole
+          # releases twice. `bun build --compile` targets any bun-<os>-<arch>
+          # from any host, and the vendored Zig archive is per-target already,
+          # so nothing here needs x64 hardware to produce. The trade is that the
+          # binary can't be executed on the runner that built it; the arch check
+          # below stands in for the cold-cache smoke test.
           - name: macOS x64
-            runner: macos-13
+            runner: macos-14
             dir: darwin-x64
+            cross: true
           - name: macOS arm64
             runner: macos-14
             dir: darwin-arm64
@@ -55,8 +64,17 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm install -g npm@latest # Trusted Publishing needs npm >= 11.5.1
       - run: bun install --frozen-lockfile
-      - run: bun run build:cli
+      - run: bun scripts/build-cli.ts --target ${{ matrix.dir }}
+      - name: Check the cross-built executable's architecture
+        if: matrix.cross
+        shell: bash
+        run: |
+          cli="platform-packages/${{ matrix.dir }}/bin/sproutboat"
+          test -x "$cli"
+          file "$cli"
+          lipo -archs "$cli" | grep -qw x86_64 || { echo "not an x86_64 binary"; exit 1; }
       - name: Exercise the packaged executable with a cold host cache
+        if: ${{ !matrix.cross }}
         shell: bash
         run: |
           cli="platform-packages/${{ matrix.dir }}/bin/sproutboat"

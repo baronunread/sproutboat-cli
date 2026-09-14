@@ -9,6 +9,11 @@
  * --compile` can target any `bun-<os>-<arch>` regardless of host — verified
  * against real Linux/macOS output, not just docs). For a maintainer building
  * every platform package locally without waiting on CI.
+ *
+ * `--target <os>-<arch>`: build exactly one named target, host or not. CI's
+ * darwin-x64 leg uses this to cross-build on an arm64 macOS runner, because
+ * GitHub's only x64 macOS image (`macos-13`) routinely sits queued for half an
+ * hour while every other leg finishes in one minute.
  */
 import { chmod, copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -113,5 +118,16 @@ async function buildOne(target: Target): Promise<void> {
   await chmod(out, 0o755);
 }
 
+function named(spec: string): Target {
+  const match = TARGETS.find((t) => `${t.platform}-${t.arch}` === spec);
+  if (!match)
+    throw new Error(
+      `unknown target ${spec}; expected one of ${TARGETS.map((t) => `${t.platform}-${t.arch}`).join(", ")}`,
+    );
+  return match;
+}
+
 const all = process.argv.includes("--all");
-for (const target of all ? TARGETS : [hostTarget()]) await buildOne(target);
+const only = process.argv[process.argv.indexOf("--target") + 1];
+const selected = all ? TARGETS : process.argv.includes("--target") ? [named(only ?? "")] : [hostTarget()];
+for (const target of selected) await buildOne(target);
