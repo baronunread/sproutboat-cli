@@ -227,15 +227,21 @@ declare global {
   }
 
   /**
+   * `env` is a global, not a parameter. `ctx` is the second argument, and its
+   * only member is `waitUntil`: work that outlives the response, drained
+   * in-process and capped at 25s.
+   */
+  interface ExecutionContext {
+    waitUntil(promise: Promise<unknown>): void;
+  }
+
+  /**
    * The default export.
-   *
-   * `fetch` takes only a request: `env` is a global, and there is no `ctx`, so
-   * there is no `ctx.waitUntil`. Use a queue for work that outlives a response.
    */
   interface SproutboatHandler<QueueBody = unknown> {
-    fetch(request: Request): Response | Promise<Response>;
-    scheduled?(event: ScheduledEvent): void | Promise<void>;
-    queue?(batch: MessageBatch<QueueBody>): void | Promise<void>;
+    fetch(request: Request, ctx: ExecutionContext): Response | Promise<Response>;
+    scheduled?(event: ScheduledEvent, ctx: ExecutionContext): void | Promise<void>;
+    queue?(batch: MessageBatch<QueueBody>, ctx: ExecutionContext): void | Promise<void>;
   }
 
   /**

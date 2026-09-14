@@ -34,7 +34,7 @@ function entries(config: SproutboatConfig): Entry[] {
     out.push({ name, type: "string", note: `vars: ${JSON.stringify(value)}` });
   }
   for (const name of config.secrets ?? []) {
-    out.push({ name, type: "string", note: "secret, set with `sproutboat secrets set`" });
+    out.push({ name, type: "string", note: "secret, set with `sproutboat secrets put`" });
   }
   for (const { binding } of resourceRefs(config.kv_namespaces)) out.push({ name: binding, type: "KVNamespace" });
   for (const { binding } of resourceRefs(config.d1_databases)) out.push({ name: binding, type: "D1Database" });

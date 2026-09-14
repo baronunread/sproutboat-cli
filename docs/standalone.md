@@ -30,9 +30,8 @@ variables anyway.
 
 The binary never carries a secret, for the same reason an artifact never does:
 the bytes are identical for everyone who has the file, and rotating a compiled
-secret would mean rebuilding. The binary checks every declared secret at
-startup, so a missing one refuses the boot and lists the names instead of
-crashing on the first request that needs it.
+secret would mean rebuilding. A missing secret does not stop the binary from
+starting; it throws the first time the handler reads it.
 
 ## Where data lives
 
