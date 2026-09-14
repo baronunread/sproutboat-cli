@@ -79,15 +79,23 @@ declare global {
      *
      * `new Response(obj.body, ...)` corrupts any non-ASCII/binary content: the
      * runtime cannot tell these bytes apart from a string a handler built, so
-     * it UTF-8-encodes them a second time (baronunread/sproutboat#177, open —
-     * no workaround yet). Safe for text content only until that lands.
+     * it UTF-8-encodes them a second time (baronunread/sproutboat#177). Use
+     * `obj.toResponse()` instead for binary content — it serves the bytes
+     * unmodified.
      */
     body: string;
     text(): string;
     json(): unknown;
+    /**
+     * A `Response` that serves `body` byte-for-byte, unlike `new
+     * Response(obj.body, ...)` (see `body` above). `init.headers`/`.status`
+     * merge in as usual; `content-type` defaults from `httpMetadata` and
+     * `etag` from `httpEtag` when not set.
+     */
+    toResponse(init?: { status?: number; headers?: HeadersInit }): Response;
   }
 
-  type R2ObjectHead = Omit<R2Object, "body" | "text" | "json">;
+  type R2ObjectHead = Omit<R2Object, "body" | "text" | "json" | "toResponse">;
 
   interface R2Objects {
     objects: R2ObjectHead[];
