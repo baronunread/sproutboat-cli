@@ -10,6 +10,18 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-09-14
+### Fixed
+- Bumped `@sproutboat/runtime` to `^0.6.4`, picking up the encode-side half of
+  the same `O(n^2)` string-building bug `v0.11.2` fixed on the decode side.
+  `__sbToBytes` sits behind every `crypto.subtle` call a handler makes:
+  `digest`, `importKey`, `sign`, `verify` and the PBKDF2/scrypt path all funnel
+  their data, keys, salts and signatures through it, so hashing a request body
+  was quadratic in the body's size. `__sbHexOrBytes`, which decodes the
+  `expected` side of an HMAC verify, was worse still; it rewrote its
+  accumulator's last character on every odd nibble, copying the whole string
+  twice per byte (baronunread/sproutboat#180).
+
 ## [0.11.2] - 2026-09-14
 ### Fixed
 - Bumped `@sproutboat/runtime` to `^0.6.3`. `v0.11.1` bumped it to `^0.6.2`,
@@ -470,7 +482,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.3...HEAD
+[0.11.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.3...v0.11.0
