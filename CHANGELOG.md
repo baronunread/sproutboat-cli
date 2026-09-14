@@ -10,6 +10,31 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-09-14
+### Fixed
+- Bumped `@sproutboat/runtime` to `^0.6.5`, undoing a severe performance
+  regression that `v0.11.3` shipped (baronunread/sproutboat#181). `0.6.4`'s
+  encode fix was correct for the large inputs it targeted and badly wrong for
+  small ones: an app hashing ~150-byte values through `crypto.subtle.digest`
+  on every request lost **64% of its throughput** (4,700 to 1,680 req/s),
+  tripled its p50 (4.6ms to 13.4ms) and grew 41% in RSS. The encoder now only
+  reaches for an array once 512 bytes have accumulated, so a small input runs
+  exactly like `v0.11.2` while a large one keeps the `#180` fix.
+- Upgrading the CLI is the only way to pick this up. The runtime prelude is
+  embedded in the CLI binary when that binary is built, so a project's own
+  `@sproutboat/runtime` dependency has no effect on `--standalone` or
+  `--target host` builds. Anyone on `v0.11.3` should move to this release;
+  `v0.11.2` is the last unaffected version before it.
+
+### Changed
+- The `darwin-x64` platform package is now cross-compiled on the arm64 macOS
+  runner instead of built natively on `macos-13`. GitHub's only x64 macOS pool
+  routinely left that leg queued for 30+ minutes and blocked two releases,
+  including `v0.11.3`, where the root package published while its own
+  `optionalDependency` on `@sproutboat/cli-darwin-x64` was still waiting on it.
+  Nothing in the package needs x64 hardware to produce. `scripts/build-cli.ts`
+  gains `--target <os>-<arch>` for this.
+
 ## [0.11.3] - 2026-09-14
 ### Fixed
 - Bumped `@sproutboat/runtime` to `^0.6.4`, picking up the encode-side half of
@@ -482,7 +507,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.3...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.4...HEAD
+[0.11.4]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.0...v0.11.1
