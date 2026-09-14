@@ -64,7 +64,7 @@
     "@sproutboat/artifact": "^0.2.0",
     "@sproutboat/assets": "^0.2.0",
     "@sproutboat/config": "^0.3.0",
-    "@sproutboat/runtime": "^0.7.0",
+    "@sproutboat/runtime": "^0.7.1",
     "@sproutboat/toolchain": "^0.4.1",
     "@sproutboat/wire": "^0.6.0",
     "esbuild": "^0.28.2"
