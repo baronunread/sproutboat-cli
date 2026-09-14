@@ -10,6 +10,24 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-09-14
+### Fixed
+- Bumped `@sproutboat/runtime` to `^0.6.6`. `__sbEntry` called `handlers.fetch()`
+  (and the `scheduled`/`queue`/`alarm` trigger paths) with no try/catch at all:
+  any synchronous throw, or a rejected async handler promise, propagated all
+  the way up and crashed the whole process: not just the request that hit
+  it, but every other in-flight and future request on that sprout, until
+  whatever supervises it restarted the binary (baronunread/sproutboat#179). A
+  throwing/rejecting `fetch()` now returns a 500 instead. `scheduled()`/
+  `alarm()` still reply `204` either way (no failure signal existed before
+  this either); a throwing `queue()` falls through to the existing
+  default-ack pass, same as a handler that never calls `ack()`/`retry()` on
+  every message.
+- Upgrading the CLI is the only way to pick this up. The runtime prelude is
+  embedded in the CLI binary when that binary is built, so a project's own
+  `@sproutboat/runtime` dependency has no effect on `--standalone` or
+  `--target host` builds.
+
 ## [0.11.4] - 2026-09-14
 ### Fixed
 - Bumped `@sproutboat/runtime` to `^0.6.5`, undoing a severe performance
@@ -507,7 +525,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.4...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.5...HEAD
+[0.11.5]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.4...v0.11.5
 [0.11.4]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.1...v0.11.2
