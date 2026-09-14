@@ -10,6 +10,17 @@ maintained going forward by the `release` skill.
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-09-14
+### Fixed
+- Bumped `@sproutboat/runtime` to `^0.6.3`. `v0.11.1` bumped it to `^0.6.2`,
+  which fixed the mojibake but not a second, compounding bug in the same
+  code path: `__sbFromUtf8` built its result with repeated `out +=` string
+  concatenation, which is `O(n^2)` in Porffor's runtime (no rope/cons
+  string optimization). A fresh install of `v0.11.1` silently carried this
+  forward, since `^0.6.2` is satisfied by `0.6.2` -- a real deployment
+  regressed back to 2.6s+ per request from a plain `bun install` picking up
+  that exact version, until the dependency was explicitly bumped further.
+
 ## [0.11.1] - 2026-09-13
 ### Fixed
 - Bumped `@sproutboat/runtime` to `^0.6.2`, picking up a fix for a handler
@@ -459,7 +470,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.3...v0.11.0
 [0.10.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.10.2...v0.10.3
