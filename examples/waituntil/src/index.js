@@ -9,8 +9,6 @@ export default {
     if (url.pathname === "/check") {
       return new Response(env.LOG.get("last") || "unset\n");
     }
-    // Date.now(), not toISOString(): calling toISOString() after an async
-    // resume can livelock a standalone build at 100% CPU (sproutboat#168).
     ctx.waitUntil(Promise.resolve().then(() => env.LOG.put("last", String(Date.now()))));
     return new Response("ok\n");
   },
