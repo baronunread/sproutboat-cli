@@ -96,10 +96,20 @@ async function fixtures(): Promise<{
 test("root npm pack excludes platform binaries and retains runtime exports", async () => {
   if (!npm) throw new Error("npm is required for package tests");
   const result = await run(npm, ["pack", "--json", "--ignore-scripts", "--dry-run"], root);
-  expect(result).toMatchObject({ code: 0, stderr: "" });
+  // Not stderr: "" or a bare JSON.parse(result.stdout) — some npm versions
+  // run the root package's own "prepare" script (`lefthook install || true`)
+  // during `pack` even with --ignore-scripts, and its stdout/stderr chatter
+  // ("sync hooks: ...") lands *before* npm's own JSON output on the same
+  // stream. The npm version this was written against doesn't do that. Either
+  // way that noise is unrelated to what this test actually checks — the
+  // packed file list — so require a clean exit and locate wherever the JSON
+  // itself starts, rather than assuming the whole stream is JSON.
+  expect(result.code).toBe(0);
+  const jsonStart = result.stdout.search(/[[{]/);
+  if (jsonStart === -1) throw new Error(`npm pack produced no JSON: ${result.stdout}`);
   // SAFETY: npm pack's --json response is an array with a files array
   // (npm 11) or an object keyed by package name (npm 12+).
-  const packed = JSON.parse(result.stdout) as
+  const packed = JSON.parse(result.stdout.slice(jsonStart)) as
     | Array<{ files: Array<{ path: string }> }>
     | Record<string, { files: Array<{ path: string }> }>;
   const entry = Array.isArray(packed) ? packed[0] : Object.values(packed)[0];
