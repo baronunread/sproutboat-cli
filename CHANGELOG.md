@@ -8,14 +8,26 @@ a breaking change.
 Reconstructed from git history on 2026-09-03 for everything through v0.4.11;
 maintained going forward by the `release` skill.
 
-## [Unreleased]
+## [0.11.6] - 2026-09-15
 ### Fixed
 - The 100% CPU livelock on a `fetch` handler that resolves a promise with a
   plain object (baronunread/sproutboat#168). Root cause was
   `__Porffor_promise_resolve`'s `.then` duck-type probe spinning forever on a
   prototype-chain fixed point instead of terminating; patched in
-  `@sproutboat/toolchain` alongside the other local Porffor patches. Ships
-  once the toolchain pin bumps into a CLI release — see `patches/UPSTREAM.md`.
+  `@sproutboat/toolchain` alongside the other local Porffor patches. Bumped
+  `@sproutboat/toolchain` to `^0.4.1` to pick it up.
+- `new Response(r2Object.body)` corrupted any binary R2 object (each byte
+  0x80-0xFF doubled on the wire): the runtime couldn't tell opaque bytes
+  apart from a Latin-1-range string, so it UTF-8-encoded them a second time
+  (baronunread/sproutboat#177). Added `R2Object.toResponse(init?)`, which
+  serves the bytes unmodified. Bumped `@sproutboat/runtime` to `^0.7.1` and
+  `@sproutboat/wire` to `^0.6.0` to pick this up, along with the R2
+  file-backed storage rework (baronunread/sproutboat#56) both depend on.
+- `sproutboat-env.d.ts`'s generated secret comment named the wrong command
+  (`secrets set`; the real one is `secrets put`), `SproutboatHandler` claimed
+  there is no `ctx`/`ctx.waitUntil` (shipped since #57/#171), and
+  `docs/standalone.md` still said a missing secret refuses the boot (0.11.1
+  changed that to throwing on first use instead).
 
 ## [0.11.5] - 2026-09-14
 ### Fixed
