@@ -56,20 +56,38 @@ declare global {
 
   // ---------------------------------------------------------------- R2
 
+  interface R2HttpMetadata {
+    contentType?: string;
+    contentDisposition?: string;
+    contentEncoding?: string;
+    contentLanguage?: string;
+    cacheControl?: string;
+  }
+
   interface R2Object {
     key: string;
     size: number;
     etag: string;
+    /** `etag`, quoted, ready for an `ETag` response header. */
+    httpEtag: string;
     uploaded: string;
+    httpMetadata: R2HttpMetadata;
     customMetadata?: Record<string, string>;
     /**
      * The object as a string. An object is held whole in memory on the way in
      * and on the way out, so keep them small.
+     *
+     * `new Response(obj.body, ...)` corrupts any non-ASCII/binary content: the
+     * runtime cannot tell these bytes apart from a string a handler built, so
+     * it UTF-8-encodes them a second time (baronunread/sproutboat#177, open —
+     * no workaround yet). Safe for text content only until that lands.
      */
     body: string;
+    text(): string;
+    json(): unknown;
   }
 
-  type R2ObjectHead = Omit<R2Object, "body">;
+  type R2ObjectHead = Omit<R2Object, "body" | "text" | "json">;
 
   interface R2Objects {
     objects: R2ObjectHead[];
@@ -78,6 +96,7 @@ declare global {
   }
 
   interface R2PutOptions {
+    httpMetadata?: R2HttpMetadata;
     customMetadata?: Record<string, string>;
   }
 
