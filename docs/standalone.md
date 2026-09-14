@@ -101,11 +101,13 @@ an earlier version of this note said to avoid `Date.prototype.toISOString()`,
 which only ever correlated with one specific repro, not the actual trigger.
 Sync-only handlers are unaffected, since nothing ever resolves a promise.
 
-There is no confirmed reliable workaround yet — the exact trigger condition
-(which allocator states produce the stale byte) isn't pinned down, so neither
-is a safe subset of `async`/`await` usage to recommend. Track
-[#168](https://github.com/baronunread/sproutboat/issues/168) for updates
-rather than relying on any workaround here.
+Fixed by a local patch to Porffor's `.then` probe (see `patches/UPSTREAM.md`),
+pending release — no CLI version has picked it up yet, so this is still live
+for every build today. There is no workaround for a build on a version
+before the fix ships: the exact allocator trigger isn't something a safe
+subset of `async`/`await` usage can dodge. Track
+[#168](https://github.com/baronunread/sproutboat/issues/168) for the release
+that carries it.
 
 ## What differs from a deployed sprout
 

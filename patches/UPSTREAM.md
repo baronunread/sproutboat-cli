@@ -14,6 +14,9 @@ generated C. Each is independent and re-applied on every build:
   standalone build can link SQLite / include `<bearssl.h>` (#15).
 - `compiler/uwebsockets.js` — configurable request-body limit (#56), the #156
   status-line fix, and the #163 `x-sb-remote-addr` synthetic header — all below.
+- `compiler/builtins/promise.ts` — guards `__Porffor_promise_resolve`'s `.then`
+  prototype-chain probe against a fixed-point loop that never terminates
+  (#168, below).
 
 The pin lives in `src/porffor-toolchain.ts` (`PORFFOR_CHANNEL` /
 `PORFFOR_COMMIT_FULL`), currently **alpha-5** (`1f4ae4ae`). Patches are applied
@@ -365,6 +368,18 @@ conclusions had to be thrown away.
 ---
 
 ## `Date.prototype.toISOString` livelocks a resumed async turn
+
+**Fixed** by a local patch (`patchPromiseTs` in `@sproutboat/toolchain`'s
+`patch.ts`, applied to `compiler/builtins/promise.ts`). Root cause is not
+`Date`-specific — see the correction below and `docs/standalone.md` — it's
+`__Porffor_promise_resolve`'s `.then` duck-type probe spinning on a
+prototype-chain fixed point instead of terminating. The patch adds the same
+`lastProto` guard `_internal_object.ts`'s own prototype walks already use.
+Verified against the pinned checkout: the repro below (and the plain-object
+variant in the correction) survive hundreds of sequential hammered requests
+post-patch where they wedged within a handful before it. Still worth filing
+upstream (the "Draft F" writeup covers the lldb-confirmed root cause) since
+the patch is local-only until Porffor fixes it directly.
 
 **Version:** `alpha-5` @ `1f4ae4ae`, `porf native`, native-fetch standalone build,
 darwin-arm64 host target. Tracked downstream as

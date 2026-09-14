@@ -9,6 +9,13 @@ Reconstructed from git history on 2026-09-03 for everything through v0.4.11;
 maintained going forward by the `release` skill.
 
 ## [Unreleased]
+### Fixed
+- The 100% CPU livelock on a `fetch` handler that resolves a promise with a
+  plain object (baronunread/sproutboat#168). Root cause was
+  `__Porffor_promise_resolve`'s `.then` duck-type probe spinning forever on a
+  prototype-chain fixed point instead of terminating; patched in
+  `@sproutboat/toolchain` alongside the other local Porffor patches. Ships
+  once the toolchain pin bumps into a CLI release — see `patches/UPSTREAM.md`.
 
 ## [0.11.5] - 2026-09-14
 ### Fixed
