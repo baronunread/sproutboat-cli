@@ -91,6 +91,7 @@ body with the wrong digest. The default maximum upload is 100 MiB; the broker's
 The deployed edge also has a 5 GiB HTTP body cap by default, configurable with
 `SPROUTBOAT_EDGE_MAX_BODY_BYTES`; both caps must allow the intended file size.
 The direct-transfer request timeout defaults to ten minutes.
+An idle connection with no bytes sent or received for 255 seconds is closed.
 
 Native standalone sprouts do not yet serve the direct-transfer path. Use the
 multipart recipe above there. `env.FILES.get()` still reads an entire object
