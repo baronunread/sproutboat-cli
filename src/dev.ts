@@ -279,9 +279,10 @@ export async function runDev(input: DevInput): Promise<void> {
       hostname: "127.0.0.1",
       port: input.port,
       maxRequestBodySize: 5 * 1024 * 1024 * 1024,
-      fetch(request) {
+      fetch(request, server) {
         const target = new URL(request.url);
         const directTransfer = /^\/__sb\/r2\/transfer\/[A-Z][A-Z0-9_]*\/[0-9a-f]{24}$/.test(target.pathname);
+        if (directTransfer) server.timeout(request, 255);
         if (directTransfer && !activeTransferPort) return new Response("direct transfers unavailable", { status: 503 });
         target.host = `127.0.0.1:${directTransfer ? activeTransferPort : activePort}`;
         return fetch(target, {
