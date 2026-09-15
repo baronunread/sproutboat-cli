@@ -127,12 +127,35 @@ declare global {
     abort(): void;
   }
 
+  interface R2TransferTicket {
+    /** Same-origin reserved path. Send the file directly to this URL. */
+    url: string;
+    expiresAt: string;
+  }
+
+  interface R2UploadTicketOptions extends R2PutOptions {
+    /** Maximum accepted body size in bytes. Default 100 MiB. */
+    maxBytes?: number;
+    /** Ticket lifetime in seconds, clamped to 30-3600. */
+    expiresIn?: number;
+    /** Optional lowercase hexadecimal SHA-256 checksum. */
+    sha256?: string;
+  }
+
+  interface R2DownloadTicketOptions {
+    expiresIn?: number;
+  }
+
   interface R2Bucket {
     put(key: string, value: string, options?: R2PutOptions): void;
     /** Starts a resumable upload whose individual parts stay memory-bounded. */
     createMultipartUpload(key: string, options?: R2PutOptions): R2MultipartUpload;
     /** Reconstructs a multipart handle after storing its key and upload id. */
     resumeMultipartUpload(key: string, uploadId: string): R2MultipartUpload;
+    /** Broker-backed direct PUT. Not available in native standalone mode yet. */
+    createUploadUrl(key: string, options?: R2UploadTicketOptions): R2TransferTicket;
+    /** Broker-backed direct GET or HEAD, including Range. */
+    createDownloadUrl(key: string, options?: R2DownloadTicketOptions): R2TransferTicket;
     get(key: string): R2Object | null;
     /** Metadata without the body. */
     head(key: string): R2ObjectHead | null;

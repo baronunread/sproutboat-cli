@@ -9,4 +9,8 @@ test("R2 ambient types include the resumable multipart surface", () => {
   expect(declarations).toContain("interface R2MultipartUpload");
   expect(declarations).toContain("createMultipartUpload(key: string, options?: R2PutOptions): R2MultipartUpload;");
   expect(declarations).toContain("resumeMultipartUpload(key: string, uploadId: string): R2MultipartUpload;");
+  expect(declarations).toContain("createUploadUrl(key: string, options?: R2UploadTicketOptions): R2TransferTicket;");
+  expect(declarations).toContain(
+    "createDownloadUrl(key: string, options?: R2DownloadTicketOptions): R2TransferTicket;",
+  );
 });

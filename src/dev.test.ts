@@ -113,6 +113,71 @@ test("dev: a failed replacement leaves the last good response on the stable port
   }
 });
 
+test("dev: reserved R2 transfer paths bypass the native sprout", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "sproutboat-dev-transfer-"));
+  const publicPort = freePort();
+  const token = "a".repeat(24);
+  const factory: NonNullable<DevInput["candidateFactory"]> = async (_input, port) => {
+    const sprout = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("native") });
+    const transfer = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (request) => new Response(await request.text()),
+    });
+    let resolveExit: (code: number) => void = () => undefined;
+    const exited = new Promise<number>((resolve) => {
+      resolveExit = resolve;
+    });
+    // SAFETY: only the coordinator's stop/exit fields are used by this fake.
+    return {
+      sprout: {
+        kill() {
+          resolveExit(0);
+        },
+        exited,
+      } as Bun.Subprocess,
+      sproutPath: join(projectDir, "fake"),
+      artifactDir: join(projectDir, "artifact"),
+      broker: {} as Running["broker"],
+      stopBroker: () => {
+        sprout.stop();
+        transfer.stop();
+      },
+      expected: false,
+      port,
+      transferPort: transfer.port,
+      enableDispatch() {},
+      disableDispatch() {},
+    };
+  };
+  const task = runDev({
+    projectDir,
+    config,
+    sourcePath: join(projectDir, "index.js"),
+    source: "",
+    port: publicPort,
+    watch: false,
+    candidateFactory: factory,
+    exitOnShutdown: false,
+    rebuild: async () => ({ config, sourcePath: join(projectDir, "index.js"), source: "" }),
+  });
+  try {
+    await eventually(async () => {
+      expect((await fetch(`http://127.0.0.1:${publicPort}/`)).status).toBe(200);
+    });
+    expect(await (await fetch(`http://127.0.0.1:${publicPort}/`)).text()).toBe("native");
+    const direct = await fetch(`http://127.0.0.1:${publicPort}/__sb/r2/transfer/FILES/${token}`, {
+      method: "PUT",
+      body: "file",
+    });
+    expect(await direct.text()).toBe("file");
+  } finally {
+    process.emit("SIGTERM");
+    await task;
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
 test("dev: saves during a slow rebuild coalesce and eventually serve the latest input", async () => {
   const projectDir = await mkdtemp(join(tmpdir(), "sproutboat-dev-"));
   const publicPort = freePort();
