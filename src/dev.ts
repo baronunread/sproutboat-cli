@@ -15,7 +15,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { connect } from "node:net";
 import { dirname, resolve } from "node:path";
 import { buildArtifact } from "./build";
-import { createBroker, listen, type Bindings, type Broker } from "./broker";
+import { createBroker, listen, listenTransfers, type Bindings, type Broker } from "./broker";
 import { jsonObject, parseJsonValue } from "./json";
 import { amber, dim, leaf, ok } from "./style";
 import type { SproutboatConfig } from "./config";
@@ -97,6 +97,8 @@ export type Running = {
   /** Set before a kill we initiated, so its exit code is not reported as a crash. */
   expected: boolean;
   port: number;
+  /** Private direct-transfer listener, absent in test candidates. */
+  transferPort?: number;
   enableDispatch: () => void;
   disableDispatch: () => void;
 };
@@ -142,10 +144,13 @@ async function start(input: DevInput, port: number): Promise<Running> {
       assetsDir: existsSync(assetsDir) ? assetsDir : undefined,
       dispatchEnabled: () => dispatchEnabled,
     });
-    let server: ReturnType<typeof listen>;
+    let server: ReturnType<typeof listen> | undefined;
+    let transferServer: ReturnType<typeof listenTransfers> | undefined;
     try {
       server = listen(broker, "127.0.0.1", 0);
+      transferServer = listenTransfers(broker, "127.0.0.1", 0);
     } catch (error) {
+      server?.stop();
       broker.close();
       throw error;
     }
@@ -156,14 +161,15 @@ async function start(input: DevInput, port: number): Promise<Running> {
         env: {
           ...process.env,
           PORT: String(port),
-          SB_BROKER_PORT: String(server.port),
+          SB_BROKER_PORT: String(server!.port),
           SB_BROKER_TOKEN: "sproutboat-dev",
         },
         stdout: "inherit",
         stderr: "inherit",
       });
     } catch (error) {
-      server.stop();
+      server?.stop();
+      transferServer?.stop();
       broker.close();
       throw error;
     }
@@ -173,11 +179,13 @@ async function start(input: DevInput, port: number): Promise<Running> {
       artifactDir,
       broker,
       stopBroker: () => {
-        server.stop();
+        server?.stop();
+        transferServer?.stop();
         broker.close();
       },
       expected: false,
       port,
+      transferPort: transferServer?.port,
       enableDispatch: () => {
         dispatchEnabled = true;
       },
@@ -262,6 +270,7 @@ export async function runDev(input: DevInput): Promise<void> {
   }
   running.enableDispatch();
   let activePort = running.port;
+  let activeTransferPort = running.transferPort;
   // Keep the public port stable while candidates boot on private ports. This is
   // what lets a failed startup leave the last known-good process reachable.
   let proxy: ReturnType<typeof Bun.serve>;
@@ -269,9 +278,13 @@ export async function runDev(input: DevInput): Promise<void> {
     proxy = Bun.serve({
       hostname: "127.0.0.1",
       port: input.port,
-      fetch(request) {
+      maxRequestBodySize: 5 * 1024 * 1024 * 1024,
+      fetch(request, server) {
         const target = new URL(request.url);
-        target.host = `127.0.0.1:${activePort}`;
+        const directTransfer = /^\/__sb\/r2\/transfer\/[A-Z][A-Z0-9_]*\/[0-9a-f]{24}$/.test(target.pathname);
+        if (directTransfer) server.timeout(request, 255);
+        if (directTransfer && !activeTransferPort) return new Response("direct transfers unavailable", { status: 503 });
+        target.host = `127.0.0.1:${directTransfer ? activeTransferPort : activePort}`;
         return fetch(target, {
           method: request.method,
           headers: request.headers,
@@ -373,6 +386,7 @@ export async function runDev(input: DevInput): Promise<void> {
             current = { ...current, ...next };
             const switchedAt = now();
             activePort = candidate.port;
+            activeTransferPort = candidate.transferPort;
             resetWatchers();
             stop(previous);
             watchExit(running);
