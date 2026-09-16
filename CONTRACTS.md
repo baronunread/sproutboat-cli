@@ -76,7 +76,11 @@ Ops:
 - `r2.get`
 - `r2.head`
 - `r2.list`
+- `r2.multipart.abort`
+- `r2.multipart.complete`
+- `r2.multipart.create`
 - `r2.put`
+- `r2.transfer.create`
 - `ratelimit.check`
 - `secret.get`
 - `service.fetch`
@@ -91,6 +95,12 @@ Tables in a resource file, which outlives every redeploy:
 - `kv`
 - `mq`
 - `r2`
+- `r2_account_quota`
+- `r2_part`
+- `r2_quota_reservation`
+- `r2_transfer`
+- `r2_transfer_metric`
+- `r2_upload`
 - `ratelimit`
 
 ## Binding kinds
