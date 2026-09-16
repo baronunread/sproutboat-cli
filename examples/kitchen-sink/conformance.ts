@@ -135,6 +135,13 @@ export async function runConformance(
       directRead.status === 200 && (await directRead.text()) === largeBody,
       directRead.status,
     );
+    const download = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
+    const directDownload = await fetch(base + String(obj(download.body).url));
+    check(
+      "R2 direct download: native ticket streams the complete object",
+      directDownload.status === 200 && (await directDownload.text()) === largeBody,
+      directDownload.status,
+    );
   }
 
   // async handler: the prelude must return the handler's own promise untouched

@@ -137,6 +137,10 @@ export default {
       const key = "direct-" + Date.now() + ".txt";
       return json({ key, ...env.UPLOADS.createUploadUrl(key, { maxBytes: 5 * 1024 * 1024 }) }, 201);
     }
+    if (path === "/r2/direct-download" && request.method === "GET") {
+      const key = url.searchParams.get("key") || "";
+      return json(env.UPLOADS.createDownloadUrl(key), 201);
+    }
 
     // GET /notes/:id  -> note + a fresh view count from the Durable Object
     const noteMatch = /^\/notes\/(\d+)$/.exec(path);
