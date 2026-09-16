@@ -13,9 +13,31 @@
  * URL and a trigger token, and asserts on responses.
  */
 import { isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "../../src/json";
+import { request as httpRequest } from "node:http";
 
 const obj = (value: JsonValue | undefined): JsonObject => jsonObject(value ?? null) ?? {};
 const arr = (value: JsonValue | undefined): JsonValue[] => (Array.isArray(value) ? value : []);
+
+async function rawGet(
+  url: string,
+  headers: Record<string, string>,
+): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(url, { headers }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () =>
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          body: Buffer.concat(chunks).toString(),
+        }),
+      );
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
 
 export type CheckFn = (name: string, cond: boolean, detail?: JsonValue) => void;
 
@@ -135,12 +157,28 @@ export async function runConformance(
       directRead.status === 200 && (await directRead.text()) === largeBody,
       directRead.status,
     );
+    const rangedTicket = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
+    const ranged = await rawGet(base + String(obj(rangedTicket.body).url), { Range: "bytes=1024-2047" });
+    check(
+      "R2 direct download: native ticket serves a byte range",
+      ranged.status === 206 &&
+        ranged.headers["content-range"] === `bytes 1024-2047/${largeBody.length}` &&
+        ranged.body === largeBody.slice(1024, 2048),
+      ranged.status,
+    );
     const download = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
     const directDownload = await fetch(base + String(obj(download.body).url));
     check(
       "R2 direct download: native ticket streams the complete object",
       directDownload.status === 200 && (await directDownload.text()) === largeBody,
       directDownload.status,
+    );
+    const conditionalTicket = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
+    const conditional = await rawGet(base + String(obj(conditionalTicket.body).url), { "If-None-Match": "*" });
+    check(
+      "R2 direct download: native ticket honors If-None-Match",
+      conditional.status === 304 && Boolean(conditional.headers.etag),
+      conditional.status,
     );
   }
 
