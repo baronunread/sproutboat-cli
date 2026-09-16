@@ -253,7 +253,7 @@ test("an interrupted Zig lock is recovered", async () => {
 test("toolchain doctor inspection is non-mutating and identifies every managed cache", () => {
   const report = inspectToolchain();
   expect(report.host).toBe(`${process.arch}/${process.platform}`);
-  expect(report.porffor.version).toContain("alpha-5");
+  expect(report.porffor.version).toContain("alpha-6");
   expect(report.zig.version).toBe(ZIG_VERSION);
   expect(report.sqlite.path).toContain("sqlite-");
   expect(report.bearssl.path).toContain("bearssl-");

@@ -37,6 +37,8 @@ export type ConformanceOptions = {
    * worker-to-worker call through, so the build refuses the binding outright.
    */
   skipServices?: boolean;
+  /** Broker-mode ticket URLs are handled by its separate transfer listener. */
+  skipDirectTransfer?: boolean;
 };
 
 export async function runConformance(
@@ -118,6 +120,22 @@ export async function runConformance(
     arr(atts.body).some((o) => obj(o).key === obj(att.body).key),
     atts.body,
   );
+
+  if (!options.skipDirectTransfer) {
+    // This exceeds the normal 1 MiB native-fetch Request limit. A standalone
+    // binary must stream the ticket PUT through the native bridge instead.
+    const direct = await jget("/r2/direct-upload", { method: "POST" });
+    const directInfo = obj(direct.body);
+    const largeBody = "x".repeat(2 * 1024 * 1024);
+    const directPut = await fetch(base + String(directInfo.url), { method: "PUT", body: largeBody });
+    check("R2 direct upload: native ticket accepts a 2 MiB body", directPut.status === 201, directPut.status);
+    const directRead = await fetch(base + "/attach/" + encodeURIComponent(String(directInfo.key)));
+    check(
+      "R2 direct upload: published object reads back intact",
+      directRead.status === 200 && (await directRead.text()) === largeBody,
+      directRead.status,
+    );
+  }
 
   // async handler: the prelude must return the handler's own promise untouched
   const asyncRes = await jget("/async");

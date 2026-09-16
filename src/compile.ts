@@ -209,6 +209,7 @@ export async function compileSprout(input: CompileInput): Promise<void> {
       input.compatibilityDate,
       input.appName,
       input.assets,
+      input.transport,
     ),
   );
 

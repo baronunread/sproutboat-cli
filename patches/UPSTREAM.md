@@ -14,12 +14,9 @@ generated C. Each is independent and re-applied on every build:
   standalone build can link SQLite / include `<bearssl.h>` (#15).
 - `compiler/uwebsockets.js` — configurable request-body limit (#56), the #156
   status-line fix, and the #163 `x-sb-remote-addr` synthetic header — all below.
-- `compiler/builtins/promise.ts` — guards `__Porffor_promise_resolve`'s `.then`
-  prototype-chain probe against a fixed-point loop that never terminates
-  (#168, below).
 
 The pin lives in `src/porffor-toolchain.ts` (`PORFFOR_CHANNEL` /
-`PORFFOR_COMMIT_FULL`), currently **alpha-5** (`1f4ae4ae`). Patches are applied
+`PORFFOR_COMMIT_FULL`), currently **alpha-6** (`038f415e`). Patches are applied
 from the build path, not a `postinstall` hook: package managers block dependency
 lifecycle scripts by default, so a published `postinstall` would silently not
 run.

@@ -130,6 +130,14 @@ export default {
       return json(env.DB.prepare("SELECT id, title, created, attachment FROM notes ORDER BY id DESC").all().results);
     }
 
+    // POST /r2/direct-upload creates a one-use URL whose PUT body bypasses
+    // the normal handler Request buffer. The harness uses a body larger than
+    // SB_REQUEST_BODY_MAX to exercise standalone native ingress.
+    if (path === "/r2/direct-upload" && request.method === "POST") {
+      const key = "direct-" + Date.now() + ".txt";
+      return json({ key, ...env.UPLOADS.createUploadUrl(key, { maxBytes: 5 * 1024 * 1024 }) }, 201);
+    }
+
     // GET /notes/:id  -> note + a fresh view count from the Durable Object
     const noteMatch = /^\/notes\/(\d+)$/.exec(path);
     if (noteMatch && request.method === "GET") {
