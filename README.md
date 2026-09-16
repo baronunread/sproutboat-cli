@@ -150,6 +150,10 @@ files in the project and from its own `node_modules`, and may also export
 is a global, not a parameter, and every binding call is synchronous.
 [`examples/kitchen-sink/`](examples/kitchen-sink) uses every binding.
 
+For objects larger than one request, use resumable R2 multipart uploads. The
+[large-object guide](docs/r2-large-objects.md) covers part sizing, browser
+chunking, resume state, cleanup, and the remaining download limitation.
+
 `sproutboat dev` runs against a real local broker, so bindings behave like
 production without a deploy — except `secrets`, which live only in the control
 plane. Put values in a `.dev.vars` file next to `sproutboat.jsonc`
