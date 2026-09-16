@@ -24,13 +24,20 @@ jobs:
       matrix:
         include:
           - name: macOS x64
-            runner: macos-13
+            # GitHub's macOS x64 pool is routinely unavailable. Bun can
+            # cross-compile this target from the macOS arm64 image.
+            runner: macos-14
+            dir: darwin-x64
+            cross: true
           - name: macOS arm64
             runner: macos-14
+            dir: darwin-arm64
           - name: Linux x64
             runner: ubuntu-24.04
+            dir: linux-x64
           - name: Linux arm64
             runner: ubuntu-24.04-arm
+            dir: linux-arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -38,12 +45,20 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
-      - run: bun run build:cli
-      - name: Exercise the packaged executable with a cold host cache
+      - run: bun scripts/build-cli.ts --target ${{ matrix.dir }}
+      - name: Check the cross-built executable's architecture
+        if: matrix.cross
         shell: bash
         run: |
-          platform="$(node -p '`${process.platform}-${process.arch}`')"
-          cli="platform-packages/$platform/bin/sproutboat"
+          cli="platform-packages/${{ matrix.dir }}/bin/sproutboat"
+          test -x "$cli"
+          file "$cli"
+          lipo -archs "$cli" | grep -qw x86_64 || { echo "not an x86_64 binary"; exit 1; }
+      - name: Exercise the packaged executable with a cold host cache
+        if: ${{ !matrix.cross }}
+        shell: bash
+        run: |
+          cli="platform-packages/${{ matrix.dir }}/bin/sproutboat"
           test -x "$cli"
           "$cli" --version
           HOME="$RUNNER_TEMP/sproutboat-home" \
