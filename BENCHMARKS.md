@@ -1,5 +1,17 @@
 # CLI startup measurements
 
+## Porffor pin bumps
+
+`bun bench/pin-compare.ts --baseline <dir> --candidate <dir>` builds
+examples/kitchen-sink and `../standalone-app` under both an already-patched
+Porffor source tree (e.g. the previous `~/.cache/sproutboat/porffor-<sha>`) and
+the new one, and compares binary size, compile time, cold start, and
+`/api/health` throughput. It hard-fails on a kitchen-sink conformance
+regression or a >2% binary-size regression; everything else prints and gets
+flagged for a human — same noise caveat as below applies to its timing
+numbers. Paste its markdown table into the pin-bump PR and append it here
+under a dated heading, same as the entry below.
+
 Management commands intentionally load only `sproutboat.jsonc`. Measure that
 property with the same fixture before claiming a speedup:
 
@@ -44,3 +56,22 @@ At this timer resolution the median does not establish a speedup, so none is
 claimed. The narrower candidate range is observational only. The management
 regression test supplies the stronger behavioral evidence: valid configuration
 with a missing entry point reaches the control API without bundling.
+
+## Porffor alpha-6 -> alpha-7, recorded 2026-09-17
+
+`bun bench/pin-compare.ts --baseline porffor-038f415e --candidate
+porffor-8f015414 --reps 3`, macOS (arm64), Bun 1.4.1, against
+`../standalone-app`. Kitchen-sink conformance passed on both pins.
+
+| metric | baseline | candidate | change |
+| --- | ---: | ---: | ---: |
+| binary size | 2.46MB | 2.46MB | +0.0% |
+| compile time (median) | 13.9s | 14.1s | +0.9% |
+| cold start (median) | 175.2ms | 236.5ms | +35.0% |
+| throughput /api/health (median) | 26125 req/s | 25527 req/s | -2.3% |
+
+Per-rep cold start ranged 158-243ms on *both* pins (not just candidate vs
+baseline) — the same timer-noise problem the CLI startup measurements above
+already flag, not a regression. Binary size (the one metric this tool hard-
+gates on) was identical; conformance passed on both. Nothing here blocks the
+alpha-7 bump.

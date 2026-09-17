@@ -5,6 +5,7 @@ dist/
 
 *.tgz
 bin/platform/
+bench/pin-compare.json
 platform-packages/*/bin/sproutboat
 platform-packages/*/bin/esbuild
 platform-packages/*/bin/zig.tar.xz
