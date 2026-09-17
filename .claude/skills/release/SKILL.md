@@ -150,15 +150,20 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-Pushing the tag is what fires `release.yml`. Check it:
+Pushing the tag fires **two** workflows, not one: `release.yml` (publishes
+the `sproutboat` npm package) and `release-platform-packages.yml` (publishes
+the four `@sproutboat/cli-<os>-<arch>` binary packages, one per platform).
+Check both:
 
 ```bash
 gh run list --repo baronunread/sproutboat-cli --workflow=release.yml --limit 1
+gh run list --repo baronunread/sproutboat-cli --workflow=release-platform-packages.yml --limit 1
 ```
 
-Once that run succeeds (poll if needed — don't declare success before it
-reports `completed`/`success`), create the GitHub Release so the tag has
-notes attached (today, none of the 14 existing tags do):
+Once both succeed (poll if needed — don't declare success before each
+reports `completed`/`success`; the platform-packages one has 4 matrix legs,
+check all 4), create the GitHub Release so the tag has notes attached (today,
+none of the 14 existing tags do):
 
 ```bash
 gh release create vX.Y.Z --repo baronunread/sproutboat-cli \
@@ -168,6 +173,30 @@ gh release create vX.Y.Z --repo baronunread/sproutboat-cli \
 (Extract just that version's section between its heading and the next
 `## [` — don't hand the whole file to `--notes-file`.)
 
-If the workflow run fails, stop and report it rather than retrying blindly —
-a failed publish after a real tag push needs the user's judgment on whether
-to fix-forward with a new patch version or investigate the tag itself.
+If either workflow run fails, stop and report it rather than retrying
+blindly — a failed publish after a real tag push needs the user's judgment
+on whether to fix-forward with a new patch version or investigate the tag
+itself.
+
+`bunx`/`npm install` can lag the registry for a few minutes after a real
+publish, longer for the platform binary packages (10MB+ tarballs) than for
+the plain `sproutboat` JS package — a 404 or a resolved-but-stale version
+right after this step is very likely propagation lag, not a failed publish.
+Poll `https://registry.npmjs.org/<pkg>/<version>` for a 200 before
+concluding otherwise, and re-run with `bun install --no-cache` (bun's own
+package-metadata cache lags separately from the registry).
+
+## 8. Check sibling repos
+
+A toolchain/runtime-driven release here almost never stands alone:
+
+- **Check the platform repo** (`sproutboat`) for the same stale
+  `@sproutboat/toolchain`/`@sproutboat/runtime` pin and cut a matching
+  release there too (its own `release` skill) — the platform and the CLI
+  should land on the same toolchain/runtime version, not drift.
+- **Check `sproutboat-site`**'s `sproutboat` devDependency pin
+  (`sproutboat-site/package.json`). It deploys itself with
+  `bunx sproutboat deploy`, so a stale pin there means the flagship demo
+  silently keeps running an old CLI after this release ships. Bump it,
+  `bun install`, `bun run build` to confirm it still compiles, then
+  `bun run deploy` (it builds and deploys in one step — no separate tag).
