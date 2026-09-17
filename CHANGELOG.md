@@ -8,6 +8,43 @@ a breaking change.
 Reconstructed from git history on 2026-09-03 for everything through v0.4.11;
 maintained going forward by the `release` skill.
 
+## [0.11.9] - 2026-09-17
+### Fixed
+- Bumped `@sproutboat/toolchain` to `^0.4.9` and `@sproutboat/runtime` to
+  `^0.9.6`. `0.11.6`'s toolchain pin (`^0.4.5` since `0.4.2`) predated a
+  native R2 size-gating feature that shipped in `0.4.6`/`0.4.7` with a
+  misplaced `#endif` in the generated C++ guard, breaking every R2-free
+  native build with a compiler error. The fix landed as `0.4.8`, but that
+  version got stuck permanently conflicted on npm after an interrupted
+  trusted-publish attempt, so `0.4.9`/`0.9.6` revert the feature outright
+  instead: R2 transfer support is native code again, always compiled in
+  with 404 stubs where unused, same as before it existed. It saved ~11KB
+  of `__text` (~1.3% of a typical binary) and didn't even change the
+  shipped file size on macOS, since `__TEXT` is page-aligned there — not
+  worth the guard-placement bug class it introduced.
+
+## [0.11.8] - 2026-09-17
+### Fixed
+- Bumped `@sproutboat/runtime` to `^0.9.4`, fixing broker-backed
+  native-fetch builds after the direct R2 download ABI gained an `ETag`
+  accessor.
+
+## [0.11.7] - 2026-09-16
+### Added
+- Direct R2 transfers now route through the local dev broker, so `sproutboat
+  dev` exercises the same upload/download path a deployed sprout uses
+  instead of a separate dev-only stand-in. Documented with a new R2
+  multipart upload guide.
+
+### Fixed
+- Direct transfer connections no longer produce spurious log noise.
+- Bumped `@sproutboat/toolchain` to `^0.4.2`, updating the pinned Porffor
+  compiler to alpha 6 and removing a promise-resolution workaround alpha 6
+  superseded.
+
+### Changed
+- CI now cross-builds the macOS x64 CLI on a macOS 14 runner.
+
 ## [0.11.6] - 2026-09-15
 ### Fixed
 - The 100% CPU livelock on a `fetch` handler that resolves a promise with a
@@ -544,7 +581,11 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.5...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.9...HEAD
+[0.11.9]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.8...v0.11.9
+[0.11.8]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.7...v0.11.8
+[0.11.7]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.6...v0.11.7
+[0.11.6]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.5...v0.11.6
 [0.11.5]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.4...v0.11.5
 [0.11.4]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.3...v0.11.4
 [0.11.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.2...v0.11.3
