@@ -65,7 +65,7 @@
     "@sproutboat/assets": "^0.2.0",
     "@sproutboat/config": "^0.3.0",
     "@sproutboat/runtime": "^0.9.6",
-    "@sproutboat/toolchain": "^0.4.9",
+    "@sproutboat/toolchain": "^0.4.10",
     "@sproutboat/wire": "^0.7.0",
     "esbuild": "^0.28.2"
   },
