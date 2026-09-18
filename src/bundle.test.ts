@@ -157,6 +157,90 @@ test("neutraliseExports rejects a module with no default export", () => {
  * trapped property is `undefined`, with no throw. `check` has to reject it, or
  * the first sign of trouble is a 502 from a handler that built cleanly.
  */
+/**
+ * Bun already bundles a working node:url polyfill for free under
+ * `target: "browser"`. node:path and node:querystring each need a shim,
+ * for different reasons: node:path's bundled resolve() calls
+ * process.cwd() with no absolute segment (trips the `process.` ban
+ * above); node:querystring's bundled polyfill pulls in Bun's full Buffer
+ * implementation internally (trips the `Buffer.` ban). The plugin in
+ * bundle.ts swaps in shims for both — this locks in that the resulting
+ * bundle both passes the capability check and behaves like the real
+ * thing.
+ */
+test("node:path is shimmed to drop the process.cwd() fallback and still pass validation", async () => {
+  const dir = project({
+    "src/index.js": `import { join, dirname, basename, extname } from "node:path";
+export default { fetch() { return new Response(JSON.stringify([join("a","b"), dirname("a/b/c.txt"), basename("a/b.txt"), extname("a/b.txt")])); } };`,
+  });
+  try {
+    const { code } = await bundleHandler(join(dir, "src/index.js"), dir);
+    expect(code).not.toMatch(/\bprocess\.[a-zA-Z_$]/);
+    expect(code).not.toMatch(/['"`]node:/);
+    expect(validateHttpSyncSource(code).ok).toBe(true);
+
+    const mod = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+    const response = await mod.default.fetch();
+    expect(await response.text()).toBe(JSON.stringify(["a/b", "a/b", "b.txt", ".txt"]));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("node:querystring is shimmed to drop the Buffer dependency and still pass validation", async () => {
+  const dir = project({
+    "src/index.js": `import { parse, stringify, escape, unescape } from "node:querystring";
+export default { fetch() { return new Response(JSON.stringify([parse("a=1&b=2&b=3"), stringify({a:1,b:[2,3]}), escape("a b&c"), unescape("a%20b%26c")])); } };`,
+  });
+  try {
+    const { code } = await bundleHandler(join(dir, "src/index.js"), dir);
+    expect(code).not.toMatch(/\bBuffer\.[a-zA-Z_$]/);
+    expect(code).not.toMatch(/['"`]node:/);
+    expect(validateHttpSyncSource(code).ok).toBe(true);
+
+    const mod = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+    const response = await mod.default.fetch();
+    expect(await response.text()).toBe(
+      JSON.stringify([{ a: "1", b: ["2", "3"] }, "a=1&b=2&b=3", "a%20b%26c", "a b&c"]),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Found by actually running a handler through `sproutboat build` (the real
+ * Porffor compile), not by auditing the bundle: Bun's node:url polyfill
+ * declares `var { URL, URLSearchParams } = globalThis;`, which passes every
+ * capability check here (no banned pattern) but Porffor's own compiler
+ * rejects it — `URL` is a name Porffor pre-binds as a global, so a second
+ * top-level declaration is a parse error, not something a regex audit at
+ * this layer could ever catch. The shim avoids declaring anything literally
+ * named `URL`/`URLSearchParams`.
+ */
+test("node:url's URL/URLSearchParams are re-exported without declaring a colliding top-level name", async () => {
+  const dir = project({
+    "src/index.js": `import { URL, format, parse, resolve } from "node:url";
+export default { fetch() {
+  const u = new URL("http://x.example/a/b?q=1");
+  return new Response(JSON.stringify([u.pathname, u.hostname, format(u), parse("http://y.example/p").hostname, resolve("http://z.example/a/", "b")]));
+} };`,
+  });
+  try {
+    const { code } = await bundleHandler(join(dir, "src/index.js"), dir);
+    expect(code).not.toMatch(/\bvar\s*\{\s*URL\s*,\s*URLSearchParams\s*\}\s*=\s*globalThis/);
+    expect(validateHttpSyncSource(code).ok).toBe(true);
+
+    const mod = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+    const response = await mod.default.fetch();
+    expect(await response.text()).toBe(
+      JSON.stringify(["/a/b", "x.example", "http://x.example/a/b?q=1", "y.example", "http://z.example/a/b"]),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Proxy is rejected: the compiler ignores its traps", () => {
   const viaSource = validateHttpSyncSource(
     `var d={fetch(){const p=new Proxy({},{get:()=>1});return new Response(p.x);}};export{d as default};`,

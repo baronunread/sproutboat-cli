@@ -12,6 +12,7 @@
  * reaching for a Node API fails exactly as user code would.
  */
 import { relative } from "node:path";
+import { NODE_SHIMS } from "./node-shims";
 
 export type BundleResult = {
   /** One self-contained ESM module: what gets validated, hashed, and compiled. */
@@ -26,6 +27,32 @@ export class BundleError extends Error {
 }
 
 const entryLabel = (entryPath: string, projectDir: string): string => relative(projectDir, entryPath) || entryPath;
+
+const shimSpecifiers = new RegExp(
+  `^(${Object.keys(NODE_SHIMS)
+    .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})$`,
+);
+
+/**
+ * Bun already bundles working polyfills for most node:* built-ins under
+ * `target: "browser"` (verified for node:url, node:querystring). This
+ * plugin only overrides the ones in NODE_SHIMS — currently just node:path,
+ * whose bundled resolve() otherwise falls back to `process.cwd()`.
+ */
+const nodeShimsPlugin: import("bun").BunPlugin = {
+  name: "sproutboat-node-shims",
+  setup(build) {
+    build.onResolve({ filter: shimSpecifiers }, (args) => ({ path: args.path, namespace: "sb-node-shim" }));
+    build.onLoad({ filter: /.*/, namespace: "sb-node-shim" }, (args) => ({
+      // SAFETY: onResolve above only ever routes a specifier matched by
+      // shimSpecifiers (built from NODE_SHIMS's own keys) into this
+      // namespace, so args.path is always one of NODE_SHIMS's keys here.
+      contents: (NODE_SHIMS as Record<string, string>)[args.path],
+      loader: "js",
+    }));
+  },
+};
 
 /** Bun reports resolution failures on `AggregateError.errors`; its own message is just "Bundle failed". */
 function bundleDetail(cause: unknown): string {
@@ -51,6 +78,7 @@ export async function bundleHandler(entryPath: string, projectDir: string): Prom
       minify: false,
       splitting: false,
       sourcemap: "none",
+      plugins: [nodeShimsPlugin],
     });
   } catch (cause) {
     // An unresolvable specifier arrives as an AggregateError whose `errors`
