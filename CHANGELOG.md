@@ -8,6 +8,13 @@ a breaking change.
 Reconstructed from git history on 2026-09-03 for everything through v0.4.11;
 maintained going forward by the `release` skill.
 
+## [0.11.10] - 2026-09-18
+### Changed
+- Bumped `@sproutboat/toolchain` to `0.4.10`, pinning Porffor to the
+  `alpha-7` tag. All local patches (render.js, uwebsockets.js) verified
+  against the real alpha-7 source — no anchor drift, kitchen-sink
+  conformance and the full test suite pass.
+
 ## [0.11.9] - 2026-09-17
 ### Fixed
 - Bumped `@sproutboat/toolchain` to `^0.4.9` and `@sproutboat/runtime` to
@@ -582,6 +589,7 @@ its own package.
   `sprout` bin alias in favour of a user-defined shell alias.
 
 [Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.9...HEAD
+[0.11.10]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.9...v0.11.10
 [0.11.9]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.8...v0.11.9
 [0.11.8]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.7...v0.11.8
 [0.11.7]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.6...v0.11.7
