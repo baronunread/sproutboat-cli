@@ -141,6 +141,7 @@ still a compatibility event.
 - `triggers`
 - `ratelimiters`
 - `assets`
+- `version_metadata`
 
 ## Version handshake
 

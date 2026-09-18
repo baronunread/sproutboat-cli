@@ -14,12 +14,19 @@
 declare global {
   // ---------------------------------------------------------------- KV
 
+  interface KVPutOptions {
+    /** Seconds from now until the key expires. Must be at least 60, matching Cloudflare. */
+    expirationTtl?: number;
+    /** Absolute expiration as unix seconds. */
+    expiration?: number;
+  }
+
   interface KVNamespace {
-    /** The stored string, or `null`. Synchronous: no `await`. */
+    /** The stored string, or `null`. Synchronous: no `await`. An expired key reads as absent. */
     get(key: string): string | null;
-    put(key: string, value: string): void;
+    put(key: string, value: string, options?: KVPutOptions): void;
     delete(key: string): void;
-    /** Keys under `prefix` (all keys when omitted). */
+    /** Keys under `prefix` (all keys when omitted). Expired keys are omitted. */
     list(prefix?: string): string[];
   }
 
@@ -319,6 +326,20 @@ declare global {
     fetch(request: Request): Response | Promise<Response>;
     /** Runs after `storage.setAlarm`, with no request in flight. */
     alarm?(): void | Promise<void>;
+  }
+
+  // ------------------------------------------------------- Version metadata
+
+  /**
+   * #126 — named by `version_metadata` in `sproutboat.jsonc`. Baked into the
+   * binary at build time from the artifact's own digest: `id` matches the
+   * `artifact` field `sproutboat versions list` prints for this build, `tag`
+   * is the project name, `timestamp` is when it was built.
+   */
+  interface VersionMetadata {
+    id: string;
+    tag: string;
+    timestamp: string;
   }
 }
 

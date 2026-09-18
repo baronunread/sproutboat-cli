@@ -7,10 +7,10 @@
       "dependencies": {
         "@sproutboat/artifact": "^0.2.0",
         "@sproutboat/assets": "^0.2.0",
-        "@sproutboat/config": "^0.3.0",
-        "@sproutboat/runtime": "^0.9.6",
+        "@sproutboat/config": "^0.4.0",
+        "@sproutboat/runtime": "^0.10.0",
         "@sproutboat/toolchain": "^0.4.10",
-        "@sproutboat/wire": "^0.7.0",
+        "@sproutboat/wire": "^0.8.0",
         "esbuild": "^0.28.2",
       },
       "devDependencies": {
@@ -172,13 +172,13 @@
 
     "@sproutboat/cli-linux-x64": ["@sproutboat/cli-linux-x64@0.11.10", "", { "os": "linux", "cpu": "x64" }, "sha512-6x+D0Ocra5Gv+ET9g7GSKyzI3ZSrNfRKNx14hWpQB6GbBVH7qC/2sgd79i/E/Mxaj85DQyWsg/e413Y4az+Qdg=="],
 
-    "@sproutboat/config": ["@sproutboat/config@0.3.0", "", {}, "sha512-7RFDvMlmLxGKvLPbvrBtVDJHXsj3FhwpmttxxsSy4t9pvn4PnmtzEvX9RFEwokdVamVzzBvxXqQcN1jDK70BYw=="],
+    "@sproutboat/config": ["@sproutboat/config@0.4.0", "", {}, "sha512-uNMaIRw5Jl3Cxt8uZuRapFxUL1z4dcjIcB1jFphllmv3XJi1/q5PL6/HY+LnLRs+Xqejl6ilhfh+g5N9E4+BeQ=="],
 
-    "@sproutboat/runtime": ["@sproutboat/runtime@0.9.6", "", {}, "sha512-gFdYLhO05CG7ofwR4qYyEmokYC8v3sAMJyO+iCtoq0HOvcwFIztZMp1ajkhetQKQRPoGzCTDgm6I0zP/BMh2zQ=="],
+    "@sproutboat/runtime": ["@sproutboat/runtime@0.10.0", "", {}, "sha512-TwehBobu2tE4V85mtjpZc1KCzGZXhIOoj70HRUWAGV2CMwEHMFYcI9VBOHQrGb8PxaNlhfn0jFWWoydNRZ/1uQ=="],
 
     "@sproutboat/toolchain": ["@sproutboat/toolchain@0.4.10", "", {}, "sha512-LDIAKlUbTkn8IYJ5G/3mivoQJKfs90IlqSMBY+mu1N+ArEYImpCaY+KNFymh0bgeMlNOwUSCbnWrXT+SrJv8Yg=="],
 
-    "@sproutboat/wire": ["@sproutboat/wire@0.7.0", "", { "dependencies": { "@sproutboat/assets": "^0.2.0" } }, "sha512-Wwu7XKW80ljWgmWiR9B7t6rLXGFJs5p5AyXX5qbWZPLK3IsVm73WSukA2EGMcnz6DYdZBmH+JTewxx1Q4xabFA=="],
+    "@sproutboat/wire": ["@sproutboat/wire@0.8.0", "", { "dependencies": { "@sproutboat/assets": "^0.2.0" } }, "sha512-/6MhQbKuOJxBLsbdDeuPNTe66HDkmpSuetNsLavyq+vpcFuUpJKAJUXpPpSET03Y1CuQQ29KooQ/rRvKEWS7mA=="],
 
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 

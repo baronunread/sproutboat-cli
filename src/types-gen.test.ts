@@ -22,9 +22,11 @@ test("every binding kind reaches env with its own type", () => {
       "analytics_engine_datasets": ["METRICS"],
       "durable_objects": { "VIEWS": "ViewCounter" },
       "services": [{ "binding": "PEER", "service": "other" }],
-      "assets": { "directory": "public", "binding": "ASSETS" }
+      "assets": { "directory": "public", "binding": "ASSETS" },
+      "version_metadata": "CF_VERSION_METADATA"
     `),
   );
+  expect(out).toContain("CF_VERSION_METADATA: VersionMetadata;");
   expect(out).toContain("SITE: string;");
   expect(out).toContain("ADMIN_TOKEN: string;");
   expect(out).toContain("SESSIONS: KVNamespace;");

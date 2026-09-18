@@ -80,6 +80,8 @@ export type CompileInput = {
   optimize?: "dev" | "release";
   /** Cross-compiler for `linux-x86_64`. Not needed, and not used, for `host`. */
   zigBin?: string;
+  /** #126 — `env.<binding> = { id, tag, timestamp }`, baked directly into the module. */
+  versionMetadata?: { binding: string; id: string; tag: string; timestamp: string };
   /**
    * `linux-x86_64` (default) cross-compiles the static musl binary every box
    * runs. `host` compiles for the machine doing the build (#62) so `sproutboat
@@ -210,6 +212,7 @@ export async function compileSprout(input: CompileInput): Promise<void> {
       input.appName,
       input.assets,
       input.transport,
+      input.versionMetadata,
     ),
   );
 

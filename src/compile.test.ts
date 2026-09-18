@@ -19,6 +19,37 @@ test("wrap: async fetch is kept verbatim in __sbHandlers", () => {
   expect(out).toContain("fetch(request) { return __sbEntry(__sbHandlers, request); }");
 });
 
+test("wrap: version metadata is baked as env.<binding>, ahead of the bindings install line", () => {
+  const handler = `export default { fetch() { return new Response(env.CF_VERSION_METADATA.id); } };`;
+  const out = wrapNativeFetchHandler(
+    handler,
+    "",
+    {},
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      binding: "CF_VERSION_METADATA",
+      id: "a1b2c3",
+      tag: "demo",
+      timestamp: "2026-09-18T00:00:00.000Z",
+    },
+  );
+  expect(out).toContain(
+    `env["CF_VERSION_METADATA"] = {"id":"a1b2c3","tag":"demo","timestamp":"2026-09-18T00:00:00.000Z"};`,
+  );
+  expect(out.indexOf("const env = ")).toBeLessThan(out.indexOf('env["CF_VERSION_METADATA"]'));
+});
+
+test("wrap: no version metadata binding -> no env[...] assignment", () => {
+  const out = wrapNativeFetchHandler(`export default { fetch() { return new Response("x"); } };`, "");
+  expect(out).not.toContain("VersionMetadata");
+  expect(out).not.toMatch(/env\[".*"\] = \{"id"/);
+});
+
 test("wrap: rejects a non-conforming handler", () => {
   expect(() => wrapNativeFetchHandler(`export default function () {}`, "")).toThrow(/default-export an object/);
 });

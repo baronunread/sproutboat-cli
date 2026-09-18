@@ -171,6 +171,13 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     bakedAssets = { manifest, files };
   }
 
+  // Hoisted above the compile: #126 bakes it into the binary, and the manifest
+  // records the same instant rather than a slightly later one.
+  const builtAt = new Date().toISOString();
+  const versionMetadata = input.config.version_metadata
+    ? { binding: input.config.version_metadata, id: artifactId, tag: input.config.name, timestamp: builtAt }
+    : undefined;
+
   if (input.reuseSproutPath) await cp(input.reuseSproutPath, sproutPath);
   else
     await compileSprout({
@@ -188,6 +195,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       extraLink,
       extraCflags,
       optimize: input.optimize,
+      versionMetadata,
     });
 
   const sprout = await readFile(sproutPath);
@@ -204,7 +212,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     sourceHash,
     binaryHash: digest(sprout),
     binarySize: (await stat(sproutPath)).size,
-    builtAt: new Date().toISOString(),
+    builtAt,
   };
   await writeFile(resolve(artifactDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   // Bindings live beside the manifest, not in it: the artifact manifest schema is

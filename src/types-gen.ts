@@ -55,6 +55,9 @@ function entries(config: SproutboatConfig): Entry[] {
   if (config.assets?.binding) {
     out.push({ name: config.assets.binding, type: "Fetcher", note: `static assets: ${config.assets.directory}` });
   }
+  if (config.version_metadata) {
+    out.push({ name: config.version_metadata, type: "VersionMetadata" });
+  }
   return out;
 }
 
