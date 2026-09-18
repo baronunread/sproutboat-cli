@@ -29,9 +29,10 @@
 | `login` | `[--api-url <url>] [--token <token>]` | Device-code browser flow, or store <token> for <url> directly. |
 | `logout` | `[--api-url <url>]` | Forget the stored credential for the active endpoint, or for <url>. |
 | `whoami` | — | Show the active endpoint and the account the stored token belongs to. |
+| `complete` | `[bash | zsh | fish]` | Print a shell completion script for the top-level commands (defaults to $SHELL). |
 
 ```
-usage: sproutboat <init [name] | check [project-dir] | types [project-dir] | dev [project-dir] [--port <n>] [--no-watch] | build [project-dir] [--target host] [--standalone] | toolchain doctor [--json] | deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] | versions <list | view <version-id>> [project-dir] | rollback <version-id> [project-dir] | tail [project-dir] [--sprout] | kv <list | create <name> | info <name> | rename <name> <new> | delete <name>> | <key | bulk | export> ... | d1 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | r2 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | queues <list | create <name> | info <name> | rename <name> <new> | delete <name>> | domains <list | add <host> | verify <host> | delete <host>> [project-dir] | secrets <list | put <NAME> [--value <value>] | delete <NAME>> [project-dir] | delete [project-dir] [--name <project>] --yes | login [--api-url <url>] [--token <token>] | logout [--api-url <url>] | whoami>
+usage: sproutboat <init [name] | check [project-dir] | types [project-dir] | dev [project-dir] [--port <n>] [--no-watch] | build [project-dir] [--target host] [--standalone] | toolchain doctor [--json] | deploy [project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] | versions <list | view <version-id>> [project-dir] | rollback <version-id> [project-dir] | tail [project-dir] [--sprout] | kv <list | create <name> | info <name> | rename <name> <new> | delete <name>> | <key | bulk | export> ... | d1 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | r2 <list | create <name> | info <name> | rename <name> <new> | delete <name>> | queues <list | create <name> | info <name> | rename <name> <new> | delete <name>> | domains <list | add <host> | verify <host> | delete <host>> [project-dir] | secrets <list | put <NAME> [--value <value>] | delete <NAME>> [project-dir] | delete [project-dir] [--name <project>] --yes | login [--api-url <url>] [--token <token>] | logout [--api-url <url>] | whoami | complete [bash | zsh | fish]>
 ```
 
 ## Environment variables
@@ -57,6 +58,7 @@ usage: sproutboat <init [name] | check [project-dir] | types [project-dir] | dev
 | `NO_COLOR` | When set, disables coloured terminal output (https://no-color.org). Output is also plain whenever stdout is not a TTY. |
 | `SPROUTBOAT_NO_UPDATE_CHECK` | When set, skips the once-a-day npm check for a newer `sproutboat` release (also skipped when CI is set). |
 | `XDG_CONFIG_HOME` | Base for the default credentials dir when SPROUTBOAT_CONFIG_DIR is unset. |
+| `SHELL` | Picks the default shell for `complete` with no argument (bash/zsh/fish). |
 | `PORFFOR_VERSION` | Override the Porffor identity string recorded in the manifest. |
 | `SB_BROKER_PORT` | Loopback port of the binding broker, read by the compiled sprout at runtime (set by the control plane, or by `src/broker.ts` for local runs). |
 | `SB_BROKER_TOKEN` | Per-deployment auth token the sprout sends on every broker frame, and the broker sends back on scheduled/queue triggers (paired with SB_BROKER_PORT). |

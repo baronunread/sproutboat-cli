@@ -195,6 +195,13 @@ export const COMMANDS: readonly Command[] = [
     args: "",
     summary: "Show the active endpoint and the account the stored token belongs to.",
   },
+  {
+    name: "complete",
+    group: "Account",
+    emoji: "⌨",
+    args: "[bash | zsh | fish]",
+    summary: "Print a shell completion script for the top-level commands (defaults to $SHELL).",
+  },
 ];
 
 export type EnvVar = { name: string; purpose: string };
@@ -264,6 +271,7 @@ export const ENV_VARS: readonly EnvVar[] = [
     purpose: "When set, skips the once-a-day npm check for a newer `sproutboat` release (also skipped when CI is set).",
   },
   { name: "XDG_CONFIG_HOME", purpose: "Base for the default credentials dir when SPROUTBOAT_CONFIG_DIR is unset." },
+  { name: "SHELL", purpose: "Picks the default shell for `complete` with no argument (bash/zsh/fish)." },
   { name: "PORFFOR_VERSION", purpose: "Override the Porffor identity string recorded in the manifest." },
   {
     name: "SB_BROKER_PORT",

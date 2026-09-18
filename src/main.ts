@@ -14,7 +14,7 @@ import { buildStandalone } from "./standalone-build";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
-import { helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
+import { CLI_NAME, COMMANDS, helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
 import { notifyIfOutdated } from "./update-check";
 import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
@@ -1263,12 +1263,36 @@ async function toolchain(args: string[]): Promise<void> {
     console.log(`macOS SDK: ${report.prerequisites.sdk ?? "missing: run xcode-select --install"}`);
 }
 
+/** `sproutboat <command> --help`: that command's full usage line + summary, exit 0. */
+function commandHelp(name: string): never {
+  const found = COMMANDS.find((c) => c.name === name);
+  if (!found) usage();
+  console.log(`${dim(`usage: ${CLI_NAME} ${name}${found.args ? ` ${found.args}` : ""}`)}\n\n${found.summary}`);
+  process.exit(0);
+}
+
+const BASH_COMPLETION = (names: string) =>
+  `_sproutboat_complete() {\n  local cur=\${COMP_WORDS[COMP_CWORD]}\n  if [ "$COMP_CWORD" -eq 1 ]; then\n    COMPREPLY=($(compgen -W "${names}" -- "$cur"))\n  fi\n}\ncomplete -F _sproutboat_complete ${CLI_NAME}\n`;
+const ZSH_COMPLETION = (names: string) => `#compdef ${CLI_NAME}\n_arguments '1: :(${names})'\n`;
+const FISH_COMPLETION = (names: string) => `complete -c ${CLI_NAME} -n "__fish_use_subcommand" -a "${names}"\n`;
+
+/** `sproutboat complete [shell]`: a static completion script for the top-level commands. */
+function complete(shell?: string): void {
+  const names = COMMANDS.map((c) => c.name).join(" ");
+  const scripts = { bash: BASH_COMPLETION(names), zsh: ZSH_COMPLETION(names), fish: FISH_COMPLETION(names) };
+  const key = shell ?? process.env.SHELL?.split("/").pop() ?? "bash";
+  const script = key === "bash" || key === "zsh" || key === "fish" ? scripts[key] : undefined;
+  if (!script) usageError(`complete: unsupported shell "${key}"`, "complete [bash | zsh | fish]");
+  console.log(script);
+}
+
 const [command, ...args] = process.argv.slice(2);
 if (command === undefined || command === "help" || command === "-h" || command === "--help") help();
 if (command === "--version" || command === "-v") {
   console.log(`sproutboat ${CLI_VERSION}`);
   process.exit(0);
 }
+if (args.includes("-h") || args.includes("--help")) commandHelp(command);
 
 await notifyIfOutdated(CLI_VERSION);
 
@@ -1333,6 +1357,9 @@ switch (command) {
     break;
   case "delete":
     await deleteProject(args);
+    break;
+  case "complete":
+    complete(args[0]);
     break;
   default:
     usage();
