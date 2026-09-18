@@ -59,23 +59,37 @@ export async function activeApiUrl(): Promise<string | undefined> {
   return (await readCredentials()).activeApiUrl;
 }
 
-/** #79 `logout`: drop one endpoint's token. Returns false when none was stored. */
-export async function forgetToken(apiUrl: string): Promise<boolean> {
+/**
+ * #79 `logout`: drop one endpoint's token. Returns `removed: false` when none
+ * was stored. baronunread/sproutboat#204 — used to repoint `activeApiUrl` to
+ * an arbitrary surviving profile chosen by object key order; now it just
+ * clears the active endpoint, so the next command falls through to
+ * `resolveApiUrl()`'s documented default instead of a silently-picked one.
+ */
+export async function forgetToken(apiUrl: string): Promise<{ removed: boolean; activeApiUrl?: string }> {
   const credentials = await readCredentials();
-  if (!credentials.profiles[apiUrl]) return false;
+  if (!credentials.profiles[apiUrl]) return { removed: false };
   delete credentials.profiles[apiUrl];
-  if (credentials.activeApiUrl === apiUrl) {
-    credentials.activeApiUrl = Object.keys(credentials.profiles)[0];
-  }
+  if (credentials.activeApiUrl === apiUrl) credentials.activeApiUrl = undefined;
   await writeCredentials(credentials);
-  return true;
+  return { removed: true, activeApiUrl: credentials.activeApiUrl };
 }
 
-export async function saveToken(apiUrl: string, token: string): Promise<void> {
+/**
+ * baronunread/sproutboat#204 — used to unconditionally repoint the
+ * machine-wide active endpoint to whatever was just logged into, so logging
+ * into a local dev control plane for one project silently became the deploy
+ * target for every unrelated project on the machine. Now the active endpoint
+ * is only set the first time (nothing saved yet); a later login to a second
+ * endpoint keeps the existing active endpoint and reports it, so the caller
+ * can say so instead of silently switching.
+ */
+export async function saveToken(apiUrl: string, token: string): Promise<{ activeApiUrl: string }> {
   const credentials = await readCredentials();
   credentials.profiles[apiUrl] = { token };
-  credentials.activeApiUrl = apiUrl;
+  if (!credentials.activeApiUrl) credentials.activeApiUrl = apiUrl;
   await writeCredentials(credentials);
+  return { activeApiUrl: credentials.activeApiUrl };
 }
 
 /** Atomic 0600 write of the whole credentials file. */

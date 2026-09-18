@@ -35,6 +35,26 @@ if (internalModeAt > 0) {
 
 const defaultApiUrl = "https://dashboard.sproutboat.com";
 
+type ApiUrlSource = "SPROUTBOAT_API_URL" | "--api-url" | "saved active endpoint" | "default";
+
+/**
+ * baronunread/sproutboat#204 — the single place `defaultApiUrl` and
+ * `activeApiUrl()` are read. Used to be implemented three different ways
+ * across `apiCredentials()`, `whoami()` and `parseLoginArgs()`, none of which
+ * told the user which endpoint it picked; `whoami` could report "not logged
+ * in" on a machine where `deploy` would happily target prod. Precedence: an
+ * explicit `--api-url` flag, then `SPROUTBOAT_API_URL`, then the saved active
+ * endpoint, then the default.
+ */
+async function resolveApiUrl(explicitApiUrl?: string): Promise<{ apiUrl: string; source: ApiUrlSource }> {
+  if (explicitApiUrl) return { apiUrl: explicitApiUrl.replace(/\/$/, ""), source: "--api-url" };
+  const envUrl = process.env.SPROUTBOAT_API_URL;
+  if (envUrl) return { apiUrl: envUrl.replace(/\/$/, ""), source: "SPROUTBOAT_API_URL" };
+  const saved = await activeApiUrl();
+  if (saved) return { apiUrl: saved.replace(/\/$/, ""), source: "saved active endpoint" };
+  return { apiUrl: defaultApiUrl, source: "default" };
+}
+
 /** Warn at most once per run: every API response carries the headers, and one
  *  command makes several calls. */
 let skewWarned = false;
@@ -407,10 +427,15 @@ async function provisionBindings(directory = process.cwd()): Promise<void> {
 
 /** #79 — wrangler parity: drop the stored credential for an endpoint. */
 async function logout(args: string[]) {
-  const { apiUrl } = parseLoginArgs(args);
-  console.log(
-    (await forgetToken(apiUrl)) ? ok(`forgot the credential for ${apiUrl}`) : `no stored credential for ${apiUrl}`,
-  );
+  const { apiUrl } = await parseLoginArgs(args);
+  const result = await forgetToken(apiUrl);
+  if (!result.removed) {
+    console.log(`no stored credential for ${apiUrl}`);
+    return;
+  }
+  console.log(ok(`forgot the credential for ${apiUrl}`));
+  if (result.activeApiUrl === undefined)
+    console.log(dim("no active endpoint remains — the next command falls through to the default"));
 }
 
 /**
@@ -419,13 +444,9 @@ async function logout(args: string[]) {
  * works rather than only reporting what is on disk.
  */
 async function whoami() {
-  const apiUrl = process.env.SPROUTBOAT_API_URL || (await activeApiUrl());
-  if (!apiUrl) {
-    console.log("not logged in — run `sproutboat login`");
-    return;
-  }
+  const { apiUrl, source } = await resolveApiUrl();
   const token = process.env.SPROUTBOAT_TOKEN || (await savedToken(apiUrl));
-  console.log(`endpoint  ${apiUrl}`);
+  console.log(`endpoint  ${apiUrl}  (${source})`);
   if (!token) {
     console.log(`account   ${dim("no stored token — run `sproutboat login`")}`);
     return;
@@ -489,7 +510,8 @@ async function deploy(args: string[]) {
     console.log("\n--dry-run: not uploading.");
     return;
   }
-  const { apiUrl, token } = await apiCredentials();
+  const { apiUrl, token, source } = await apiCredentials();
+  console.log(`endpoint  ${apiUrl}  (${source})`);
   const form = new FormData();
   form.set("manifest", new File([await manifest.arrayBuffer()], "manifest.json", { type: "application/json" }));
   form.set("sprout", new File([await sprout.arrayBuffer()], "sprout", { type: "application/octet-stream" }));
@@ -516,7 +538,7 @@ async function deploy(args: string[]) {
     }
   }
 
-  const response = await fetch(`${apiUrl.replace(/\/$/, "")}/api/projects/${projectName}/deployments`, {
+  const response = await fetch(`${apiUrl}/api/projects/${projectName}/deployments`, {
     method: "POST",
     headers: { "x-api-key": token },
     body: form,
@@ -579,25 +601,34 @@ async function waitForHealthy(url: string, timeoutMs: number): Promise<boolean> 
   return false;
 }
 
-function parseLoginArgs(args: string[]) {
-  let apiUrl = process.env.SPROUTBOAT_API_URL || defaultApiUrl;
+async function parseLoginArgs(args: string[]) {
+  let explicitApiUrl: string | undefined;
   let token: string | undefined;
   for (let index = 0; index < args.length; index += 2) {
     const value = args[index + 1];
-    if (args[index] === "--api-url" && value) apiUrl = value;
+    if (args[index] === "--api-url" && value) explicitApiUrl = value;
     else if (args[index] === "--token" && value) token = value;
     else usageError(`login: unexpected argument "${args[index]}"`, "login [--api-url <url>] [--token <token>]");
   }
-  return { apiUrl: apiUrl.replace(/\/$/, ""), token };
+  const { apiUrl, source } = await resolveApiUrl(explicitApiUrl);
+  return { apiUrl, source, token };
+}
+
+/** Announce a login that left the machine's active endpoint pointed elsewhere. */
+function reportActiveEndpoint(apiUrl: string, active: string): void {
+  if (active !== apiUrl)
+    console.log(dim(`active endpoint remains ${active} — \`sproutboat logout\` it first to switch`));
 }
 
 async function login(args: string[]) {
-  const { apiUrl, token: directToken } = parseLoginArgs(args);
+  const { apiUrl, source, token: directToken } = await parseLoginArgs(args);
+  console.log(`endpoint  ${apiUrl}  (${source})`);
   // Self-hosted / non-interactive: skip the browser flow and store the token
   // the admin already holds (e.g. SPROUTBOAT_BOOTSTRAP_TOKEN).
   if (directToken) {
-    await saveToken(apiUrl, directToken);
+    const { activeApiUrl: active } = await saveToken(apiUrl, directToken);
     console.log(`Saved credentials for ${apiUrl}.`);
+    reportActiveEndpoint(apiUrl, active);
     return;
   }
   const response = await fetch(`${apiUrl}/api/cli/authorizations`, { method: "POST" });
@@ -620,7 +651,7 @@ async function login(args: string[]) {
   console.log(`Confirm code: ${authorization.userCode}`);
   while (new Date(authorization.expiresAt).getTime() > Date.now()) {
     await Bun.sleep(Math.max(authorization.interval, 1) * 1000);
-    const exchange = await fetch(`${apiUrl.replace(/\/$/, "")}/api/cli/authorizations/token`, {
+    const exchange = await fetch(`${apiUrl}/api/cli/authorizations/token`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ deviceCode: authorization.deviceCode }),
@@ -630,18 +661,19 @@ async function login(args: string[]) {
     if (!exchange.ok) fail(`login failed (${exchange.status}): ${result}`);
     const token = parseToken(result);
     if (!token) fail("login response did not include a CLI token");
-    await saveToken(apiUrl, token);
+    const { activeApiUrl: active } = await saveToken(apiUrl, token);
     console.log(ok("login approved — credentials saved for this endpoint"));
+    reportActiveEndpoint(apiUrl, active);
     return;
   }
   fail("login expired before approval");
 }
 
 async function apiCredentials() {
-  const apiUrl = (process.env.SPROUTBOAT_API_URL || (await activeApiUrl()) || defaultApiUrl).replace(/\/$/, "");
+  const { apiUrl, source } = await resolveApiUrl();
   const token = process.env.SPROUTBOAT_TOKEN || (await savedToken(apiUrl));
   if (!token) fail("not logged in; run sproutboat login or set SPROUTBOAT_TOKEN for this command");
-  return { apiUrl, token };
+  return { apiUrl, token, source };
 }
 
 async function versions(args: string[]) {
