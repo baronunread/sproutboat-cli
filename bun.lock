@@ -22,10 +22,10 @@
         "typescript": "7.0.2",
       },
       "optionalDependencies": {
-        "@sproutboat/cli-darwin-arm64": "0.11.10",
-        "@sproutboat/cli-darwin-x64": "0.11.10",
-        "@sproutboat/cli-linux-arm64": "0.11.10",
-        "@sproutboat/cli-linux-x64": "0.11.10",
+        "@sproutboat/cli-darwin-arm64": "0.11.11",
+        "@sproutboat/cli-darwin-x64": "0.11.11",
+        "@sproutboat/cli-linux-arm64": "0.11.11",
+        "@sproutboat/cli-linux-x64": "0.11.11",
       },
     },
   },
@@ -163,14 +163,6 @@
     "@sproutboat/artifact": ["@sproutboat/artifact@0.2.0", "", {}, "sha512-lDJz0YGByMZX5x9JAf6Co07y6dPMT3/aR7QnBvvEQHSlOkyhgyaVBV7Gi9kscv8nDAFoO/wENjJyryxdyFhcWQ=="],
 
     "@sproutboat/assets": ["@sproutboat/assets@0.3.0", "", {}, "sha512-YvKhDPnAaU+Xxnn6QpDizFq/SYwGEgbCWtSz+7edniPBQT5HHOnh9GyKj5Sa1+sjlkNnpKvUk+6evfCUTNRytg=="],
-
-    "@sproutboat/cli-darwin-arm64": ["@sproutboat/cli-darwin-arm64@0.11.10", "", { "os": "darwin", "cpu": "arm64" }, "sha512-9jJTSjZHzOK2JsgEnQOxjaNrN057lRgQqiX4GKTLzPu6hxXTv8Siazt/WK7j8YgwdKDyQYGq4Nt1e0l0Pps0mw=="],
-
-    "@sproutboat/cli-darwin-x64": ["@sproutboat/cli-darwin-x64@0.11.10", "", { "os": "darwin", "cpu": "x64" }, "sha512-BTu4G0ZFL2ZAvDDMa/Wu6CShVmXMOn7F2zO01yt2nMXBOPybS5QAj5FhZald6ccuPmyxUi1N0k0Bo7r9f51obQ=="],
-
-    "@sproutboat/cli-linux-arm64": ["@sproutboat/cli-linux-arm64@0.11.10", "", { "os": "linux", "cpu": "arm64" }, "sha512-7P/B84YOZ0enoGo9w1nSD64lInmFj8R/APG6MjCvuTDpHBM66It4SeMBOaks5v2bsjI2BpdYPjWoIhkcJp9mLA=="],
-
-    "@sproutboat/cli-linux-x64": ["@sproutboat/cli-linux-x64@0.11.10", "", { "os": "linux", "cpu": "x64" }, "sha512-6x+D0Ocra5Gv+ET9g7GSKyzI3ZSrNfRKNx14hWpQB6GbBVH7qC/2sgd79i/E/Mxaj85DQyWsg/e413Y4az+Qdg=="],
 
     "@sproutboat/config": ["@sproutboat/config@0.4.0", "", {}, "sha512-uNMaIRw5Jl3Cxt8uZuRapFxUL1z4dcjIcB1jFphllmv3XJi1/q5PL6/HY+LnLRs+Xqejl6ilhfh+g5N9E4+BeQ=="],
 
