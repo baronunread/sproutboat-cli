@@ -238,6 +238,13 @@ export async function runConformance(
     isString(h.hmac) && h.hmac.length === 64 && h.verifyOk === true && h.verifyBad === false,
     h,
   );
+  const rounds = arr(h.rounds);
+  check(
+    "crypto.subtle: repeated HMAC uses raw digest bytes between rounds",
+    rounds[0] === "e94df4f03406bc36299dd6e6961b22b50fc963fbbf8aeb773f8d7960a77e741e" &&
+      rounds[1] === "1321aaf34d2ad833bd0c8af3ab6c3a91f2be090fd9631538c88ec3986b6eac28",
+    h.rounds,
+  );
   check(
     "crypto.scryptVerify: a matching hash verifies, a wrong password does not (#153)",
     h.scryptOk === true && h.scryptBad === false,

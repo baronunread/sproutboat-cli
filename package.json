@@ -62,11 +62,11 @@
   },
   "dependencies": {
     "@sproutboat/artifact": "^0.2.0",
-    "@sproutboat/assets": "^0.2.0",
+    "@sproutboat/assets": "^0.3.0",
     "@sproutboat/config": "^0.4.0",
-    "@sproutboat/runtime": "^0.10.0",
-    "@sproutboat/toolchain": "^0.4.10",
-    "@sproutboat/wire": "^0.8.0",
+    "@sproutboat/runtime": "^0.12.0",
+    "@sproutboat/toolchain": "^0.4.11",
+    "@sproutboat/wire": "^0.9.0",
     "esbuild": "^0.28.2"
   },
   "devDependencies": {
