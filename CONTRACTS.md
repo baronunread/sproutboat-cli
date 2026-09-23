@@ -52,6 +52,9 @@ Ops:
 - `ae.query`
 - `ae.write`
 - `assets.get`
+- `cache.delete`
+- `cache.match`
+- `cache.put`
 - `d1.backup`
 - `d1.batch`
 - `d1.exec`
@@ -90,6 +93,7 @@ Ops:
 Tables in a resource file, which outlives every redeploy:
 
 - `ae`
+- `cache`
 - `do_alarm`
 - `do_storage`
 - `kv`

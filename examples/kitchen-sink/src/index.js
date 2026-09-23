@@ -72,12 +72,25 @@ async function asyncHash() {
   const sig = await crypto.subtle.sign("HMAC", k, "message");
   const ok = await crypto.subtle.verify("HMAC", k, sig, "message");
   const bad = await crypto.subtle.verify("HMAC", k, sig, "message!");
+  const roundKey = await crypto.subtle.importKey(
+    "raw",
+    new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  let roundData = new TextEncoder().encode("h1-regression-password-0001");
+  const rounds = [];
+  for (let i = 0; i < 2; i++) {
+    roundData = new Uint8Array(await crypto.subtle.sign("HMAC", roundKey, roundData));
+    rounds.push(hex(roundData));
+  }
   // #153 — scrypt verify against a small-parameter vector (fast for the suite).
   // node crypto.scryptSync("pw","salt",32,{N:1024,r:8,p:1}):
   const scEx = "9f1f8695838e682c1689750f45a69fb95645b4a27f0c9994c696b1c98c0a1671";
   const scOk = crypto.scryptVerify("pw", "salt", scEx, { N: 1024, r: 8, p: 1 });
   const scBad = crypto.scryptVerify("nope", "salt", scEx, { N: 1024, r: 8, p: 1 });
-  return json({ digest: d, hmac: hex(sig), verifyOk: ok, verifyBad: bad, scryptOk: scOk, scryptBad: scBad });
+  return json({ digest: d, hmac: hex(sig), verifyOk: ok, verifyBad: bad, rounds, scryptOk: scOk, scryptBad: scBad });
 }
 
 function ensureSchema(env) {
