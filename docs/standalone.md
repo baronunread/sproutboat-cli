@@ -101,11 +101,10 @@ an earlier version of this note said to avoid `Date.prototype.toISOString()`,
 which only ever correlated with one specific repro, not the actual trigger.
 Sync-only handlers are unaffected, since nothing ever resolves a promise.
 
-Fixed by a local patch to Porffor's `.then` probe (see
-`patches/upstream/promise-resolution-livelock.md`),
-pending release — no CLI version has picked it up yet, so this is still live
-for every build today. There is no workaround for a build on a version
-before the fix ships: the exact allocator trigger isn't something a safe
+Fixed by a local patch to Porffor's `.then` probe (see the
+[platform upstream note](https://github.com/baronunread/sproutboat/blob/main/patches/upstream/promise-resolution-livelock.md)).
+Current CLI releases include that toolchain patch. Builds using an older
+toolchain remain affected; the exact allocator trigger isn't something a safe
 subset of `async`/`await` usage can dodge. Track
 [#168](https://github.com/baronunread/sproutboat/issues/168) for the release
 that carries it.
