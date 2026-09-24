@@ -1,9 +1,9 @@
 /**
  * #89 — bundle the handler before Porffor sees it.
  *
- * Porffor compiles one self-contained module, so until now a project was one
- * file with no imports: no router, no validation library, no SDK, no splitting
- * a codebase in two. Bundling first lifts that without touching the compiler.
+ * Porffor alpha 9 supports ESM imports. We still bundle first so capability
+ * validation sees every dependency and the runtime wrapper receives one
+ * controlled default export.
  *
  * Bun's bundler resolves relative imports across the project and bare
  * specifiers out of the project's own `node_modules`, then emits a single ESM

@@ -1,4 +1,5 @@
 node_modules/
+**/.sproutboat/
 dist/
 *.log
 .DS_Store

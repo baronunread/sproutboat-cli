@@ -77,7 +77,7 @@ async function fixtures(): Promise<{
       version: release,
       os: [process.platform],
       cpu: [process.arch],
-      files: ["bin/sproutboat", "bin/esbuild"],
+      files: ["bin/sproutboat"],
     }),
   );
   await writeFile(
@@ -142,8 +142,9 @@ test("platform package manifests, and the root's optionalDependencies pin on the
       version: manifest.version,
       os: [platform],
       cpu: [arch],
-      files: ["bin/sproutboat", "bin/esbuild", "bin/zig.tar.xz", "THIRD_PARTY_NOTICES.md"],
+      files: ["bin/sproutboat", "bin/zig.tar.xz", "THIRD_PARTY_NOTICES.md"],
     });
+    expect(platformManifest.files).not.toContain("bin/esbuild");
     expect(existsSync(join(root, "platform-packages", `${platform}-${arch}`, "THIRD_PARTY_NOTICES.md"))).toBe(true);
     // A version bump that forgets these leaves npm resolving a stale, possibly
     // unpublished platform package for every install -- this is the release
