@@ -10,7 +10,6 @@
  * unusable it stops with its specific integrity or archive error. Contributors
  * may explicitly opt into Porffor's source fallback.
  */
-import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
@@ -50,6 +49,8 @@ const COMPILE_TIMEOUT_MS = Number(process.env.SPROUTBOAT_COMPILE_TIMEOUT_MS || 6
 
 export type CompileInput = {
   sourcePath: string;
+  /** Stable compiler input for dev rebuilds, independent of the candidate binary path. */
+  generatedPath?: string;
   /** The bundled module (#89). Falls back to reading `sourcePath` verbatim. */
   source?: string;
   outPath: string;
@@ -195,7 +196,8 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   // OS may still be executing. The linker cannot overwrite either, so clear it
   // first rather than failing with "can't write output file".
   await rm(input.outPath, { force: true });
-  const generatedPath = resolve(outDir, "sprout.generated.js");
+  const generatedPath = input.generatedPath ?? resolve(outDir, "sprout.generated.js");
+  await mkdir(dirname(generatedPath), { recursive: true });
   const [source, prelude] = await Promise.all([
     input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),
     loadPrelude(input.transport ?? "broker"),
@@ -222,22 +224,7 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   // below instead and has no zigBin to contribute here.
   const zigDir = input.zigBin ? `${dirname(input.zigBin)}:` : "";
   const hostCompiler = input.target === "host" ? await resolveHostCompiler() : undefined;
-  // The per-platform binary ships esbuild next to it; a compiled build finds it
-  // there. Running from the npm package under Bun, `process.execPath` is Bun
-  // itself and `npm i -g` puts no dependency `.bin` on PATH, so resolve the
-  // esbuild dependency directly. `Bun.which` is the last resort.
-  const packagedEsbuild = resolve(dirname(process.execPath), "esbuild");
-  let esbuild: string | null = existsSync(packagedEsbuild) ? packagedEsbuild : null;
-  if (!esbuild) {
-    try {
-      esbuild = Bun.resolveSync("esbuild/bin/esbuild", import.meta.dir);
-    } catch {
-      esbuild = null;
-    }
-  }
-  esbuild ??= Bun.which("esbuild");
-  if (!esbuild) throw new Error("esbuild could not be located; install it or reinstall sproutboat");
-  const path = `${zigDir}${dirname(esbuild)}:${process.env.PATH ?? ""}`;
+  const path = `${zigDir}${process.env.PATH ?? ""}`;
   const command = PACKAGED
     ? [process.execPath, "__porffor", launcher]
     : [process.execPath, resolve(import.meta.dir, "main.ts"), "__porffor", launcher];

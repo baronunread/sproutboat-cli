@@ -677,14 +677,9 @@ export function porfforVersion(): string {
 }
 
 export function esbuildVersion(): string {
-  try {
-    const pkg = Bun.resolveSync("esbuild/package.json", import.meta.dir);
-    // SAFETY: esbuild's package.json always has a string `version`; defaulted below.
-    const parsed = JSON.parse(readFileSync(pkg, "utf8")) as { version?: string };
-    return parsed.version || "unknown";
-  } catch {
-    return "unknown";
-  }
+  // Legacy artifact field, retained so older control planes can read manifests.
+  // Handler bundling uses Bun.build and Porffor alpha 9 needs no esbuild binary.
+  return "unused";
 }
 
 function uwsCommit(): string {

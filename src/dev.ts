@@ -11,6 +11,7 @@
  * project, one port.
  */
 import { existsSync, watch, type FSWatcher } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { connect } from "node:net";
 import { dirname, resolve } from "node:path";
@@ -21,6 +22,7 @@ import { amber, dim, leaf, ok } from "./style";
 import type { SproutboatConfig } from "./config";
 
 const RESTART_DEBOUNCE_MS = 120;
+const DEV_COMPILE_SESSION = randomUUID();
 
 export type DevInput = {
   projectDir: string;
@@ -121,6 +123,14 @@ async function start(input: DevInput, port: number): Promise<Running> {
       optimize: "dev",
       reuseSproutPath: input.reuseSproutPath,
       outputDirectory: candidateDir,
+      // Alpha 9 keys its C-unit cache by the entry's absolute path. Keep that
+      // path fixed across saves while each candidate keeps its own binary.
+      generatedPath: resolve(
+        input.projectDir,
+        ".sproutboat/dev-compile",
+        `${process.pid}-${DEV_COMPILE_SESSION}`,
+        "sprout.generated.js",
+      ),
     });
   } catch (error) {
     await rm(candidateDir, { recursive: true, force: true });

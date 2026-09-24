@@ -47,6 +47,8 @@ export type BuildInput = {
   reuseSproutPath?: string;
   /** An isolated artifact directory, used by dev candidates to avoid mixing snapshots. */
   outputDirectory?: string;
+  /** Stable compiler input used only by the local dev loop. */
+  generatedPath?: string;
 };
 
 export type BuildOutput = {
@@ -182,6 +184,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   else
     await compileSprout({
       sourcePath: input.sourcePath,
+      generatedPath: input.generatedPath,
       source: input.source,
       outPath: sproutPath,
       vars: input.config.vars ?? {},

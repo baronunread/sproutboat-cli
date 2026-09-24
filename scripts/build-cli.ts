@@ -15,7 +15,7 @@
  * GitHub's only x64 macOS image (`macos-13`) routinely sits queued for half an
  * hour while every other leg finishes in one minute.
  */
-import { chmod, copyFile, mkdir } from "node:fs/promises";
+import { chmod, copyFile, mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { ensureZigArchive, type ZigPlatform } from "../src/toolchain";
 
@@ -39,49 +39,11 @@ function hostTarget(): Target {
 
 const root = resolve(import.meta.dir, "..");
 
-/** esbuild ships one binary per platform (`@esbuild/<os>-<arch>`); a cross
- * target's copy is never installed locally (npm/bun refuse it — the package
- * declares `os`/`cpu` and gets skipped for any other host), so fetch that
- * platform's tarball from the registry instead, same shape as ensureZig's
- * prebuilt-archive fetches. */
-async function esbuildBinaryFor(target: Target): Promise<string> {
-  const host = hostTarget();
-  if (target.platform === host.platform && target.arch === host.arch) {
-    try {
-      return Bun.resolveSync(`@esbuild/${target.platform}-${target.arch}/bin/esbuild`, import.meta.dir);
-    } catch {
-      throw new Error("host esbuild binary is missing; run bun install first");
-    }
-  }
-  // SAFETY: package.json is this repo's own manifest, with a required esbuild dependency entry.
-  const pkg = (await Bun.file(resolve(root, "package.json")).json()) as { dependencies: { esbuild: string } };
-  const version = pkg.dependencies.esbuild.replace(/^[\^~]/, "");
-  const name = `${target.platform}-${target.arch}`;
-  const cacheDir = resolve(
-    process.env.SPROUTBOAT_TOOLCHAIN_CACHE ?? `${process.env.HOME}/.cache/sproutboat`,
-    `esbuild-${version}-${name}`,
-  );
-  const cached = resolve(cacheDir, "esbuild");
-  if (await Bun.file(cached).exists()) return cached;
-  const res = await fetch(`https://registry.npmjs.org/@esbuild/${name}/-/${name}-${version}.tgz`);
-  if (!res.ok) throw new Error(`could not fetch @esbuild/${name}@${version}: HTTP ${res.status}`);
-  const tarPath = resolve(cacheDir, "esbuild.tgz");
-  await mkdir(cacheDir, { recursive: true });
-  await Bun.write(tarPath, await res.arrayBuffer());
-  const untar = Bun.spawn(["tar", "-xzf", tarPath, "-C", cacheDir, "--strip-components=2", "package/bin/esbuild"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [code, err] = await Promise.all([untar.exited, new Response(untar.stderr).text()]);
-  if (code !== 0) throw new Error(`could not extract @esbuild/${name}: ${err.trim()}`);
-  await chmod(cached, 0o755);
-  return cached;
-}
-
 async function buildOne(target: Target): Promise<void> {
   const packageDir = resolve(root, "platform-packages", `${target.platform}-${target.arch}`);
   const out = resolve(packageDir, "bin", "sproutboat");
   await mkdir(resolve(out, ".."), { recursive: true });
+  await rm(resolve(packageDir, "bin", "esbuild"), { force: true });
   // SAFETY: package.json is this release's manifest and npm requires its version.
   const version = ((await Bun.file(resolve(root, "package.json")).json()) as { version: string }).version;
   // SAFETY: every checked-in platform package manifest owns a required string version.
@@ -103,9 +65,6 @@ async function buildOne(target: Target): Promise<void> {
     { cwd: root, stdout: "inherit", stderr: "inherit" },
   );
   if ((await child.exited) !== 0) throw new Error(`compile failed for ${target.platform}-${target.arch}`);
-  const esbuild = await esbuildBinaryFor(target);
-  const packagedEsbuild = resolve(packageDir, "bin", "esbuild");
-  await copyFile(esbuild, packagedEsbuild);
   // The compressed archive (~50 MB), not the ~400 MB extracted install: Zig's
   // lib/ carries libc/libc++ sources for every target it can cross-compile to,
   // which only matters once, on extract. `ensureZig` (src/toolchain.ts) looks
@@ -114,7 +73,6 @@ async function buildOne(target: Target): Promise<void> {
   // same shape as the vendored uWebSockets archive.
   await copyFile(await ensureZigArchive(target.zigPlatform), resolve(packageDir, "bin", "zig.tar.xz"));
   await copyFile(resolve(root, "THIRD_PARTY_NOTICES.md"), resolve(packageDir, "THIRD_PARTY_NOTICES.md"));
-  await chmod(packagedEsbuild, 0o755);
   await chmod(out, 0o755);
 }
 

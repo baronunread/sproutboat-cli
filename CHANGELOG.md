@@ -8,6 +8,21 @@ a breaking change.
 Reconstructed from git history on 2026-09-03 for everything through v0.4.11;
 maintained going forward by the `release` skill.
 
+## [0.11.12] - 2026-09-24
+
+### Changed
+- Porffor alpha 9 handles ESM modules without the external esbuild executable.
+  The CLI now requires `@sproutboat/toolchain@^0.4.12`, runtime `^0.12.1`,
+  and wire `^0.9.1`.
+  Removed the CLI's esbuild dependency, platform binary copies, and compile-time
+  PATH lookup. Handler validation and shimming still use Bun's built-in bundler.
+  The required `esbuildVersion` manifest field remains for older artifact
+  readers and now records `unused`.
+- Local `dev` rebuilds keep a stable generated entry path for each process, so
+  Porffor alpha 9 can reuse unchanged compiled C units. In a local `hello`
+  handler-edit comparison, compilation took 549 ms with the stable path versus
+  1,505 ms with changing paths. Candidate binaries remain isolated.
+
 ## [0.11.11] - 2026-09-24
 ### Fixed
 - Updated the native runtime to `0.12.0` so repeated HMAC signing uses the raw
@@ -15,7 +30,6 @@ maintained going forward by the `release` skill.
 - Updated the toolchain to `0.4.11` so `Uint8Array.from({ length: 16 }, mapFn)`
   produces the intended key bytes in standalone native builds.
 - Added the two-round HMAC vector to broker and standalone conformance checks.
-
 ## [0.11.10] - 2026-09-18
 ### Changed
 - Bumped `@sproutboat/toolchain` to `0.4.10`, pinning Porffor to the
@@ -596,7 +610,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.11...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.12...HEAD
+[0.11.12]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.11...v0.11.12
 [0.11.11]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.10...v0.11.11
 [0.11.10]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.9...v0.11.10
 [0.11.9]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.8...v0.11.9
