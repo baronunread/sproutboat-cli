@@ -25,11 +25,11 @@ website's support table links to these, so a broken one makes the table lie.
 
 ## Compiler gaps
 
-`patches/UPSTREAM.md` lists what Porffor cannot do yet and what was already
-ruled out. Read it before working around something: Proxy, Web Crypto, streams
-and the zod init crash are all recorded there with issue numbers.
+`patches/upstream/README.md` links what Porffor cannot do yet and what was
+already ruled out. Read it before working around something: Proxy, Web Crypto,
+streams and the zod init crash are all recorded there with issue numbers.
 
-A finished draft in that file, even one with a verified repro, is not
+A finished draft in those files, even one with a verified repro, is not
 authorization to open it on the real `CanadaHonk/porffor` tracker. Filing
 there is outward-facing and effectively irreversible, so always stop and ask
 a human first, immediately before the `gh issue create` call, even if told

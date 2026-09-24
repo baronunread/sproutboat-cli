@@ -101,7 +101,8 @@ an earlier version of this note said to avoid `Date.prototype.toISOString()`,
 which only ever correlated with one specific repro, not the actual trigger.
 Sync-only handlers are unaffected, since nothing ever resolves a promise.
 
-Fixed by a local patch to Porffor's `.then` probe (see `patches/UPSTREAM.md`),
+Fixed by a local patch to Porffor's `.then` probe (see
+`patches/upstream/promise-resolution-livelock.md`),
 pending release — no CLI version has picked it up yet, so this is still live
 for every build today. There is no workaround for a build on a version
 before the fix ships: the exact allocator trigger isn't something a safe
