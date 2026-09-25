@@ -15,6 +15,8 @@ maintained going forward by the `release` skill.
   refresh broker asset sidecars without recompiling the handler.
 - Report native compilation time and binary cache status after `build`.
 - Reject unsupported service bindings before starting a standalone build.
+- Fetch the pinned Mozilla CA bundle from curl's dated archive so new upstream
+  revisions do not break fresh standalone builds.
 
 ## [0.11.12] - 2026-09-24
 
