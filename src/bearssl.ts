@@ -34,7 +34,8 @@ const BEARSSL_SHA256 = "6705bba1714961b41a728dfc5debbe348d2966c117649392f8c8139e
  * release is unknown until the next one. Fine while releases are frequent;
  * revisit if a user is ever stuck on an old CLI for months.
  */
-const CACERT_URL = "https://curl.se/ca/cacert.pem";
+// Use the dated archive so its bytes stay equal to the pinned digest.
+const CACERT_URL = "https://curl.se/ca/cacert-2026-08-13.pem";
 const CACERT_SHA256 = "f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9";
 
 const cacheDir = (): string =>

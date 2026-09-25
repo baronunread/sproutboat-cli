@@ -7,7 +7,7 @@
  * embedded transport already produces exactly the binary we want, so this
  * copies it out and enforces the one thing a standalone binary cannot do.
  */
-import { chmod, cp, mkdir, readFile } from "node:fs/promises";
+import { chmod, cp, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { buildArtifact, type BuildInput } from "./build";
 import type { Bindings } from "./wrap";
@@ -29,7 +29,7 @@ export type StandaloneBuildResult = { outPath: string; bytes: number };
  * Outbound `fetch` is absent from this list: http and https both work, with
  * BearSSL and the Mozilla root set compiled in.
  */
-export function unsupportedBindings(bindings: Partial<Bindings>): string[] {
+export function unsupportedBindings(bindings: Pick<Partial<Bindings>, "services" | "outbound">): string[] {
   const reasons: string[] = [];
   if ((bindings.services ?? []).length > 0) {
     reasons.push("service bindings call another deployment through an edge, which a standalone binary has none of");
@@ -38,21 +38,11 @@ export function unsupportedBindings(bindings: Partial<Bindings>): string[] {
 }
 
 export async function buildStandalone(input: StandaloneBuildInput): Promise<StandaloneBuildResult> {
-  const artifact = await buildArtifact({ ...input, transport: "embedded" });
-
-  let bindings: Partial<Bindings> = {};
-  try {
-    // SAFETY: bindings.json is written by buildArtifact from the validated
-    // config in this same call — our own output, not user input.
-    bindings = JSON.parse(await readFile(resolve(artifact.artifactDir, "bindings.json"), "utf8")) as Partial<Bindings>;
-  } catch {
-    bindings = {}; // a project with no bindings at all
-  }
-
-  const blocked = unsupportedBindings(bindings);
+  const blocked = unsupportedBindings(input.config);
   if (blocked.length > 0) {
     throw new Error(`cannot build a standalone binary for this project:\n  - ${blocked.join("\n  - ")}`);
   }
+  const artifact = await buildArtifact({ ...input, transport: "embedded" });
 
   // The sprout *is* the binary: assets and bindings are compiled into it, and
   // everything else it needs (port, data dir, secrets) arrives at run time.
