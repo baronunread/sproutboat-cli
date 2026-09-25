@@ -53,6 +53,8 @@ export type CompileInput = {
   generatedPath?: string;
   /** The bundled module (#89). Falls back to reading `sourcePath` verbatim. */
   source?: string;
+  /** The exact wrapped module used to compute a verified compile-cache key. */
+  generatedSource?: string;
   outPath: string;
   vars: Record<string, string>;
   bindings?: Bindings;
@@ -198,25 +200,27 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   await rm(input.outPath, { force: true });
   const generatedPath = input.generatedPath ?? resolve(outDir, "sprout.generated.js");
   await mkdir(dirname(generatedPath), { recursive: true });
-  const [source, prelude] = await Promise.all([
-    input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),
-    loadPrelude(input.transport ?? "broker"),
-  ]);
-  await writeFile(
-    generatedPath,
-    wrapNativeFetchHandler(
-      source,
-      prelude,
-      input.vars,
-      input.bindings ?? EMPTY_BINDINGS,
-      undefined,
-      input.compatibilityDate,
-      input.appName,
-      input.assets,
-      input.transport,
-      input.versionMetadata,
-    ),
-  );
+  const generatedSource =
+    input.generatedSource ??
+    (await (async () => {
+      const [source, prelude] = await Promise.all([
+        input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),
+        loadPrelude(input.transport ?? "broker"),
+      ]);
+      return wrapNativeFetchHandler(
+        source,
+        prelude,
+        input.vars,
+        input.bindings ?? EMPTY_BINDINGS,
+        undefined,
+        input.compatibilityDate,
+        input.appName,
+        input.assets,
+        input.transport,
+        input.versionMetadata,
+      );
+    })());
+  await writeFile(generatedPath, generatedSource);
 
   const launcher = resolve(porffor, "runtime/index.js");
   // A musl build shells `zig` bare (Porffor hardcodes the literal command), so

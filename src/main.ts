@@ -319,6 +319,7 @@ async function build(directory?: string, target: "linux-x86_64" | "host" = "linu
     target,
   });
   console.log(ok(`built ${project.config.name}`));
+  console.log(dim(`  compile  ${artifact.compileMs} ms · binary cache ${artifact.compileCache}`));
   if (target === "host")
     console.log(dim("  host build — runs here, not deployable; drop --target host to build for a box"));
   console.log(artifact.artifactDir);

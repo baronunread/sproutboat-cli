@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { unsupportedBindings } from "./standalone-build";
+import { buildStandalone, unsupportedBindings } from "./standalone-build";
 
 test("service bindings cannot work in a standalone binary", () => {
   // They call another deployment through an edge, and a standalone binary has
@@ -17,4 +17,19 @@ test("outbound does not block a build", () => {
 
 test("a project with no bindings at all is fine", () => {
   expect(unsupportedBindings({})).toEqual([]);
+});
+
+test("standalone rejects service bindings before reading source or acquiring a compiler", async () => {
+  await expect(
+    buildStandalone({
+      projectDir: "/does/not/exist",
+      sourcePath: "/does/not/exist/handler.js",
+      config: {
+        name: "app",
+        main: "handler.js",
+        compatibility_date: "2026-08-26",
+        services: [{ binding: "AUTH", service: "auth-api" }],
+      },
+    }),
+  ).rejects.toThrow("service bindings call another deployment");
 });
