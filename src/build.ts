@@ -291,7 +291,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     const compileMs = Math.round(performance.now() - compileStartedAt);
 
     const sprout = await readFile(sproutPath);
-    const manifest: ArtifactManifest = {
+    const manifest: ArtifactManifest & { compileMs: number } = {
       schemaVersion: ARTIFACT_SCHEMA_VERSION,
       project: input.config.name,
       target: host ? hostTarget() : DEPLOY_TARGET,
@@ -304,6 +304,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       sourceHash,
       binaryHash: digest(sprout),
       binarySize: (await stat(sproutPath)).size,
+      compileMs,
       builtAt,
     };
     await writeFile(resolve(artifactDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
