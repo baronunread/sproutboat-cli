@@ -65,7 +65,7 @@
     "@sproutboat/assets": "^0.3.0",
     "@sproutboat/config": "^0.4.0",
     "@sproutboat/runtime": "^0.12.1",
-    "@sproutboat/toolchain": "^0.4.12",
+    "@sproutboat/toolchain": "^0.4.13",
     "@sproutboat/wire": "^0.9.1"
   },
   "devDependencies": {
