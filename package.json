@@ -1,6 +1,6 @@
 {
   "name": "sproutboat",
-  "version": "0.11.12",
+  "version": "0.11.13",
   "description": "Wrangler-shaped CLI for Sproutboat. Deploys workers to any control plane via --api-url / SPROUTBOAT_API_URL.",
   "keywords": [
     "cli",
@@ -61,7 +61,7 @@
     "kitchen-sink:standalone": "bun examples/kitchen-sink/harness-standalone.ts"
   },
   "dependencies": {
-    "@sproutboat/artifact": "^0.2.0",
+    "@sproutboat/artifact": "^0.3.0",
     "@sproutboat/assets": "^0.3.0",
     "@sproutboat/config": "^0.4.0",
     "@sproutboat/runtime": "^0.12.1",
@@ -77,10 +77,10 @@
     "typescript": "7.0.2"
   },
   "optionalDependencies": {
-    "@sproutboat/cli-darwin-arm64": "0.11.12",
-    "@sproutboat/cli-darwin-x64": "0.11.12",
-    "@sproutboat/cli-linux-arm64": "0.11.12",
-    "@sproutboat/cli-linux-x64": "0.11.12"
+    "@sproutboat/cli-darwin-arm64": "0.11.13",
+    "@sproutboat/cli-darwin-x64": "0.11.13",
+    "@sproutboat/cli-linux-arm64": "0.11.13",
+    "@sproutboat/cli-linux-x64": "0.11.13"
   },
   "engines": {
     "node": ">=18"

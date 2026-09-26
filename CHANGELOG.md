@@ -10,6 +10,12 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.11.13] - 2026-09-26
+
+### Added
+- Record compile duration in the artifact manifest so the platform can show it per deployment.
+- Support selected `node:path`, `node:url`, and `node:querystring` APIs in handlers.
+
 ### Changed
 - Reuse checksum-verified native binaries for identical release builds and
   refresh broker asset sidecars without recompiling the handler.
@@ -17,6 +23,7 @@ maintained going forward by the `release` skill.
 - Reject unsupported service bindings before starting a standalone build.
 - Fetch the pinned Mozilla CA bundle from curl's dated archive so new upstream
   revisions do not break fresh standalone builds.
+- Update the pinned toolchain to `0.4.13` and the artifact contract to `0.3.0`.
 
 ## [0.11.12] - 2026-09-24
 
@@ -620,7 +627,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.12...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.13...HEAD
+[0.11.13]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.12...v0.11.13
 [0.11.12]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.11...v0.11.12
 [0.11.11]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.10...v0.11.11
 [0.11.10]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.9...v0.11.10

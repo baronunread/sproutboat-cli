@@ -5,7 +5,7 @@
     "": {
       "name": "@sproutboat/cli",
       "dependencies": {
-        "@sproutboat/artifact": "^0.2.0",
+        "@sproutboat/artifact": "^0.3.0",
         "@sproutboat/assets": "^0.3.0",
         "@sproutboat/config": "^0.4.0",
         "@sproutboat/runtime": "^0.12.1",
@@ -21,10 +21,10 @@
         "typescript": "7.0.2",
       },
       "optionalDependencies": {
-        "@sproutboat/cli-darwin-arm64": "0.11.12",
-        "@sproutboat/cli-darwin-x64": "0.11.12",
-        "@sproutboat/cli-linux-arm64": "0.11.12",
-        "@sproutboat/cli-linux-x64": "0.11.12",
+        "@sproutboat/cli-darwin-arm64": "0.11.13",
+        "@sproutboat/cli-darwin-x64": "0.11.13",
+        "@sproutboat/cli-linux-arm64": "0.11.13",
+        "@sproutboat/cli-linux-x64": "0.11.13",
       },
     },
   },
@@ -107,7 +107,7 @@
 
     "@oxlint/plugins": ["@oxlint/plugins@1.81.0", "", {}, "sha512-HhD8kd3r6XpelZkhxhRty/po8V6yK1VV63Eq4kSsOS2IoHUywG3DV2EX+z/ZHw46aLI74Y6aA604NRiAqLKW9w=="],
 
-    "@sproutboat/artifact": ["@sproutboat/artifact@0.2.0", "", {}, "sha512-lDJz0YGByMZX5x9JAf6Co07y6dPMT3/aR7QnBvvEQHSlOkyhgyaVBV7Gi9kscv8nDAFoO/wENjJyryxdyFhcWQ=="],
+    "@sproutboat/artifact": ["@sproutboat/artifact@0.3.0", "", {}, "sha512-+Rs3eLezheNLBSASsdEhYdmngWTRWJd1J32akBczPhk9Dt+NsTCfhfk8qAXJFi0oho3XCfMcyT/DqU7t7o8zJQ=="],
 
     "@sproutboat/assets": ["@sproutboat/assets@0.3.0", "", {}, "sha512-YvKhDPnAaU+Xxnn6QpDizFq/SYwGEgbCWtSz+7edniPBQT5HHOnh9GyKj5Sa1+sjlkNnpKvUk+6evfCUTNRytg=="],
 
