@@ -10,6 +10,18 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.12.0] - 2026-09-28
+
+### Added
+- Run three original Cloudflare Worker examples unchanged: JSON responses,
+  cookie parsing, and redirects. The example suite now checks 21 native apps.
+- Pass `(request, env, ctx)` to fetch handlers using the 2026-09-28
+  compatibility date while preserving the earlier two-argument form for older apps.
+
+### Changed
+- Update to Porffor alpha 10 via `@sproutboat/toolchain@^0.4.14` and use
+  `@sproutboat/runtime@^0.13.0` for native request decoding and redirects.
+
 ## [0.11.13] - 2026-09-26
 
 ### Added
@@ -627,7 +639,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.13...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.13...v0.12.0
 [0.11.13]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.12...v0.11.13
 [0.11.12]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.11...v0.11.12
 [0.11.11]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.10...v0.11.11
