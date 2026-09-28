@@ -1,7 +1,7 @@
 /**
  * #89 — bundle the handler before Porffor sees it.
  *
- * Porffor alpha 9 supports ESM imports. We still bundle first so capability
+ * Porffor supports ESM imports. We still bundle first so capability
  * validation sees every dependency and the runtime wrapper receives one
  * controlled default export.
  *

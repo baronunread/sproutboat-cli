@@ -8,7 +8,7 @@ const manifest: ArtifactManifest = {
   target: "linux-x86_64",
   runtime: "native-fetch",
   capabilityProfile: "http-sync-v0",
-  porfforVersion: "alpha-4 (a415d19)",
+  porfforVersion: "alpha-10 (08ac7ee)",
   esbuildVersion: "0.28.2",
   buildImage: "ghcr.io/baronunread/sproutboat/build@sha256:" + "a".repeat(64),
   sourceHash: "sha256:a",
@@ -51,7 +51,7 @@ test("deploy report: files table, sizes, and every binding kind", () => {
     ),
   );
   expect(out).toContain("🌱 sproutboat");
-  expect(out).toContain("Porffor alpha-4 (a415d19)");
+  expect(out).toContain("Porffor alpha-10 (08ac7ee)");
   expect(out).toContain("2.00 KiB"); // sprout size
   expect(out).toContain("512 B"); // manifest size
   expect(out).toContain("Total upload: 2.50 KiB");

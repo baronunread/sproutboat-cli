@@ -31,6 +31,98 @@ const EXAMPLES = {
     ok("reads the query string", (await text(base + "/?name=sprout")) === "Hello, sprout!\n");
   },
 
+  "cf-json": async (base, ok) => {
+    const response = await fetch(base + "/");
+    ok("returns a JSON content type", response.headers.get("content-type")?.includes("application/json") === true);
+    ok("returns the JSON object", JSON.stringify(await response.json()) === '{"hello":"world"}');
+  },
+
+  "cf-cookies": async (base, ok) => {
+    ok(
+      "reads a named cookie",
+      (await text(base + "/", { headers: { cookie: "other=1; __uid=abc=123" } })) === "abc=123",
+    );
+    ok(
+      "does not match a prefix",
+      (await text(base + "/", { headers: { cookie: "__uid_extra=no" } })) === "No cookie with name: __uid",
+    );
+  },
+
+  "cf-redirects": async (base, ok) => {
+    const redirect = await fetch(base + "/old-guide?from=search", { redirect: "manual" });
+    ok("redirects a mapped path", redirect.status === 301 && redirect.headers.get("location") === base + "/guide", {
+      status: redirect.status,
+      location: redirect.headers.get("location"),
+    });
+    ok("does not redirect an unmapped path", (await fetch(base + "/unknown", { redirect: "manual" })).status === 404);
+  },
+
+  "cf-headers": async (base, ok) => {
+    const response = await fetch(base + "/");
+    ok("returns the page", (await response.text()) === "Protected page");
+    ok(
+      "sets security headers",
+      response.headers.get("x-content-type-options") === "nosniff" &&
+        response.headers.get("x-frame-options") === "DENY" &&
+        response.headers.get("content-security-policy") === "default-src 'none'",
+    );
+  },
+
+  "cf-post": async (base, ok) => {
+    const json = await fetch(base + "/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"message":"hello"}',
+    });
+    ok(
+      "reads JSON bodies",
+      json.status === 200 && JSON.stringify(await json.json()) === '{"received":{"message":"hello"}}',
+    );
+    const invalid = await fetch(base + "/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{",
+    });
+    ok("rejects malformed JSON", invalid.status === 400);
+    ok(
+      "reads text bodies",
+      (await text(base + "/", { method: "POST", headers: { "content-type": "text/plain" }, body: "hello" })) ===
+        "hello",
+    );
+    ok(
+      "rejects unsupported media",
+      (await fetch(base + "/", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: "a" }))
+        .status === 415,
+    );
+  },
+
+  "worker-return-json": async (base, ok) => {
+    const response = await fetch(base + "/");
+    ok("returns the original JSON", response.status === 200 && (await response.text()) === '{"hello":"world"}');
+    ok("sets a JSON content type", response.headers.get("content-type")?.includes("application/json") === true);
+  },
+
+  "worker-cookie-parsing": async (base, ok) => {
+    ok("reads the original cookie", (await text(base + "/", { headers: { cookie: "other=1; __uid=abc" } })) === "abc");
+    ok("reports a missing cookie", (await text(base + "/")) === "No cookie with name: __uid");
+  },
+
+  "worker-redirect": async (base, ok) => {
+    const response = await fetch(base + "/anything", { redirect: "manual" });
+    ok(
+      "returns the original 301 redirect",
+      response.status === 301 && response.headers.get("location") === "https://example.com",
+      {
+        status: response.status,
+        location: response.headers.get("location"),
+      },
+    );
+  },
+
+  "workers-contract": async (base, ok) => {
+    ok("passes env second and ctx third", (await text(base + "/")) === "sproutboat:true");
+  },
+
   kv: async (base, ok) => {
     await fetch(base + "/greeting", { method: "PUT", body: "hello" });
     ok("get returns what put stored", (await text(base + "/greeting")) === "hello\n");
@@ -145,7 +237,7 @@ const names: Name[] = wanted.length ? wanted.filter(isName) : Object.keys(EXAMPL
 
 let failures = 0;
 for (const name of names) {
-  const dir = join(HERE, name);
+  const dir = name.startsWith("worker-") ? join(HERE, "workers-verbatim", name.slice(7)) : join(HERE, name);
   const workdir = mkdtempSync(join(tmpdir(), `sb-smoke-${name}-`));
   const parsed = parseConfig(readFileSync(join(dir, "sproutboat.jsonc"), "utf8"));
   if (!parsed.ok) throw new Error(`${name}: bad config: ${parsed.errors.join("; ")}`);

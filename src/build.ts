@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { cp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { walkAssets, type AssetManifest } from "./assets";
 import { resourceRefs, type SproutboatConfig } from "./config";
@@ -82,7 +82,13 @@ async function integrationIdentity(): Promise<string> {
   const files = ["build.ts", "compile.ts", "sqlite.ts", "bearssl.ts", "toolchain.ts"].map((file) =>
     resolve(import.meta.dir, file),
   );
-  files.push(Bun.resolveSync("@sproutboat/toolchain/patch", import.meta.dir));
+  // Hash the patch implementation and its local modules so a Unicode patch
+  // edit cannot reuse a binary compiled with earlier builtin semantics.
+  const patchDir = dirname(Bun.resolveSync("@sproutboat/toolchain/patch", import.meta.dir));
+  const toolchainFiles = (await readdir(patchDir))
+    .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+    .sort();
+  files.push(...toolchainFiles.map((file) => resolve(patchDir, file)));
   return digest(Buffer.concat(await Promise.all(files.map((file) => readFile(file)))));
 }
 

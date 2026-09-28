@@ -8,13 +8,14 @@
         "@sproutboat/artifact": "^0.3.0",
         "@sproutboat/assets": "^0.3.0",
         "@sproutboat/config": "^0.4.0",
-        "@sproutboat/runtime": "^0.12.1",
-        "@sproutboat/toolchain": "^0.4.13",
+        "@sproutboat/runtime": "^0.13.0",
+        "@sproutboat/toolchain": "^0.4.14",
         "@sproutboat/wire": "^0.9.1",
       },
       "devDependencies": {
         "@oxlint/plugins": "1.81.0",
         "@types/bun": "1.4.0",
+        "cookie": "2.0.1",
         "lefthook": "2.1.12",
         "oxfmt": "0.66.0",
         "oxlint": "1.81.0",
@@ -113,9 +114,9 @@
 
     "@sproutboat/config": ["@sproutboat/config@0.4.0", "", {}, "sha512-uNMaIRw5Jl3Cxt8uZuRapFxUL1z4dcjIcB1jFphllmv3XJi1/q5PL6/HY+LnLRs+Xqejl6ilhfh+g5N9E4+BeQ=="],
 
-    "@sproutboat/runtime": ["@sproutboat/runtime@0.12.1", "", {}, "sha512-/tMZkWJik5vvijcpjZ4hwhMCszHW0EaYhRmOIULuXHIbxSsQ8VIrefP0t957uJEjkKNt5wI020+a4U3x94sayg=="],
+    "@sproutboat/runtime": ["@sproutboat/runtime@0.13.0", "", {}, "sha512-w5yWpqkS/xVAnMrzikAofj9RwfU4immW+yolJLqLePIsvQS7/ET5o4++souZzPvUzmaZ6opA4rH5q0ouLF8RCw=="],
 
-    "@sproutboat/toolchain": ["@sproutboat/toolchain@0.4.13", "", {}, "sha512-K231HeR6cGdNHSViNrpqNdJxE3fAazmHBjNFWUUlcVi5Jy+/3VAu3srQ4RXNZdo5s+1QgH0U75En1aZJX6Jdag=="],
+    "@sproutboat/toolchain": ["@sproutboat/toolchain@0.4.14", "", {}, "sha512-XCCqCcTjAJwmkFE+rFNajOG/a9UkMMeS24Pi/f5Mkse3k50lteOecjd0w1jvE44RS8/HedjiSk1/03uSVQVE7Q=="],
 
     "@sproutboat/wire": ["@sproutboat/wire@0.9.1", "", { "dependencies": { "@sproutboat/assets": "^0.3.0" } }, "sha512-Veza52VCsbfppBbWXXtWqXTnoipaOeNthqSyqvxsCZ4LTgExsN/B0fTbEIStFSctDVpJ4Vxs9gz4H/tLZE8XNQ=="],
 
@@ -164,6 +165,8 @@
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
     "bun-types": ["bun-types@1.4.0", "", { "dependencies": { "@types/node": "*" } }, "sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q=="],
+
+    "cookie": ["cookie@2.0.1", "", {}, "sha512-yuToqVvRrj6pfDXREyQAAv8SkAEk/8GS3jQRTiUMm66TVtBYmqQeoEjL2Lmq8Rpo6271vH76InTChTitEAm65w=="],
 
     "lefthook": ["lefthook@2.1.12", "", { "optionalDependencies": { "lefthook-darwin-arm64": "2.1.12", "lefthook-darwin-x64": "2.1.12", "lefthook-freebsd-arm64": "2.1.12", "lefthook-freebsd-x64": "2.1.12", "lefthook-linux-arm64": "2.1.12", "lefthook-linux-x64": "2.1.12", "lefthook-openbsd-arm64": "2.1.12", "lefthook-openbsd-x64": "2.1.12", "lefthook-windows-arm64": "2.1.12", "lefthook-windows-x64": "2.1.12" }, "bin": { "lefthook": "bin/index.js" } }, "sha512-2uOexfsrrRhCiTUWdGyDySxVHHhOFJ8MQejs27dM3hugrQB48/z1ZVlaNoxpZ1SnzQ1GaDIbO5rAvicwyiknYQ=="],
 

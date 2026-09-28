@@ -20,7 +20,7 @@ them reads as machine-written.
 They exist because there are two implementations of the binding ops. A change
 that passes one and not the other is drift, not a flake.
 
-`bun run examples` builds all eight small examples and drives them. The
+`bun run examples` builds all small examples and drives them. The
 website's support table links to these, so a broken one makes the table lie.
 
 ## Compiler gaps
