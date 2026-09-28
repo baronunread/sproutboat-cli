@@ -155,7 +155,7 @@ test("manifest: a host-target artifact is rejected as undeployable", () => {
     project: "hello",
     runtime: "native-fetch",
     capabilityProfile: "http-sync-v0",
-    porfforVersion: "alpha-4",
+    porfforVersion: "alpha-10",
     esbuildVersion: "0.28.2",
     buildImage: "stamp",
     sourceHash: digest,
@@ -187,6 +187,7 @@ test("wrap: bakes the compatibility date, defaulting to the baseline", () => {
 });
 
 test("manifest: compatibilityDate is optional, and validated when present", () => {
+  // Historical artifact: rollback must still accept one built before this field existed.
   const base = {
     schemaVersion: 2,
     project: "hello",

@@ -153,7 +153,7 @@ test("neutraliseExports rejects a module with no default export", () => {
 });
 
 /**
- * Porffor alpha-4 compiles `new Proxy` and then ignores the handler — the
+ * The Porffor pin compiles `new Proxy` and then ignores the handler — the
  * trapped property is `undefined`, with no throw. `check` has to reject it, or
  * the first sign of trouble is a 502 from a handler that built cleanly.
  */

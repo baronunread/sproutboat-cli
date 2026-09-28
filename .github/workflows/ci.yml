@@ -30,6 +30,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run kitchen-sink
       - run: bun run kitchen-sink:standalone
+      - run: bun run examples
 
   packaged-cli:
     name: packaged CLI (${{ matrix.name }})

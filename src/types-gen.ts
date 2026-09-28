@@ -1,10 +1,9 @@
 /**
  * `sproutboat types` — the project's `env`, as TypeScript.
  *
- * In Workers `env` is a parameter, so an editor can infer it from a signature.
- * Here it is a global, which means nothing is inferable at all: `env.SESSIONS`
- * is an undeclared identifier until this file exists. That makes generated
- * types worth more here than they are there, not less.
+ * `env` remains available as a global in both compatibility modes. This file
+ * gives it the project's binding names and types. From 2026-09-28 it is also
+ * the second handler argument.
  *
  * The output declares `env` from `sproutboat.jsonc` and references the ambient
  * types shipped in `types/sproutboat.d.ts`, so binding *shapes* version with
@@ -75,6 +74,11 @@ export function generateTypes(config: SproutboatConfig): string {
         .join("\n")
     : "    // No bindings declared in sproutboat.jsonc yet.";
 
+  const handlerNote =
+    config.compatibility_date >= "2026-09-28"
+      ? "The same object is passed as the second handler argument: fetch(request, env, ctx)."
+      : "The handler signature is fetch(request, ctx); env is only a global.";
+
   return `${HEADER}
 /// <reference types="sproutboat/types" />
 
@@ -82,7 +86,7 @@ declare global {
   /**
    * Bindings from sproutboat.jsonc, for project "${config.name}".
    *
-   * A global, not a parameter: the handler signature is \`fetch(request)\`.
+   * ${handlerNote}
    * Every call on these is synchronous, so \`await\` is allowed and does
    * nothing.
    */

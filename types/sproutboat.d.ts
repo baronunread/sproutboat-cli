@@ -6,9 +6,9 @@
  * generates a project's `sproutboat-env.d.ts`, which references this file and
  * declares `env` with that project's bindings.
  *
- * Two things differ from Cloudflare Workers and are the reason these exist:
- * `env` is a global rather than a parameter, so nothing is inferable from a
- * signature, and every binding call is synchronous.
+ * Bindings are synchronous. Before compatibility date 2026-09-28, `env` is a
+ * global only and `ctx` is the second handler argument. From that date, `env`
+ * is also passed as the second argument and `ctx` as the third.
  */
 
 declare global {
@@ -300,11 +300,7 @@ declare global {
     scheduledTime: number;
   }
 
-  /**
-   * `env` is a global, not a parameter. `ctx` is the second argument, and its
-   * only member is `waitUntil`: work that outlives the response, drained
-   * in-process and capped at 25s.
-   */
+  /** Work that outlives the response, drained in-process and capped at 25s. */
   interface ExecutionContext {
     waitUntil(promise: Promise<unknown>): void;
   }
@@ -316,6 +312,13 @@ declare global {
     fetch(request: Request, ctx: ExecutionContext): Response | Promise<Response>;
     scheduled?(event: ScheduledEvent, ctx: ExecutionContext): void | Promise<void>;
     queue?(batch: MessageBatch<QueueBody>, ctx: ExecutionContext): void | Promise<void>;
+  }
+
+  /** Handler signature for compatibility dates from 2026-09-28. */
+  interface WorkersHandler<Bindings = Record<string, unknown>, QueueBody = unknown> {
+    fetch(request: Request, env: Bindings, ctx: ExecutionContext): Response | Promise<Response>;
+    scheduled?(event: ScheduledEvent, env: Bindings, ctx: ExecutionContext): void | Promise<void>;
+    queue?(batch: MessageBatch<QueueBody>, env: Bindings, ctx: ExecutionContext): void | Promise<void>;
   }
 
   /**

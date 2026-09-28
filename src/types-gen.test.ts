@@ -57,6 +57,12 @@ test("the file references the shipped ambient types and declares env as a global
   expect(out).not.toContain("fetch(request, env");
 });
 
+test("new compatibility dates document the Workers handler arguments", () => {
+  const parsed = parseConfig('{ "name": "demo", "main": "src/index.js", "compatibility_date": "2026-09-28" }');
+  if (!parsed.ok) throw new Error(parsed.errors.join("; "));
+  expect(generateTypes(parsed.value)).toContain("fetch(request, env, ctx)");
+});
+
 test("a project with no bindings still produces a valid file", () => {
   const out = generateTypes(config(`"vars": {}`));
   expect(out).toContain("const env: {");

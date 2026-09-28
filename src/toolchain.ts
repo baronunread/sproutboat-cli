@@ -38,7 +38,7 @@ const ZIG_SHA256 = {
 // frozen reference handlers and update its COMPAT.md for any new mismatch before
 // releasing — the alpha compiler's output can shift between pins. Checked by
 // hand at bump time, not in CI.
-// uWebSockets commit Porffor alpha-4 fetches for the native-fetch server.
+// uWebSockets commit Porffor alpha-10 fetches for the native-fetch server.
 const UWS_COMMIT = "360c276d";
 const UWS_COMMIT_FULL = "360c276d609d59af56ae6932adb95154ace9f15f";
 
@@ -678,7 +678,7 @@ export function porfforVersion(): string {
 
 export function esbuildVersion(): string {
   // Legacy artifact field, retained so older control planes can read manifests.
-  // Handler bundling uses Bun.build and Porffor alpha 9 needs no esbuild binary.
+  // Handler bundling uses Bun.build and Porffor alpha 10 needs no esbuild binary.
   return "unused";
 }
 
