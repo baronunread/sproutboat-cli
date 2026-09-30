@@ -52,6 +52,8 @@ declare global {
     /** The first row, or one column of it when named. `null` if there are none. */
     first<T = Record<string, unknown>>(): T | null;
     first<T = unknown>(column: string): T | null;
+    /** Rows as arrays of column values. */
+    raw<T = unknown[]>(): T[];
   }
 
   interface D1Database {
@@ -81,8 +83,8 @@ declare global {
     httpMetadata: R2HttpMetadata;
     customMetadata?: Record<string, string>;
     /**
-     * The object as a string. A get holds the object whole in memory, so keep
-     * downloads small until native download tickets are available.
+     * The object as a string. A get holds the object whole in memory, so serve
+     * large objects with `createDownloadUrl` instead.
      *
      * `new Response(obj.body, ...)` corrupts any non-ASCII/binary content: the
      * runtime cannot tell these bytes apart from a string a handler built, so
@@ -159,9 +161,9 @@ declare global {
     createMultipartUpload(key: string, options?: R2PutOptions): R2MultipartUpload;
     /** Reconstructs a multipart handle after storing its key and upload id. */
     resumeMultipartUpload(key: string, uploadId: string): R2MultipartUpload;
-    /** Broker-backed direct PUT. Not available in native standalone mode yet. */
+    /** Direct PUT to a one-use URL, streamed to storage without passing through the handler. */
     createUploadUrl(key: string, options?: R2UploadTicketOptions): R2TransferTicket;
-    /** Broker-backed direct GET or HEAD, including Range. */
+    /** Direct GET or HEAD from a one-use URL, including Range. */
     createDownloadUrl(key: string, options?: R2DownloadTicketOptions): R2TransferTicket;
     get(key: string): R2Object | null;
     /** Metadata without the body. */
@@ -179,14 +181,14 @@ declare global {
   interface Queue<Body = unknown> {
     /** Returns immediately. The batch reaches `queue()` out of band. */
     send(body: Body, options?: QueueSendOptions): void;
-    sendBatch(messages: Array<{ body: Body }>): void;
+    sendBatch(messages: Array<{ body: Body; delaySeconds?: number }>): void;
   }
 
   interface QueueMessage<Body = unknown> {
     id: string;
     timestamp: number;
     body: Body;
-    /** Mark as handled. Without this the message is redelivered. */
+    /** Mark as handled. A message neither acked nor retried counts as acked. */
     ack(): void;
     /** Hand it back for another attempt. */
     retry(): void;
@@ -195,6 +197,8 @@ declare global {
   interface MessageBatch<Body = unknown> {
     queue: string;
     messages: Array<QueueMessage<Body>>;
+    ackAll(): void;
+    retryAll(): void;
   }
 
   // --------------------------------------------------- Durable Objects
@@ -273,8 +277,8 @@ declare global {
    *
    * `crypto.scryptVerify` is a Sproutboat extension (#153), not WebCrypto: it
    * re-derives a scrypt hash and compares it in constant time, for migrating
-   * password hashes made by Node/Bun `scrypt`. Verify-only on purpose; new
-   * credentials should use HMAC/PBKDF2 via `crypto.subtle`.
+   * password hashes made by Node/Bun `scrypt`. Verify-only on purpose; derive
+   * new credentials with HMAC via `crypto.subtle`.
    */
   interface Crypto {
     scryptVerify(
