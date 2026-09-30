@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "cliTag": "v0.12.0",
+  "cliCommit": "869d12dcbbf6bfed37cf70e80e037c43c8db94c4",
+  "dateUTC": "2026-09-30T00:44:56Z",
+  "sourceResultsSha256": "155e4341892929c86e8e3aa8ca8b0704d9b239550e21ada2723186ea5ce42aca",
+  "protocol": {
+    "seed": 20260930,
+    "repeats": 3,
+    "idleSeconds": 60,
+    "offeredRate": 50,
+    "requestsPerWorkload": 500,
+    "warmupRequests": 100,
+    "connection": "fresh HTTP/1.1 per request",
+    "cpuQuota": "100%",
+    "memoryMax": "512M",
+    "appCpu": 0,
+    "generatorCpu": 1
+  },
+  "tools": {
+    "node": {
+      "version": "v26.5.1",
+      "sha256": "fb48e77df2f8e92fedfec39afa60a5f41563441f6b61316ada5fb295a431c2c6",
+      "executableBytes": 148011296
+    },
+    "workerd": {
+      "version": "workerd 2026-09-27",
+      "sha256": "d53c1e6d128563a5250aa6e3787ef26b1d293bf838159322ad7aaa458bde6901",
+      "executableBytes": 134218000
+    }
+  },
+  "rows": {
+    "node": {
+      "checks": "23/23",
+      "startupMs": 185.06,
+      "idlePssMiB": 67.54,
+      "orderP95Ms": 4.57,
+      "mixedP95Ms": 54.33,
+      "orderCpuMsPer1000": 2361.27,
+      "correctTraffic": 3000,
+      "scheduledTraffic": 3000,
+      "runtimeExecutableBytes": 148011296,
+      "appArtifactBytes": 4997
+    },
+    "workerd": {
+      "checks": "23/23",
+      "startupMs": 39.15,
+      "idlePssMiB": 46.23,
+      "orderP95Ms": 2.89,
+      "mixedP95Ms": 53.52,
+      "orderCpuMsPer1000": 1417.0,
+      "correctTraffic": 3000,
+      "scheduledTraffic": 3000,
+      "runtimeExecutableBytes": 134218000,
+      "appArtifactBytes": 3933
+    },
+    "sproutboat": {
+      "checks": "23/23",
+      "startupMs": 13.55,
+      "idlePssMiB": 6.41,
+      "orderP95Ms": 2.78,
+      "mixedP95Ms": 56.87,
+      "orderCpuMsPer1000": 1101.42,
+      "correctTraffic": 3000,
+      "scheduledTraffic": 3000,
+      "runtimeExecutableBytes": null,
+      "appArtifactBytes": 3153096
+    }
+  }
+}
