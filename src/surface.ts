@@ -7,7 +7,7 @@ import { bold, dim, leaf } from "./style";
 
 export const CLI_NAME = "sproutboat";
 export const TAGLINE = "Deploy JavaScript handlers as tiny native binaries on your own VPS.";
-export const REPO_URL = "https://github.com/baronunread/sproutboat";
+export const DOCS_URL = "https://docs.sproutboat.com";
 
 export type Group = "Develop" | "Ship" | "Storage" | "Configure" | "Account";
 
@@ -356,7 +356,7 @@ export function helpText(): string {
   lines.push(
     "",
     dim(`Run \`${CLI_NAME} <command>\` with no/invalid args to see that command's full usage.`),
-    dim(`Docs: ${REPO_URL}  ·  runs on Bun — use \`bunx\`, not \`npx\`.`),
+    dim(`Docs: ${DOCS_URL}`),
   );
   return lines.join("\n");
 }
