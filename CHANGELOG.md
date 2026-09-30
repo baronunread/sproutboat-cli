@@ -10,6 +10,25 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.12.1] - 2026-09-30
+
+### Fixed
+
+- `sproutboat` with no arguments linked the platform repository and said to
+  use `bunx`, not `npx`. The CLI has shipped as a self-contained binary since
+  0.11.0, so `npx` works; the help now links https://docs.sproutboat.com.
+- Handler types now declare `batch.ackAll()`/`retryAll()`, per-message
+  `delaySeconds` in `sendBatch()` and D1 `raw()`, matching the runtime.
+  Comments that said direct R2 uploads are unavailable standalone, and that an
+  un-acked queue message is redelivered, are corrected.
+
+### Changed
+
+- `examples/runtime-comparison` runs one Worker-style app on Node, workerd and
+  a standalone Sproutboat binary and checks every response;
+  `benchmarks/v0.12.0` holds the first tagged run, which sproutboat.com
+  renders.
+
 ## [0.12.0] - 2026-09-28
 
 ### Added
@@ -639,7 +658,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.13...v0.12.0
 [0.11.13]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.12...v0.11.13
 [0.11.12]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.11...v0.11.12
