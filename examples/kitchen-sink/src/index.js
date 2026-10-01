@@ -129,7 +129,7 @@ export default {
 
     // POST /notes {title, body}
     if (path === "/notes" && request.method === "POST") {
-      const input = JSON.parse(request.body || "{}");
+      const input = request.body ? request.json() : {};
       const res = env.DB.prepare("INSERT INTO notes (title, body, created) VALUES (?, ?, ?)")
         .bind(String(input.title || "untitled"), String(input.body || ""), new Date().toISOString())
         .run();

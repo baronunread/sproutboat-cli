@@ -119,6 +119,11 @@ export async function runConformance(
   const noteId = Number(obj(created.body).id);
   const list = await jget("/notes");
   check("D1: GET /notes lists it", arr(list.body).length >= 1, list.body);
+  // baronunread/sproutboat#189: non-ASCII text used to come back as Latin-1 mojibake.
+  const unicodeTitle = "café 日本 😀";
+  await jget("/notes", { method: "POST", body: JSON.stringify({ title: unicodeTitle, body: "" }) });
+  const titles = arr((await jget("/notes")).body).map((row) => obj(row).title);
+  check("D1: non-ASCII text round-trips", titles.includes(unicodeTitle), titles);
 
   // Durable Object (view counter increments atomically)
   const v1 = await jget(`/notes/${noteId}`);
