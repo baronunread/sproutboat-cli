@@ -10,6 +10,17 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.12.3] - 2026-10-01
+
+### Changed
+
+- Builds use Porffor alpha-13 (`547c781`), up from alpha-10, through
+  `@sproutboat/toolchain` 0.4.16. Alpha-11 to alpha-13 add array and typed
+  array fast paths, closure and module codegen fixes, a basic `RegExp`
+  search, a `String.prototype.normalize` stub and lowercase JSON hex escapes.
+  Compatibility is unchanged at 30/32 handlers and binaries are about 1.7%
+  smaller.
+
 ## [0.12.2] - 2026-10-01
 
 ### Fixed
@@ -670,7 +681,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.2...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.3...HEAD
+[0.12.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.13...v0.12.0
