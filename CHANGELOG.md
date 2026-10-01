@@ -20,6 +20,15 @@ maintained going forward by the `release` skill.
   `sproutboat dev` and platform deployments alike. The data itself was stored
   correctly. Fixed in `@sproutboat/runtime` 0.13.1
   (baronunread/sproutboat#189).
+- Async handlers no longer start failing on every request after a few
+  requests. An async function returning `null` (an anonymous session lookup,
+  say) had its promise rejected with `TypeError: Cannot get property of null`
+  once a `new Date().toISOString()` call had run, and the handler never
+  recovered. The cause is a Porffor promise-resolution bug, patched in
+  `@sproutboat/toolchain` 0.4.17 (baronunread/sproutboat#168).
+- Uncaught exceptions from `fetch`, `scheduled()` and `alarm()` are now logged
+  to stderr as `Uncaught (in fetch) Error: ...` before the 500. They used to be
+  swallowed silently (`@sproutboat/runtime` 0.13.2).
 
 ### Changed
 
