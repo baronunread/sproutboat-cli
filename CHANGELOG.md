@@ -10,6 +10,18 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.12.2] - 2026-10-01
+
+### Fixed
+
+- `sproutboat dev` no longer kills a large app's sprout with SIGBUS (exit 138)
+  on its first request. Every async function runs on its own fiber stack,
+  which Porffor fixes at 256 KiB, and the unoptimised code `dev` builds
+  overflowed it within a few nested awaits. `@sproutboat/toolchain` 0.4.15
+  raises it to 8 MiB; only touched pages cost memory. Release builds had the
+  same limit at a higher threshold, so a deep async chain could crash a
+  deployed sprout the same way (baronunread/sproutboat#178).
+
 ## [0.12.1] - 2026-09-30
 
 ### Fixed
@@ -658,7 +670,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.13...v0.12.0
 [0.11.13]: https://github.com/baronunread/sproutboat-cli/compare/v0.11.12...v0.11.13
