@@ -10,6 +10,32 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.12.4] - 2026-10-01
+
+### Fixed
+
+- Non-ASCII text read back from bindings no longer comes back garbled:
+  `"café"` was returned as `"cafÃ©"` from D1 rows, KV values, cached
+  responses, R2 metadata and SQLite error messages, in standalone builds,
+  `sproutboat dev` and platform deployments alike. The data itself was stored
+  correctly. Fixed in `@sproutboat/runtime` 0.13.1
+  (baronunread/sproutboat#189).
+- Async handlers no longer start failing on every request after a few
+  requests. An async function returning `null` (an anonymous session lookup,
+  say) had its promise rejected with `TypeError: Cannot get property of null`
+  once a `new Date().toISOString()` call had run, and the handler never
+  recovered. The cause is a Porffor promise-resolution bug, patched in
+  `@sproutboat/toolchain` 0.4.17 (baronunread/sproutboat#168).
+- Uncaught exceptions from `fetch`, `scheduled()` and `alarm()` are now logged
+  to stderr as `Uncaught (in fetch) Error: ...` before the 500. They used to be
+  swallowed silently (`@sproutboat/runtime` 0.13.2).
+
+### Changed
+
+- The kitchen-sink example reads its JSON body with `request.json()`, which
+  decodes UTF-8, instead of parsing `request.body`, which holds the raw bytes.
+  Its conformance suite now checks that non-ASCII text round-trips through D1.
+
 ## [0.12.3] - 2026-10-01
 
 ### Changed
@@ -681,7 +707,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.3...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.4...HEAD
+[0.12.4]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.3...v0.12.4
 [0.12.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.0...v0.12.1
