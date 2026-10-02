@@ -24,6 +24,11 @@ maintained going forward by the `release` skill.
   `proxy_http_version 1.0`. The connection closes after the response, as
   HTTP/1.0 expects (`@sproutboat/toolchain` 0.4.19,
   baronunread/sproutboat#236).
+- Binary responses from outbound `fetch()` and service bindings arrive intact.
+  `arrayBuffer()` and `bytes()` returned a corrupted body (a 31,340-byte font
+  came back as about 30,000 bytes), in standalone builds and through the
+  broker alike. `text()` and `json()` are unchanged (`@sproutboat/runtime`
+  0.13.3, `@sproutboat/wire` 0.9.2, baronunread/sproutboat#232).
 
 ### Changed
 
