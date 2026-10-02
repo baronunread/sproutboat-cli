@@ -10,6 +10,30 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.12.5] - 2026-10-02
+
+### Fixed
+
+- Floating-point results on arm64 now match JavaScript. The C compiler fused
+  `a * b + c` into one instruction that rounds once, where JavaScript rounds
+  twice, so code like a seeded random-number generator drifted from V8.
+  Builds now use `-ffp-contract=off` (`@sproutboat/toolchain` 0.4.18,
+  baronunread/sproutboat#235).
+- Standalone binaries answer HTTP/1.0 requests instead of returning
+  `505 HTTP Version Not Supported`, so they work behind nginx's default
+  `proxy_http_version 1.0`. The connection closes after the response, as
+  HTTP/1.0 expects (`@sproutboat/toolchain` 0.4.19,
+  baronunread/sproutboat#236).
+- Binary responses from outbound `fetch()` and service bindings arrive intact.
+  `arrayBuffer()` and `bytes()` returned a corrupted body (a 31,340-byte font
+  came back as about 30,000 bytes), in standalone builds and through the
+  broker alike. `text()` and `json()` are unchanged (`@sproutboat/runtime`
+  0.13.3, `@sproutboat/wire` 0.9.2, baronunread/sproutboat#232).
+
+### Changed
+
+- The standalone kitchen-sink checks a raw HTTP/1.0 request.
+
 ## [0.12.4] - 2026-10-01
 
 ### Fixed
@@ -707,7 +731,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.4...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.5...HEAD
+[0.12.5]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.4...v0.12.5
 [0.12.4]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.3...v0.12.4
 [0.12.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.1...v0.12.2

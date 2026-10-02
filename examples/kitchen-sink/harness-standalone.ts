@@ -118,6 +118,37 @@ console.log("bindings (standalone):");
 // triggers, so the suite's HTTP-delivered ones do not apply here.
 await runConformance(base, TOKEN, check, { skipTriggers: true, skipServices: true });
 
+// baronunread/sproutboat#236: nginx proxies with HTTP/1.0 by default, which
+// uWebSockets used to answer with 505. Raw socket: fetch() always speaks 1.1.
+const http10 = await new Promise<{ reply: string; closed: boolean }>((resolve) => {
+  let reply = "";
+  const done = (closed: boolean) => resolve({ reply, closed });
+  Bun.connect({
+    hostname: "127.0.0.1",
+    port,
+    socket: {
+      open(socket) {
+        socket.write("GET / HTTP/1.0\r\nHost: localhost\r\n\r\n");
+      },
+      data(_socket, chunk) {
+        reply += new TextDecoder().decode(chunk);
+      },
+      close() {
+        done(true);
+      },
+      error() {
+        done(false);
+      },
+    },
+  }).catch(() => done(false));
+  setTimeout(() => done(false), 5000);
+});
+check(
+  "HTTP/1.0: answered with 200 and the connection closed",
+  http10.reply.startsWith("HTTP/1.1 200") && http10.closed,
+  { head: http10.reply.slice(0, 40), closed: http10.closed },
+);
+
 console.log(`\n${passed} checks passed — same suite as harness.ts, one binary.`);
 for (const c of cleanup.reverse())
   try {
