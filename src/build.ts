@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { walkAssets, type AssetManifest } from "./assets";
+import { readAssetRules, walkAssets, type AssetManifest } from "./assets";
 import { resourceRefs, type SproutboatConfig } from "./config";
 import { ensureSqliteObject } from "./sqlite";
 import { sqliteStamp } from "./sqlite";
@@ -166,14 +166,18 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   ) {
     throw new Error(`assets.directory "${input.config.assets?.directory}" not found — run your site build first`);
   }
-  const assetManifest: AssetManifest | undefined =
-    assetDir && input.config.assets
-      ? {
-          notFound: input.config.assets.not_found_handling ?? "none",
-          runSproutFirst: input.config.assets.run_sprout_first ?? false,
-          files: walkAssets(assetDir),
-        }
-      : undefined;
+  let assetManifest: AssetManifest | undefined;
+  if (assetDir && input.config.assets) {
+    assetManifest = {
+      notFound: input.config.assets.not_found_handling ?? "none",
+      runSproutFirst: input.config.assets.run_sprout_first ?? false,
+      files: walkAssets(assetDir),
+    };
+    // #61 — `_headers`/`_redirects` ride along for the edge to apply.
+    const rules = readAssetRules(assetDir);
+    if (rules.headers.length) assetManifest.headers = rules.headers;
+    if (rules.redirects.length) assetManifest.redirects = rules.redirects;
+  }
   // #15 — an embedded binary has no files beside it, so assets are baked into
   // the module. Read them from the source directory: the artifact copy happens
   // after the compile, and the compile is what needs them. Bytes travel as a
