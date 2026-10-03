@@ -10,6 +10,25 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.12.7] - 2026-10-03
+
+### Fixed
+
+- Writing past the end of a typed array is ignored instead of overwriting
+  neighbouring memory. `a[-1] = x` no longer writes `a[0]`
+  (`@sproutboat/toolchain` 0.4.23, baronunread/sproutboat#241).
+- `join()` and `toString()` work on typed arrays. `Uint8Array.join` returned
+  garbage, and a `Uint16Array.join` could kill the process
+  (`@sproutboat/toolchain` 0.4.24, baronunread/sproutboat#242).
+- KV stores binary values: `put()` of an `ArrayBuffer` or typed array keeps
+  its bytes instead of storing `"0,1,2,..."`. `get(key, type)` supports
+  `"text"`, `"json"` and `"arrayBuffer"` (baronunread/sproutboat#233).
+- `fetch()` and service-binding request bodies send an `ArrayBuffer` or typed
+  array as its exact bytes, in standalone builds and through the broker. The
+  standalone client also no longer cuts a body off at its first zero byte
+  (`@sproutboat/runtime` 0.13.5, `@sproutboat/wire` 0.9.3,
+  baronunread/sproutboat#232).
+
 ## [0.12.6] - 2026-10-03
 
 ### Fixed
@@ -754,7 +773,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.6...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.7...HEAD
+[0.12.7]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.6...v0.12.7
 [0.12.6]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.5...v0.12.6
 [0.12.5]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.4...v0.12.5
 [0.12.4]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.3...v0.12.4
