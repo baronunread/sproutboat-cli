@@ -10,6 +10,29 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.12.6] - 2026-10-03
+
+### Fixed
+
+- `String.prototype.replaceAll` is linear: replacing in a 2.1 MB string took
+  about 42 s and now takes 71 ms (`@sproutboat/toolchain` 0.4.20,
+  baronunread/sproutboat#237).
+- uuid and @noble/hashes work. Four compiler bugs and one runtime bug were
+  behind them (baronunread/sproutboat#238):
+  - Integer typed-array stores wrapped wrongly: `uint32[i] = x | 0` stored 0
+    for negative `x`, and `fill`/`set`/`from` were affected too.
+  - `typedArray.set(source)` with no offset copied nothing and wrote into the
+    wrong memory.
+  - `~x` was wrong for values above 2^31.
+  - Typed-array reads past the end returned neighbouring memory instead of
+    `undefined`.
+  - A handler's own top-level `URL` (uuid exports one) replaced the runtime's
+    `URL` class and crashed the binary at startup. The handler now runs in its
+    own scope.
+
+  SHA-256, HMAC and uuid v5 now match Node (`@sproutboat/toolchain` 0.4.22,
+  `@sproutboat/runtime` 0.13.4).
+
 ## [0.12.5] - 2026-10-02
 
 ### Fixed
@@ -731,7 +754,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.5...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.6...HEAD
+[0.12.6]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.5...v0.12.6
 [0.12.5]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.4...v0.12.5
 [0.12.4]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.3...v0.12.4
 [0.12.3]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.2...v0.12.3

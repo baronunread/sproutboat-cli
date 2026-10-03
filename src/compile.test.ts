@@ -16,7 +16,10 @@ test("wrap: injects prelude + env, keeps the handler body verbatim", () => {
 test("wrap: async fetch is kept verbatim in __sbHandlers", () => {
   const out = wrapNativeFetchHandler(`export default { async fetch() { return new Response("x"); } };`, "");
   expect(out).toContain('const __sbHandlers = { async fetch() { return new Response("x"); } };');
-  expect(out).toContain("fetch(request) { return __sbEntry(__sbHandlers, request); }");
+  expect(out).toContain("fetch(request) { return __sbEntry(__sbUserHandlers, request); }");
+  // #238: the handler runs in its own function scope, so its top-level names
+  // (a bundled `const URL`, say) cannot replace the prelude's globals.
+  expect(out).toContain("const __sbUserHandlers = (() => {");
 });
 
 test("wrap: version metadata is baked as env.<binding>, ahead of the bindings install line", () => {
@@ -80,7 +83,7 @@ test("wrap: declared bindings emit one install line after `const env`", () => {
     },
   );
   expect(out).toContain(`const env = {"V":"1"};\nglobalThis.env = env;\n__sbInstallBindings(env, {"kv":["CACHE"]`);
-  expect(out).toContain(`fetch(request) { return __sbEntry(__sbHandlers, request); }`);
+  expect(out).toContain(`fetch(request) { return __sbEntry(__sbUserHandlers, request); }`);
   expect(out).toContain(`const __sbHandlers = { fetch() { return new Response("x"); } };`);
 });
 

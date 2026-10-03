@@ -1,6 +1,6 @@
 {
   "name": "sproutboat",
-  "version": "0.12.5",
+  "version": "0.12.6",
   "description": "Wrangler-shaped CLI for Sproutboat. Deploys workers to any control plane via --api-url / SPROUTBOAT_API_URL.",
   "keywords": [
     "cli",
@@ -64,8 +64,8 @@
     "@sproutboat/artifact": "^0.3.0",
     "@sproutboat/assets": "^0.3.0",
     "@sproutboat/config": "^0.4.0",
-    "@sproutboat/runtime": "^0.13.3",
-    "@sproutboat/toolchain": "^0.4.19",
+    "@sproutboat/runtime": "^0.13.4",
+    "@sproutboat/toolchain": "^0.4.22",
     "@sproutboat/wire": "^0.9.2"
   },
   "devDependencies": {
@@ -78,10 +78,10 @@
     "typescript": "7.0.2"
   },
   "optionalDependencies": {
-    "@sproutboat/cli-darwin-arm64": "0.12.5",
-    "@sproutboat/cli-darwin-x64": "0.12.5",
-    "@sproutboat/cli-linux-arm64": "0.12.5",
-    "@sproutboat/cli-linux-x64": "0.12.5"
+    "@sproutboat/cli-darwin-arm64": "0.12.6",
+    "@sproutboat/cli-darwin-x64": "0.12.6",
+    "@sproutboat/cli-linux-arm64": "0.12.6",
+    "@sproutboat/cli-linux-x64": "0.12.6"
   },
   "engines": {
     "node": ">=18"
