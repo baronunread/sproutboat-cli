@@ -155,7 +155,8 @@ report = {
     "runs": [],
 }
 log = (ROOT / "runtime.log").open("w")
-env = dict(os.environ, BENCH_UPSTREAM="http://127.0.0.1:18081", PORT="18081")
+# SB_EGRESS_ALLOW: the upstream is on loopback, which a sprout's fetch() refuses (#174).
+env = dict(os.environ, BENCH_UPSTREAM="http://127.0.0.1:18081", PORT="18081", SB_EGRESS_ALLOW="127.0.0.1")
 with socket.socket() as sock:
     sock.bind(("127.0.0.1", 18081))
 upstream = subprocess.Popen(["taskset", "-c", "1", str(NODE), str(ROOT / "adapters/upstream.mjs")],

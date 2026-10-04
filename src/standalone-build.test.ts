@@ -9,12 +9,6 @@ test("service bindings cannot work in a standalone binary", () => {
   expect(blocked[0]).toContain("edge");
 });
 
-test("outbound does not block a build", () => {
-  // http:// works and https reports at runtime, so a project that only talks to
-  // its own network still builds.
-  expect(unsupportedBindings({ outbound: ["api.example.com"] })).toEqual([]);
-});
-
 test("a project with no bindings at all is fine", () => {
   expect(unsupportedBindings({})).toEqual([]);
 });

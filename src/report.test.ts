@@ -41,7 +41,6 @@ test("deploy report: files table, sizes, and every binding kind", () => {
         vars: { GREETING: "hej", N: "3" },
         kv_namespaces: ["CACHE"],
         secrets: ["API_KEY"],
-        outbound: ["api.example.com"],
         triggers: { crons: ["0 3 * * *"] },
         assets: { binding: "ASSETS", directory: "web/dist" },
       },
@@ -60,7 +59,6 @@ test("deploy report: files table, sizes, and every binding kind", () => {
   expect(out).toContain("env.N");
   expect(out).toContain("env.CACHE"); // kv
   expect(out).toContain("env.API_KEY"); // secret — name only, no value
-  expect(out).toContain("api.example.com"); // outbound
   expect(out).toContain("0 3 * * *"); // cron
   expect(out).toContain("env.ASSETS");
 });

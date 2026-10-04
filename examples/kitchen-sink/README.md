@@ -21,7 +21,7 @@ serve.ts         same, but stays up for the browser
 | Queues | `env.EMAILS.send()` on `POST /notes`; the `queue(batch)` handler logs to D1 | **Admin dashboard** (emails processed) |
 | Durable Objects | `env.VIEWS` / `class ViewCounter` — atomic per-note view count via `state.storage` | **Notes** (open a note) |
 | Analytics Engine | `env.METRICS.writeDataPoint()` every request; `env.METRICS.query()` feeds the dashboard | **Admin dashboard** (points + recent events) |
-| outbound `fetch` | `fetch(env.QUOTE_URL)` on `/quote`, host must be in `outbound` | **Outbound fetch** |
+| outbound `fetch` | `fetch(env.QUOTE_URL)` on `/quote`; `/egress?to=` shows a private address refused | **Outbound fetch** |
 | cron | `*/1 * * * *` → `scheduled(event)` prunes sessions + writes a heartbeat | **Admin dashboard** (heartbeats) |
 
 ## Routes

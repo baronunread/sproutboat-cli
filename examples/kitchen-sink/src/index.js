@@ -8,7 +8,7 @@
 //   queue     EMAILS               notification jobs -> queue() handler
 //   DO        VIEWS (ViewCounter)  atomic per-note view count
 //   analytics METRICS              one data point per request
-//   fetch     api.quotable.local   outbound, allowlisted
+//   fetch     api.quotable.local   any public host; private addresses refused
 //   cron      */1 * * * *          -> scheduled(): prune sessions + heartbeat
 //   assets    ASSETS (public/)     UI served via env.ASSETS.fetch(request)
 
@@ -221,10 +221,21 @@ export default {
       return json({ success: true, resetAt: r.resetAt });
     }
 
-    // GET /quote -> outbound fetch (host from env.QUOTE_URL must be allowlisted)
+    // GET /quote -> outbound fetch to env.QUOTE_URL
     if (path === "/quote") {
       const r = fetch(env.QUOTE_URL);
       return new Response(r.body, { status: r.status, headers: { "content-type": "application/json" } });
+    }
+
+    // GET /egress?to=<url> -> what fetch() did with it. A private address is
+    // refused with a message naming it (#174); a redirect comes back unfollowed.
+    if (path === "/egress") {
+      try {
+        const r = fetch(url.searchParams.get("to"));
+        return json({ status: r.status, location: r.headers.get("location") });
+      } catch (error) {
+        return json({ error: String(error && error.message) });
+      }
     }
 
     // GET /admin/stats -> secret-gated dashboard feed: one number per binding

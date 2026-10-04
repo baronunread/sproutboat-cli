@@ -66,7 +66,6 @@ function bindingRows(config: SproutboatConfig): string[][] {
     rows.push([`env.${name}`, "durable object", className]);
   for (const rl of config.ratelimiters ?? [])
     rows.push([`env.${rl.binding}`, "rate limiter", `${rl.limit} / ${rl.period}s`]);
-  for (const host of config.outbound ?? []) rows.push([`fetch()`, "outbound", host]);
   for (const cron of config.triggers?.crons ?? []) rows.push([`scheduled()`, "cron", cron]);
   if (config.assets?.binding) rows.push([`env.${config.assets.binding}`, "assets", config.assets.directory ?? ""]);
   return rows;

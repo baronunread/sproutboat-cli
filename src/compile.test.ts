@@ -70,7 +70,6 @@ test("wrap: declared bindings emit one install line after `const env`", () => {
     {
       kv: ["CACHE"],
       secrets: [],
-      outbound: [],
       d1: [],
       r2: [],
       queues: [],
@@ -82,7 +81,9 @@ test("wrap: declared bindings emit one install line after `const env`", () => {
       assets: "",
     },
   );
-  expect(out).toContain(`const env = {"V":"1"};\nglobalThis.env = env;\n__sbInstallBindings(env, {"kv":["CACHE"]`);
+  expect(out).toContain(
+    `const env = {"V":"1"};\nglobalThis.env = env;\n__sbInstallFetch();\n__sbInstallBindings(env, {"kv":["CACHE"]`,
+  );
   expect(out).toContain(`fetch(request) { return __sbEntry(__sbUserHandlers, request); }`);
   expect(out).toContain(`const __sbHandlers = { fetch() { return new Response("x"); } };`);
 });
@@ -95,7 +96,6 @@ test("wrap: an assets binding alone triggers the install line", () => {
     {
       kv: [],
       secrets: [],
-      outbound: [],
       d1: [],
       r2: [],
       queues: [],
@@ -119,7 +119,6 @@ test("wrap: Durable Object classes are neutralised and registered", () => {
     {
       kv: [],
       secrets: [],
-      outbound: [],
       d1: [],
       r2: [],
       queues: [],

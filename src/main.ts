@@ -212,6 +212,7 @@ async function readProjectConfig(directory = process.cwd()) {
   }
   const parsed = parseConfig(configSource);
   if (!parsed.ok) fail(parsed.errors.join("\n"));
+  for (const warning of parsed.warnings) console.warn(amber(`! ${warning}`));
   return { directory: projectDirectory, config: parsed.value };
 }
 
@@ -234,7 +235,7 @@ async function readProject(directory = process.cwd()) {
   } catch (cause) {
     fail(cause instanceof BundleError ? cause.message : String(cause));
   }
-  const supported = validateHttpSyncSource(bundle.code, (project.config.outbound ?? []).length > 0);
+  const supported = validateHttpSyncSource(bundle.code);
   if (!supported.ok) fail(supported.errors.join("\n"));
   return { ...project, sourcePath, source, bundle };
 }

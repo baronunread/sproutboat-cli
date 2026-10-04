@@ -43,7 +43,6 @@ const upstreamHost = `127.0.0.1:${upstream.port}`;
 const bindings: Bindings = {
   kv: c.kv_namespaces ?? [],
   secrets: c.secrets ?? [],
-  outbound: [upstreamHost],
   d1: c.d1_databases ?? [],
   r2: c.r2_buckets ?? [],
   queues: c.queues ?? [],
@@ -90,6 +89,8 @@ if (compile.exitCode !== 0) {
 const TOKEN = "dev-token";
 const sproutPort = Number(process.env.PORT) || 8787;
 const broker = createBroker({
+  // The stub upstream is on loopback, which fetch() refuses (#174).
+  egressAllow: ["127.0.0.1"],
   db: join(workdir, "state.sqlite"),
   dataDir: join(workdir, "d1"),
   token: TOKEN,

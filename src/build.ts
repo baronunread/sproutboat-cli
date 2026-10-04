@@ -138,7 +138,6 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
   const bindings = {
     kv: refsByKind.kv.map((ref) => ref.binding),
     secrets: input.config.secrets ?? [],
-    outbound: input.config.outbound ?? [],
     d1: refsByKind.d1.map((ref) => ref.binding),
     r2: refsByKind.r2.map((ref) => ref.binding),
     queues: refsByKind.queue.map((ref) => ref.binding),
@@ -320,15 +319,10 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     await writeFile(resolve(artifactDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     // Bindings live beside the manifest, not in it: the artifact manifest schema is
     // frozen at v2. The control plane reads this to configure the per-deployment
-    // broker (KV / D1 / R2 / queue names, secret names, outbound allowlist, cron
-    // schedules, Durable Object classes).
-    const hasBindings =
-      Object.values(bindings).some((value) => Array.isArray(value) && value.length > 0) ||
-      Object.keys(bindings.resources).length > 0 ||
-      Object.keys(bindings.vars).length > 0;
-    if (hasBindings) {
-      await writeFile(resolve(artifactDir, "bindings.json"), `${JSON.stringify(bindings, null, 2)}\n`);
-    } else await rm(resolve(artifactDir, "bindings.json"), { force: true });
+    // broker (KV / D1 / R2 / queue names, secret names, cron schedules, Durable
+    // Object classes). Written even when empty: its presence is what gives a
+    // deployment a broker, and fetch() needs one with no binding (#174).
+    await writeFile(resolve(artifactDir, "bindings.json"), `${JSON.stringify(bindings, null, 2)}\n`);
 
     // Static assets: copy the directory next to the artifact and record a manifest
     // the edge serves from directly (assets-first) and the broker reads for

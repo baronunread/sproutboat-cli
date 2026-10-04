@@ -115,7 +115,6 @@ Tables in a resource file, which outlives every redeploy:
 - `d1`
 - `do`
 - `kv`
-- `outbound`
 - `queues`
 - `r2`
 - `ratelimiters`

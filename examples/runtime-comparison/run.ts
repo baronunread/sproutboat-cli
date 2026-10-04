@@ -115,7 +115,13 @@ try {
       const port = freePort();
       const base = `http://127.0.0.1:${port}`;
       let command: string[];
-      let env: RuntimeEnvironment = { ...process.env, PORT: String(port), BENCH_UPSTREAM: upstreamBase };
+      // SB_EGRESS_ALLOW: the upstream is on loopback, which a sprout's fetch() refuses (#174).
+      let env: RuntimeEnvironment = {
+        ...process.env,
+        PORT: String(port),
+        BENCH_UPSTREAM: upstreamBase,
+        SB_EGRESS_ALLOW: "127.0.0.1",
+      };
       if (runtime === "node") {
         const node = process.env.NODE_BIN || "node";
         row.version = version([node, "--version"]);
@@ -187,7 +193,6 @@ const config :Workerd.Config = (
             main: "adapters/sproutboat.js",
             compatibility_date: "2026-09-01",
             vars: { BENCH_UPSTREAM: upstreamBase },
-            outbound: [`127.0.0.1:${upstreamPort}`],
           },
           sourcePath,
           source: bundle.code,
