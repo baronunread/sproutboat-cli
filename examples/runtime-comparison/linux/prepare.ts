@@ -46,7 +46,6 @@ const built = await buildStandalone({
     main: "adapters/sproutboat.js",
     compatibility_date: "2026-09-01",
     vars: { BENCH_UPSTREAM: `http://127.0.0.1:${upstreamPort}` },
-    outbound: [`127.0.0.1:${upstreamPort}`],
   },
   sourcePath: entry,
   source: bundle.code,

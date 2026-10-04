@@ -14,6 +14,7 @@
  */
 import { isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "../../src/json";
 import { request as httpRequest } from "node:http";
+import { egressRefusal } from "@sproutboat/runtime";
 
 const obj = (value: JsonValue | undefined): JsonObject => jsonObject(value ?? null) ?? {};
 const arr = (value: JsonValue | undefined): JsonValue[] => (Array.isArray(value) ? value : []);
@@ -61,6 +62,8 @@ export type ConformanceOptions = {
   skipServices?: boolean;
   /** Broker-mode ticket URLs are handled by its separate transfer listener. */
   skipDirectTransfer?: boolean;
+  /** The stub upstream's origin; its /redirect answers 302 to a private address. */
+  upstream?: string;
 };
 
 export async function runConformance(
@@ -195,13 +198,39 @@ export async function runConformance(
     asyncRes.body,
   );
 
-  // outbound fetch (allowlisted)
+  // outbound fetch
   const quote = await jget("/quote");
   check(
-    "fetch: /quote proxies the allowlisted upstream",
+    "fetch: /quote proxies the upstream",
     quote.status === 200 && isString(obj(quote.body).content) && String(obj(quote.body).author).length > 0,
     quote.body,
   );
+
+  // #174 — fetch() never reaches a private address, and both backends refuse
+  // with the same words. The harness allows 127.0.0.1 only, for its stub.
+  const refusals: Array<[url: string, hostname: string, address: string]> = [
+    ["http://127.0.0.2:9/", "127.0.0.2", "127.0.0.2"],
+    ["http://169.254.169.254/latest/meta-data/", "169.254.169.254", "169.254.169.254"],
+    ["http://10.0.0.1/", "10.0.0.1", "10.0.0.1"],
+    ["http://[::1]:9/", "[::1]", "::1"],
+    ["http://[64:ff9b::7f00:2]:9/", "[64:ff9b::7f00:2]", "64:ff9b::7f00:2"],
+  ];
+  for (const [url, hostname, address] of refusals) {
+    const refused = await jget(`/egress?to=${encodeURIComponent(url)}`);
+    check(
+      `egress: fetch(${url}) is refused`,
+      obj(refused.body).error === `sproutboat fetch: ${egressRefusal(hostname, address, [])}`,
+      refused.body,
+    );
+  }
+  if (options.upstream) {
+    const hop = await jget(`/egress?to=${encodeURIComponent(`${options.upstream}/redirect`)}`);
+    check(
+      "egress: a redirect to a private address comes back unfollowed",
+      obj(hop.body).status === 302 && obj(hop.body).location === "http://127.0.0.2/",
+      hop.body,
+    );
+  }
 
   // secret gate
   const denied = await jget("/admin/stats", { headers: { "x-admin-token": "wrong" } });

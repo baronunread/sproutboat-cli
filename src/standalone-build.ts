@@ -29,7 +29,7 @@ export type StandaloneBuildResult = { outPath: string; bytes: number };
  * Outbound `fetch` is absent from this list: http and https both work, with
  * BearSSL and the Mozilla root set compiled in.
  */
-export function unsupportedBindings(bindings: Pick<Partial<Bindings>, "services" | "outbound">): string[] {
+export function unsupportedBindings(bindings: Pick<Partial<Bindings>, "services">): string[] {
   const reasons: string[] = [];
   if ((bindings.services ?? []).length > 0) {
     reasons.push("service bindings call another deployment through an edge, which a standalone binary has none of");

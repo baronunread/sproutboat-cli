@@ -3,5 +3,4 @@
   "name": "outbound-fetch",
   "main": "src/index.js",
   "compatibility_date": "2026-09-11",
-  "outbound": ["example.com"],
 }

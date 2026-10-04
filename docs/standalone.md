@@ -15,15 +15,20 @@ mini app, run it on a Pi, later `sproutboat deploy` it.
 ## Runtime surface
 
 Everything a project declares — KV and D1 names, buckets, queues, DO classes,
-cron expressions, the outbound allowlist, `vars` — compiles in. Four things do
+cron expressions, `vars` — compiles in. Five things do
 not:
 
 - `PORT`: the port to listen on.
 - `SB_DATA_DIR` or `SPROUTBOAT_DATA`: where state lives.
 - `SB_TRUSTED_PROXIES`: trusted reverse-proxy CIDRs, for the client IP (below).
+- `SB_EGRESS_ALLOW`: private addresses `fetch()` may reach, `*` or a
+  comma-separated list of exact addresses. `fetch()` reaches any public address
+  and refuses private and reserved ones (loopback, RFC 1918, link-local and
+  cloud metadata, and the rest) unless they are listed here, for example a
+  database on the same host.
 - **Secrets**: from the environment, or `<data>/secrets.json`.
 
-All four arrive through the environment, and none of them through flags: a
+All five arrive through the environment, and none of them through flags: a
 native-fetch binary never sees `argv`, because Porffor's runtime init calls
 `porf_init(0, NULL)`. That suits systemd and docker, which set environment
 variables anyway.

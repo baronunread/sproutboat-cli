@@ -8,6 +8,5 @@
   "queues": ["JOBS"],
   "analytics_engine_datasets": ["METRICS"],
   "durable_objects": { "BAG": "Bag" },
-  "outbound": ["example.com"],
   "assets": { "directory": "public", "binding": "ASSETS" },
 }

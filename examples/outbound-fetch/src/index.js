@@ -1,15 +1,15 @@
-// Outbound fetch: fetch() works, but only to a host named in `outbound` in
-// sproutboat.jsonc - anything else is refused before it leaves the process.
+// Outbound fetch: fetch() reaches any public host with no config, and never a
+// private or reserved address - that is refused before it connects.
 //
-//   curl localhost:8080/          # fetches the allowlisted host
-//   curl localhost:8080/blocked   # fetch()es a host NOT on the allowlist
+//   curl localhost:8080/          # fetches a public host
+//   curl localhost:8080/blocked   # fetch()es the cloud metadata address
 
 export default {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/blocked") {
       try {
-        await fetch("https://sproutboat.com/");
+        await fetch("http://169.254.169.254/latest/meta-data/");
         return new Response("should not have reached here\n", { status: 500 });
       } catch (e) {
         return new Response(`blocked: ${e.message}\n`, { status: 403 });

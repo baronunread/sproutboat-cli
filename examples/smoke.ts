@@ -195,8 +195,8 @@ const EXAMPLES = {
   },
 
   "outbound-fetch": async (base, ok) => {
-    ok("fetches the allowlisted host", (await text(base + "/")).startsWith("example.com answered with 200"));
-    ok("blocks a host not on the allowlist", (await fetch(base + "/blocked")).status === 403);
+    ok("fetches a public host", (await text(base + "/")).startsWith("example.com answered with 200"));
+    ok("refuses a private address", (await fetch(base + "/blocked")).status === 403);
   },
 
   ratelimit: async (base, ok) => {

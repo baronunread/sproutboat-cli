@@ -72,7 +72,12 @@ const QUOTES = [
 ];
 const upstream = Bun.serve({
   port: 0,
-  fetch: () => Response.json(QUOTES[Math.floor(Date.now() / 4000) % QUOTES.length]),
+  // /redirect points at a private address: the suite checks fetch() hands the
+  // 302 back instead of following it (#174).
+  fetch: (req) =>
+    new URL(req.url).pathname === "/redirect"
+      ? new Response(null, { status: 302, headers: { location: "http://127.0.0.2/" } })
+      : Response.json(QUOTES[Math.floor(Date.now() / 4000) % QUOTES.length]),
 });
 cleanup.push(() => upstream.stop(true));
 const upstreamHost = `127.0.0.1:${upstream.port}`;
@@ -80,7 +85,6 @@ const upstreamHost = `127.0.0.1:${upstream.port}`;
 const bindings: Bindings = {
   kv: c.kv_namespaces ?? [],
   secrets: c.secrets ?? [],
-  outbound: [upstreamHost], // override the example's placeholder host
   d1: c.d1_databases ?? [],
   r2: c.r2_buckets ?? [],
   queues: c.queues ?? [],
@@ -143,6 +147,9 @@ const broker = createBroker({
   // shim -> broker -> Host exchange either way.
   services: { PEER: "quote-service.local" },
   edgeUrl: `http://${upstreamHost}/`,
+  // The stub upstream is on loopback, which fetch() refuses (#174). Let exactly
+  // that address through, as an operator would with SB_EGRESS_ALLOW.
+  egressAllow: ["127.0.0.1"],
 });
 const brokerServer = listen(broker, "127.0.0.1", 0);
 cleanup.push(() => {
@@ -172,7 +179,7 @@ async function up() {
 }
 await up();
 
-await runConformance(base, TOKEN, check, { skipDirectTransfer: true });
+await runConformance(base, TOKEN, check, { skipDirectTransfer: true, upstream: `http://${upstreamHost}` });
 
 console.log(`\n${passed} checks passed — every binding exercised end to end.`);
 for (const c2 of cleanup.reverse())
