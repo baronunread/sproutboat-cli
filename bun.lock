@@ -7,10 +7,10 @@
       "dependencies": {
         "@sproutboat/artifact": "^0.3.0",
         "@sproutboat/assets": "^0.3.0",
-        "@sproutboat/config": "^0.4.0",
-        "@sproutboat/runtime": "^0.13.5",
+        "@sproutboat/config": "^0.5.0",
+        "@sproutboat/runtime": "^0.14.0",
         "@sproutboat/toolchain": "^0.4.24",
-        "@sproutboat/wire": "^0.9.3",
+        "@sproutboat/wire": "^0.11.0",
       },
       "devDependencies": {
         "@oxlint/plugins": "1.81.0",
@@ -112,13 +112,13 @@
 
     "@sproutboat/assets": ["@sproutboat/assets@0.3.0", "", {}, "sha512-YvKhDPnAaU+Xxnn6QpDizFq/SYwGEgbCWtSz+7edniPBQT5HHOnh9GyKj5Sa1+sjlkNnpKvUk+6evfCUTNRytg=="],
 
-    "@sproutboat/config": ["@sproutboat/config@0.4.0", "", {}, "sha512-uNMaIRw5Jl3Cxt8uZuRapFxUL1z4dcjIcB1jFphllmv3XJi1/q5PL6/HY+LnLRs+Xqejl6ilhfh+g5N9E4+BeQ=="],
+    "@sproutboat/config": ["@sproutboat/config@0.5.0", "", {}, "sha512-GKLjuzxTIXyaxocgJqgveW48+NixWrvXZqGAFh7mfH7C9698YFtOtObk4cwC0k+PKNSXmus9kYWcp8TUxzD/wQ=="],
 
-    "@sproutboat/runtime": ["@sproutboat/runtime@0.13.5", "", {}, "sha512-hK0i1S4JkM6eHAfF3nJl8BGyJHmosR+7n5/xDZNVhRK8mNVAqKcNJWOTD6u3JBouumwEbN6KGGGNYmXqLyF5yA=="],
+    "@sproutboat/runtime": ["@sproutboat/runtime@0.14.0", "", {}, "sha512-Xhb0/ZLXu+cwuLmPKNopf8yoreUyDZXfMBwai/SptvidJLEjGdZHWWvwarPPnYQIelpmUiXe8FLybv741toS4w=="],
 
     "@sproutboat/toolchain": ["@sproutboat/toolchain@0.4.24", "", {}, "sha512-OeuPpFZ2IU0rq8dn8MqACX2ZHd/8iKTxrPsdDfrxSmZoNB7iGRhcWc7l28FtpZ9Tg3mybiNRCqp2OpJacD1yYQ=="],
 
-    "@sproutboat/wire": ["@sproutboat/wire@0.9.3", "", { "dependencies": { "@sproutboat/assets": "^0.3.0" } }, "sha512-n6KRlewN1HSOxsudpPXy6QR8Of7n184TFumMOB/Nhk5T2WvUZ3Fuu2YOrXd9cTmxeJ8nFtNlNkLzkD9eMxpqNA=="],
+    "@sproutboat/wire": ["@sproutboat/wire@0.11.0", "", { "dependencies": { "@sproutboat/assets": "^0.3.0", "@sproutboat/runtime": "^0.14.0" } }, "sha512-oTRSbOQ11Vd/fKs03itLqwIGhhRaghVw/7WZsFnUHXWjuYLQXwW4RrJtyfiGT2NJNLNrf17tx2F7EtSr0v2/YQ=="],
 
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 
