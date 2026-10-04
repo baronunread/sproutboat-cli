@@ -10,6 +10,28 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.14.0] - 2026-10-04
+
+### Changed
+
+- `fetch()` reaches any public address with no configuration, and never a
+  private or reserved one: loopback, private networks, link-local and cloud
+  metadata, and their IPv6 forms. The check runs on the resolved address at
+  connect time, in deployed sprouts and standalone binaries alike. Operators can
+  allow specific addresses with `SB_EGRESS_ALLOW`
+  (baronunread/sproutboat#174).
+- Every build writes `bindings.json`, so every deployment gets a broker.
+
+### Deprecated
+
+- `outbound` in `sproutboat.jsonc` is ignored with a warning, and will be
+  refused in a later release.
+
+### Fixed
+
+- `fetch()` to an IPv6 literal such as `http://[::1]:9/` works in standalone
+  binaries; `URL.hostname` used to come back as `[`.
+
 ## [0.13.0] - 2026-10-04
 
 ### Added
@@ -782,7 +804,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.7...v0.13.0
 [0.12.7]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.6...v0.12.7
 [0.12.6]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.5...v0.12.6
