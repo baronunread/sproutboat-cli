@@ -10,6 +10,15 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.13.0] - 2026-10-04
+
+### Added
+
+- `sproutboat build` reads `_headers` and `_redirects` (Cloudflare Pages
+  format) from the assets directory and writes the rules into `assets.json`.
+  The deployed edge applies them: redirects before any file lookup, header
+  rules on edge-served files (baronunread/sproutboat#61).
+
 ## [0.12.7] - 2026-10-03
 
 ### Fixed
@@ -773,7 +782,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.7...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.7...v0.13.0
 [0.12.7]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.6...v0.12.7
 [0.12.6]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.5...v0.12.6
 [0.12.5]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.4...v0.12.5
