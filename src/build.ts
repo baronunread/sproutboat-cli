@@ -248,24 +248,38 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       const [sqliteObject, tls] = embedded
         ? await Promise.all([ensureSqliteObject({ target, zigBin }), ensureBearssl({ target, zigBin })])
         : [null, null];
-      await compileSprout({
-        sourcePath: input.sourcePath,
-        generatedPath: input.generatedPath,
-        generatedSource,
-        outPath,
-        vars: input.config.vars ?? {},
-        bindings,
-        zigBin,
-        target: input.target,
-        compatibilityDate: input.config.compatibility_date,
-        transport: input.transport,
-        appName: input.config.name,
-        assets: bakedAssets,
-        extraLink: [...(sqliteObject ? [sqliteObject] : []), ...(tls ? tls.objects : [])],
-        extraCflags: tls ? ["-I", tls.includeDir] : [],
-        optimize: input.optimize,
-        versionMetadata,
-      });
+      // Porffor caches compiled C units per entry path, so compile from one
+      // path per project and build shape: unchanged units (the uWebSockets
+      // server alone is ~1.75 s of clang) are reused instead of rebuilt, and
+      // Porffor keeps one build dir per shape instead of one per artifact.
+      const unitDir = resolve(
+        input.projectDir,
+        ".sproutboat/porffor-units",
+        `${input.target ?? "linux-x86_64"}-${input.transport ?? "broker"}-${input.optimize ?? "release"}`,
+      );
+      const unitLock = input.generatedPath ? null : await acquireArtifactLock(unitDir);
+      try {
+        await compileSprout({
+          sourcePath: input.sourcePath,
+          generatedPath: input.generatedPath ?? resolve(unitDir, "sprout.generated.js"),
+          generatedSource,
+          outPath,
+          vars: input.config.vars ?? {},
+          bindings,
+          zigBin,
+          target: input.target,
+          compatibilityDate: input.config.compatibility_date,
+          transport: input.transport,
+          appName: input.config.name,
+          assets: bakedAssets,
+          extraLink: [...(sqliteObject ? [sqliteObject] : []), ...(tls ? tls.objects : [])],
+          extraCflags: tls ? ["-I", tls.includeDir] : [],
+          optimize: input.optimize,
+          versionMetadata,
+        });
+      } finally {
+        if (unitLock) await rm(unitLock, { recursive: true, force: true });
+      }
     };
     let compileCache: BuildOutput["compileCache"] = "bypass";
     const compileStartedAt = performance.now();
