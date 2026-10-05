@@ -240,3 +240,28 @@ test("porfforArgs: --musl marks the cross-compile, and only that", () => {
   expect(porfforArgs("/t/m.js", "/t/out", "linux-x86_64", "release")).toContain("--musl");
   expect(porfforArgs("/t/m.js", "/t/out", "host", "release")).not.toContain("--musl");
 });
+
+test("prunePorfforBuilds drops build dirs unused for a week and keeps recent ones", async () => {
+  const { mkdtemp, mkdir: mk, writeFile: wf, utimes, readdir: rd, rm: rmd } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { prunePorfforBuilds } = await import("./compile");
+  const root = await mkdtemp(join(tmpdir(), "sb-porffor-builds-"));
+  try {
+    const now = Date.now();
+    for (const [name, ageDays] of [
+      ["old", 9],
+      ["recent", 1],
+    ] as const) {
+      await mk(join(root, name));
+      await wf(join(root, name, "flags"), "cc");
+      const t = (now - ageDays * 86_400_000) / 1000;
+      await utimes(join(root, name, "flags"), t, t);
+    }
+    expect(await prunePorfforBuilds(root, now)).toBe(1);
+    expect(await rd(root)).toEqual(["recent"]);
+    expect(await prunePorfforBuilds(join(root, "missing"), now)).toBe(0);
+  } finally {
+    await rmd(root, { recursive: true, force: true });
+  }
+});

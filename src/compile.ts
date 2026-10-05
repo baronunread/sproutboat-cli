@@ -10,7 +10,8 @@
  * unusable it stops with its specific integrity or archive error. Contributors
  * may explicitly opt into Porffor's source fallback.
  */
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
 import { ensureUWebSockets, ensureUWebSocketsHost, resolveHostCompiler, UwsUnavailableError } from "./toolchain";
@@ -113,6 +114,32 @@ export async function loadPrelude(transport: Transport = "broker"): Promise<stri
   return core.replace(TRANSPORT_MARKER, chosen);
 }
 
+let porfforBuildsPruned = false;
+/**
+ * Porffor writes one build dir per entry path under ~/.cache/porffor/build and
+ * never removes any (one machine had 1,395 of them, 6.3 GB). Drop the ones not
+ * compiled in for a week; the only cost is a recompile. Each dir's `flags`
+ * stamp is rewritten on every compile, so its mtime is "last used".
+ */
+export async function prunePorfforBuilds(
+  root = resolve(process.env.HOME ?? homedir(), ".cache/porffor/build"),
+  now = Date.now(),
+): Promise<number> {
+  porfforBuildsPruned = true;
+  const cutoff = now - 7 * 24 * 60 * 60 * 1000;
+  const entries: string[] = await readdir(root).catch(() => []);
+  let removed = 0;
+  for (const name of entries) {
+    const dir = resolve(root, name);
+    const used = (await stat(resolve(dir, "flags")).catch(() => null)) ?? (await stat(dir).catch(() => null));
+    if (used && used.mtimeMs < cutoff) {
+      await rm(dir, { recursive: true, force: true });
+      removed++;
+    }
+  }
+  return removed;
+}
+
 /** Child env for the Porffor run. `SB_EXTRA_LINK` is read by the patched link
  *  step (#15) and is absent entirely for a normal build. `cc`/`cxx` override
  *  Porffor's own `CC`/`CXX` read for a **host** build (musl builds hardcode
@@ -190,6 +217,9 @@ export async function compileSprout(input: CompileInput): Promise<void> {
       );
     }
   }
+
+  // Once per process, in the background: housekeeping must never slow a build.
+  if (!porfforBuildsPruned) void prunePorfforBuilds().catch(() => {});
 
   const outDir = dirname(input.outPath);
   await mkdir(outDir, { recursive: true });
