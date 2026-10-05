@@ -10,6 +10,32 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.15.0] - 2026-10-05
+
+### Changed
+
+- Sprouts compile with Porffor alpha-15 (`@sproutboat/toolchain` 0.5.0).
+  Async functions now compile to state machines, and `console.log` no longer
+  adds colour codes when its output is piped. The compatibility suite is
+  unchanged at 30/32, and binary size, compile time, start-up and throughput
+  are level with alpha-13.
+
+### Performance
+
+- Rebuilding after a small change is about 3 times faster: 2.1 to 2.4 s
+  instead of 6.8 to 7.7 s for the standalone example app. Builds now compile
+  from one path per project, so Porffor reuses the C units that didn't change.
+  Porffor's build directories that haven't been used for a week are removed;
+  they used to pile up without limit.
+
+### Fixed
+
+- Handlers using marked, or any bundled class whose static methods create
+  instances of the class itself, work again. Since 0.12.6 they failed with
+  `TypeError: value is not a constructor` (baronunread/sproutboat#256).
+- An ISO date's timezone offset could flip sign, so `-00:30` sometimes parsed
+  as `+00:30`, depending on what sat next to the string in memory.
+
 ## [0.14.0] - 2026-10-04
 
 ### Changed
@@ -804,7 +830,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.7...v0.13.0
 [0.12.7]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.6...v0.12.7
