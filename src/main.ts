@@ -20,6 +20,7 @@ import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
 import { pathToFileURL } from "node:url";
 import { inspectToolchain } from "./toolchain";
+import { takeDataTarget, localKvTarget, openLocalKv, type KvRequest } from "./local-kv";
 
 // A compiled Bun executable is not a general-purpose `bun` command. Porffor
 // is acquired after installation, so run its external ESM launcher through an
@@ -165,11 +166,11 @@ const starterConfig = (name: string) => `{
   "$schema": "https://sproutboat.com/schema.json",
   "name": "${name}",
   "main": "src/index.js",
-  "compatibility_date": "2026-08-26"
+  "compatibility_date": "2026-09-28"
 }
 `;
 const starterHandler = `export default {
-  fetch() {
+  fetch(request, env, ctx) {
     return new Response("hello from Sproutboat");
   }
 };
@@ -920,6 +921,8 @@ function idForName(rows: JsonObject[], name: string, product: StorageProduct): s
 }
 
 async function storage(key: string, args: string[]) {
+  if (args.some((arg) => ["--local", "--data-dir", "--project-dir"].includes(arg)))
+    usageError("local targeting is supported for KV contents commands", "kv <key | bulk | export> ... --local");
   const product = STORAGE_PRODUCTS.find((entry) => entry.name === key)!;
   const sub = args[0] && STORAGE_VERBS.some((verb) => verb === args[0]) ? args.shift()! : "list";
   const { apiUrl, token } = await apiCredentials();
@@ -998,7 +1001,7 @@ function option(args: string[], name: string): string | undefined {
 
 async function writeAtomic(
   path: string,
-  chunks: AsyncIterable<string> | readonly string[],
+  chunks: AsyncIterable<string> | readonly (string | Uint8Array)[],
   overwrite: boolean,
 ): Promise<void> {
   const destination = resolve(path);
@@ -1015,7 +1018,7 @@ async function writeAtomic(
   process.once("exit", cleanup);
   const file = await open(temporary, "wx", 0o600);
   try {
-    for await (const chunk of chunks) await file.write(chunk);
+    for await (const chunk of chunks) await file.writeFile(chunk);
     await file.sync();
     await file.close();
     await rename(temporary, destination);
@@ -1029,154 +1032,206 @@ async function writeAtomic(
 }
 
 async function kvContents(args: string[]): Promise<void> {
+  let target;
+  try {
+    target = takeDataTarget(args);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   const area = args.shift();
   if (!area || !["key", "bulk", "export"].includes(area))
     usageError("kv: unknown contents command", "kv <key | bulk | export> ...");
   const namespace = area === "export" ? args.shift() : args[1];
   if (!namespace) usageError(`kv ${area}: missing <namespace>`, `kv ${area} <namespace> ...`);
-  const { apiUrl, token } = await apiCredentials();
-  const rows = await storageRows(`${apiUrl}/api/kv`, { "x-api-key": token }, STORAGE_PRODUCTS[0]);
-  const id = idForName(rows, namespace, STORAGE_PRODUCTS[0]);
-  const base = `${apiUrl}/api/kv/${id}`;
-  const auth = { "x-api-key": token };
-
-  if (area === "key") {
-    const verb = args.shift();
-    args.shift();
-    if (!verb || !["list", "get", "put", "delete"].includes(verb))
-      usageError("kv key: unknown operation", "kv key <list | get | put | delete> <namespace> ...");
-    if (verb === "list") {
-      const query = new URLSearchParams();
-      for (const flag of ["--prefix", "--cursor", "--limit"] as const) {
-        const value = option(args, flag);
-        if (value !== undefined) query.set(flag.slice(2), value);
-      }
-      const body = await responseText(await fetch(`${base}/keys?${query}`, { headers: auth }), "list rejected");
-      console.log(body);
-      return;
-    }
-    const key = args.shift();
-    if (!key) usageError(`kv key ${verb}: missing <key>`, `kv key ${verb} <namespace> <key>`);
-    const url = `${base}/keys/${encodeURIComponent(key)}`;
-    if (verb === "get") {
-      const body = await responseText(await fetch(url, { headers: auth }), "get rejected");
-      const record = jsonObject(parseJsonValue(body));
-      if (!record || !isString(record.value)) fail("get response did not contain a value");
+  let request: KvRequest;
+  let close = () => {};
+  if (target.local) {
+    const project = await readProjectConfig(target.projectDir);
+    try {
+      const selected = localKvTarget(project.directory, project.config, namespace, target.dataDir);
       const output = option(args, "--output");
-      if (output) await writeAtomic(output, [record.value], args.includes("--force"));
-      else console.log(args.includes("--text") ? record.value : JSON.stringify({ key, value: record.value }, null, 2));
-      return;
+      if (output && resolve(output) === selected.path) fail("output cannot replace the selected KV database");
+      const writable = area !== "export" && ["put", "delete"].includes(args[0]);
+      console.error(`local KV ${namespace}: ${selected.path}`);
+      const local = openLocalKv(selected.path, selected.namespace, writable);
+      request = local.request;
+      close = local.close;
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
     }
-    if (verb === "put") {
-      const path = option(args, "--path");
-      const positional = args.find((arg, index) => !arg.startsWith("-") && args[index - 1] !== "--path");
-      if (path && positional)
-        usageError(
-          "kv key put: use a value or --path, not both",
-          "kv key put <namespace> <key> [value] [--path <file>]",
-        );
-      const value = path ? await readFile(resolve(path), "utf8") : (positional ?? (await Bun.stdin.text()));
-      await responseText(
-        await fetch(url, {
-          method: "PUT",
-          headers: { ...auth, "content-type": "application/json" },
-          body: JSON.stringify({ value }),
-        }),
-        "put rejected",
-      );
-      console.log(ok(`set ${key}`));
-      return;
-    }
-    if (!args.includes("--yes")) fail(`this permanently deletes "${key}"; re-run with --yes`);
-    await responseText(await fetch(url, { method: "DELETE", headers: auth }), "delete rejected");
-    console.log(ok(`deleted ${key}`));
-    return;
+  } else {
+    if (args.includes("--binary")) fail("--binary currently requires --local");
+    const { apiUrl, token } = await apiCredentials();
+    const rows = await storageRows(`${apiUrl}/api/kv`, { "x-api-key": token }, STORAGE_PRODUCTS[0]);
+    const id = idForName(rows, namespace, STORAGE_PRODUCTS[0]);
+    const base = `${apiUrl}/api/kv/${id}`;
+    request = (path, init) => fetch(base + path, { ...init, headers: { "x-api-key": token, ...init?.headers } });
   }
-
-  if (area === "bulk") {
-    const verb = args.shift();
-    args.shift();
-    const input = args.shift();
-    if (!verb || !["get", "put", "delete"].includes(verb) || !input)
-      usageError(
-        "kv bulk: expected an operation, namespace, and JSON file",
-        "kv bulk <get | put | delete> <namespace> <file>",
-      );
-    if (verb === "delete" && !args.includes("--yes")) fail("bulk deletion requires --yes");
-    const parsed = parseJsonValue(await readFile(resolve(input), "utf8"));
-    if (!Array.isArray(parsed) || parsed.length === 0) fail("bulk input must be a non-empty JSON array");
-    const responses: unknown[] = [];
-    let changed = 0;
-    const failures: unknown[] = [];
-    for (let start = 0; start < parsed.length; start += 100) {
-      const body = await responseText(
-        await fetch(`${base}/bulk/${verb}`, {
-          method: "POST",
-          headers: { ...auth, "content-type": "application/json" },
-          body: JSON.stringify(parsed.slice(start, start + 100)),
-        }),
-        `bulk ${verb} rejected`,
-      );
-      const result = parseJsonValue(body);
-      if (verb === "get" && Array.isArray(result)) responses.push(...result);
-      else {
-        const summary = jsonObject(result);
-        changed += Number(summary?.written ?? summary?.deleted ?? 0);
-        if (Array.isArray(summary?.failures)) failures.push(...summary.failures);
+  try {
+    if (area === "key") {
+      const verb = args.shift();
+      args.shift();
+      if (!verb || !["list", "get", "put", "delete"].includes(verb))
+        usageError("kv key: unknown operation", "kv key <list | get | put | delete> <namespace> ...");
+      if (verb === "list") {
+        const query = new URLSearchParams();
+        for (const flag of ["--prefix", "--cursor", "--limit"] as const) {
+          const value = option(args, flag);
+          if (value !== undefined) query.set(flag.slice(2), value);
+        }
+        const body = await responseText(await request(`/keys?${query}`), "list rejected");
+        console.log(body);
+        return;
       }
-    }
-    const result = verb === "get" ? responses : { [verb === "put" ? "written" : "deleted"]: changed, failures };
-    const output = option(args, "--output");
-    if (output) await writeAtomic(output, [JSON.stringify(result, null, 2) + "\n"], args.includes("--force"));
-    else console.log(JSON.stringify(result, null, 2));
-    return;
-  }
-
-  const output = option(args, "--output");
-  if (!output)
-    usageError(
-      "kv export: missing --output <file>",
-      "kv export <namespace> --output <dump.json> [--prefix <prefix>] [--force]",
-    );
-  const prefix = option(args, "--prefix") ?? "";
-  async function* dump(): AsyncGenerator<string> {
-    yield "[\n";
-    let cursor = "";
-    let first = true;
-    do {
-      const query = new URLSearchParams({ prefix, limit: "100" });
-      if (cursor) query.set("cursor", cursor);
-      const listed = jsonObject(
-        parseJsonValue(
-          await responseText(await fetch(`${base}/keys?${query}`, { headers: auth }), "export list rejected"),
-        ),
-      );
-      const keys = Array.isArray(listed?.keys) ? listed.keys.filter(isString) : [];
-      if (keys.length) {
-        const values = parseJsonValue(
-          await responseText(
-            await fetch(`${base}/bulk/get`, {
-              method: "POST",
-              headers: { ...auth, "content-type": "application/json" },
-              body: JSON.stringify(keys),
-            }),
-            "export read rejected",
-          ),
+      const key = args.shift();
+      if (!key) usageError(`kv key ${verb}: missing <key>`, `kv key ${verb} <namespace> <key>`);
+      const url = `/keys/${encodeURIComponent(key)}`;
+      if (verb === "get") {
+        const body = await responseText(await request(url), "get rejected");
+        const record = jsonObject(parseJsonValue(body));
+        if (!record || !isString(record.value)) fail("get response did not contain a value");
+        const output = option(args, "--output");
+        if (record.base64 === true && args.includes("--text"))
+          fail("binary value: use --output to write bytes or omit --text for base64 JSON");
+        if (output)
+          await writeAtomic(
+            output,
+            [record.base64 === true ? Buffer.from(record.value, "base64") : record.value],
+            args.includes("--force"),
+          );
+        else console.log(args.includes("--text") ? record.value : JSON.stringify(record, null, 2));
+        return;
+      }
+      if (verb === "put") {
+        const path = option(args, "--path");
+        const positional = args.find((arg, index) => !arg.startsWith("-") && args[index - 1] !== "--path");
+        if (path && positional)
+          usageError(
+            "kv key put: use a value or --path, not both",
+            "kv key put <namespace> <key> [value] [--path <file>]",
+          );
+        if (args.includes("--binary") && !path) fail("--binary requires --path <file>");
+        const value = path
+          ? args.includes("--binary")
+            ? (await readFile(resolve(path))).toString("base64")
+            : await readFile(resolve(path), "utf8")
+          : (positional ?? (await Bun.stdin.text()));
+        const payload: JsonObject = { value };
+        if (args.includes("--binary")) payload.base64 = true;
+        await responseText(
+          await request(url, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+          "put rejected",
         );
-        if (!Array.isArray(values)) fail("export response was not an array");
-        for (const entry of values) {
+        console.log(ok(`set ${key}`));
+        return;
+      }
+      if (!args.includes("--yes")) fail(`this permanently deletes "${key}"; re-run with --yes`);
+      await responseText(await request(url, { method: "DELETE" }), "delete rejected");
+      console.log(ok(`deleted ${key}`));
+      return;
+    }
+
+    if (area === "bulk") {
+      const verb = args.shift();
+      args.shift();
+      const input = args.shift();
+      if (!verb || !["get", "put", "delete"].includes(verb) || !input)
+        usageError(
+          "kv bulk: expected an operation, namespace, and JSON file",
+          "kv bulk <get | put | delete> <namespace> <file>",
+        );
+      if (verb === "delete" && !args.includes("--yes")) fail("bulk deletion requires --yes");
+      const parsed = parseJsonValue(await readFile(resolve(input), "utf8"));
+      if (!Array.isArray(parsed) || parsed.length === 0) fail("bulk input must be a non-empty JSON array");
+      if (
+        !target.local &&
+        verb === "put" &&
+        parsed.some((entry) => {
           const record = jsonObject(entry);
-          if (!record || !isString(record.key) || !isString(record.value)) continue;
-          yield `${first ? "" : ",\n"}  ${JSON.stringify({ key: record.key, value: record.value })}`;
-          first = false;
+          return record?.base64 === true || record?.expiration !== undefined;
+        })
+      )
+        fail("binary values and expiration metadata in dumps currently require --local");
+      const responses: unknown[] = [];
+      let changed = 0;
+      const failures: unknown[] = [];
+      for (let start = 0; start < parsed.length; start += 100) {
+        const body = await responseText(
+          await request(`/bulk/${verb}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(parsed.slice(start, start + 100)),
+          }),
+          `bulk ${verb} rejected`,
+        );
+        const result = parseJsonValue(body);
+        if (verb === "get" && Array.isArray(result)) responses.push(...result);
+        else {
+          const summary = jsonObject(result);
+          changed += Number(summary?.written ?? summary?.deleted ?? 0);
+          if (Array.isArray(summary?.failures)) failures.push(...summary.failures);
         }
       }
-      cursor = isString(listed?.cursor) ? listed.cursor : "";
-    } while (cursor);
-    yield "\n]\n";
+      const result = verb === "get" ? responses : { [verb === "put" ? "written" : "deleted"]: changed, failures };
+      const output = option(args, "--output");
+      if (output) await writeAtomic(output, [JSON.stringify(result, null, 2) + "\n"], args.includes("--force"));
+      else console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    const output = option(args, "--output");
+    if (!output)
+      usageError(
+        "kv export: missing --output <file>",
+        "kv export <namespace> --output <dump.json> [--prefix <prefix>] [--force]",
+      );
+    const prefix = option(args, "--prefix") ?? "";
+    async function* dump(): AsyncGenerator<string> {
+      yield "[\n";
+      let cursor = "";
+      let first = true;
+      do {
+        const query = new URLSearchParams({ prefix, limit: "100" });
+        if (cursor) query.set("cursor", cursor);
+        const listed = jsonObject(
+          parseJsonValue(await responseText(await request(`/keys?${query}`), "export list rejected")),
+        );
+        const keys = Array.isArray(listed?.keys) ? listed.keys.filter(isString) : [];
+        if (keys.length) {
+          const values = parseJsonValue(
+            await responseText(
+              await request(`/bulk/get`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(keys),
+              }),
+              "export read rejected",
+            ),
+          );
+          if (!Array.isArray(values)) fail("export response was not an array");
+          for (const entry of values) {
+            const record = jsonObject(entry);
+            if (!record || !isString(record.key) || !isString(record.value)) continue;
+            const dumpRecord: JsonObject = { key: record.key, value: record.value };
+            if (record.base64 === true) dumpRecord.base64 = true;
+            if (record.expiration !== undefined) dumpRecord.expiration = record.expiration;
+            yield `${first ? "" : ",\n"}  ${JSON.stringify(dumpRecord)}`;
+            first = false;
+          }
+        }
+        cursor = isString(listed?.cursor) ? listed.cursor : "";
+      } while (cursor);
+      yield "\n]\n";
+    }
+    await writeAtomic(output, dump(), args.includes("--force"));
+    console.log(ok(`exported ${namespace} to ${output}`));
+  } finally {
+    close();
   }
-  await writeAtomic(output, dump(), args.includes("--force"));
-  console.log(ok(`exported ${namespace} to ${output}`));
 }
 
 async function deleteProject(args: string[]) {
@@ -1296,7 +1351,7 @@ if (command === "--version" || command === "-v") {
 }
 if (args.includes("-h") || args.includes("--help")) commandHelp(command);
 
-await notifyIfOutdated(CLI_VERSION);
+if (!(command === "kv" && args.includes("--local"))) await notifyIfOutdated(CLI_VERSION);
 
 switch (command) {
   case "init":

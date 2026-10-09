@@ -10,6 +10,17 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Added
+
+- KV contents commands support `--local`, `--data-dir` and `--project-dir`
+  for development and standalone stores, without credentials or network access.
+  Local binary values and expiration metadata survive export and restore.
+
+### Changed
+
+- New projects use the Workers-style `fetch(request, env, ctx)` signature and
+  compatibility date `2026-09-28`.
+
 ## [0.15.0] - 2026-10-05
 
 ### Changed

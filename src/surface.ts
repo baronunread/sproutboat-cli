@@ -57,9 +57,12 @@ const storageCommands: readonly Command[] = STORAGE_PRODUCTS.map((product) => ({
   name: product.name,
   group: "Storage" as const,
   emoji: product.emoji,
-  args: product.name === "kv" ? `${STORAGE_ARGS} | <key | bulk | export> ...` : STORAGE_ARGS,
+  args:
+    product.name === "kv"
+      ? `${STORAGE_ARGS} | <key | bulk | export> ... [--local | --remote] [--data-dir <dir>] [--project-dir <dir>]`
+      : STORAGE_ARGS,
   brief: `<${STORAGE_VERBS.join(" | ")}>`,
-  summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "kv" ? "; key and bulk operations manage contents, and export writes a restorable JSON dump" : ""}${product.name === "queues" ? "; consumers deliver in batches with retries, and stop after 5 attempts" : ""}.`,
+  summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "kv" ? "; key and bulk operations manage contents, and export writes a restorable JSON dump. Use --local for dev state or --local --data-dir <dir> for a standalone store" : ""}${product.name === "queues" ? "; consumers deliver in batches with retries, and stop after 5 attempts" : ""}.`,
 }));
 
 export const COMMANDS: readonly Command[] = [
