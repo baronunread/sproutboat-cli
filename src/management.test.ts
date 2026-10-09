@@ -86,6 +86,9 @@ test("init scaffolds a sproutboat.jsonc pointing at the published schema", async
     // #196 — sproutboat.com/schema.json used to 404; this only regresses if the
     // published schema is ever pulled without updating the scaffold to match.
     expect(config.$schema).toBe("https://sproutboat.com/schema.json");
+    expect(config.compatibility_date).toBe("2026-09-28");
+    const handler = await Bun.file(join(directory, "hello", "src", "index.js")).text();
+    expect(handler).toContain("fetch(request, env, ctx)");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

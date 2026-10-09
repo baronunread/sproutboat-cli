@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildWebUi } from "./build-web";
 import { runConformance } from "./conformance";
+import { checkLocalKv } from "./local-kv";
 import { buildStandalone } from "../../src/standalone-build";
 import { bundleHandler } from "../../src/bundle";
 import { parseConfig } from "../../src/config";
@@ -134,6 +135,8 @@ await runConformance(base, TOKEN, check, {
   skipServices: true,
   upstream: `http://${upstreamHost}`,
 });
+
+await checkLocalKv(base, dataDir, check);
 
 // baronunread/sproutboat#236: nginx proxies with HTTP/1.0 by default, which
 // uWebSockets used to answer with 505. Raw socket: fetch() always speaks 1.1.

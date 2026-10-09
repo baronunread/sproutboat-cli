@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildWebUi } from "./build-web";
 import { runConformance } from "./conformance";
+import { checkLocalKv } from "./local-kv";
 import { loadPrelude, wrapNativeFetchHandler, type Bindings } from "../../src/compile";
 import { parseConfig } from "../../src/config";
 import { createBroker, listen } from "../../src/broker";
@@ -180,6 +181,7 @@ async function up() {
 await up();
 
 await runConformance(base, TOKEN, check, { skipDirectTransfer: true, upstream: `http://${upstreamHost}` });
+await checkLocalKv(base, workdir, check);
 
 console.log(`\n${passed} checks passed — every binding exercised end to end.`);
 for (const c2 of cleanup.reverse())
