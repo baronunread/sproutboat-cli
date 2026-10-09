@@ -92,9 +92,10 @@ export const COMMANDS: readonly Command[] = [
     name: "dev",
     group: "Develop",
     emoji: "⚡",
-    args: "[project-dir] [--port <n>] [--no-watch]",
+    args: "[project-dir] [--port <n>] [--no-watch] [--test-scheduled]",
     brief: "[project-dir] [--port <n>]",
-    summary: "Run the project on this machine against a real broker, rebuilding on save.",
+    summary:
+      "Run the project against a local broker, rebuilding on save. --test-scheduled replaces automatic cron ticks with GET /cdn-cgi/local/scheduled (cron and scheduledTime query parameters).",
   },
   {
     name: "build",

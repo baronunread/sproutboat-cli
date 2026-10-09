@@ -361,7 +361,7 @@ async function dev(args: string[]) {
   const portArg = portIndex >= 0 ? args[portIndex + 1] : undefined;
   const port = Number(portArg ?? 8787);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535)
-    usageError(`invalid --port: ${portArg}`, "dev [project-dir] [--port <n>] [--no-watch]");
+    usageError(`invalid --port: ${portArg}`, "dev [project-dir] [--port <n>] [--no-watch] [--test-scheduled]");
   const project = await readProject(directory);
   await refreshTypes(project.directory, project.config);
   console.log(dim(`Building ${project.config.name} for this machine (${hostTarget()})…`));
@@ -372,6 +372,7 @@ async function dev(args: string[]) {
     source: project.bundle.code,
     port,
     watch: !args.includes("--no-watch"),
+    testScheduled: args.includes("--test-scheduled"),
     // Re-read from disk on every rebuild: the point of watching is that the
     // files changed, so the bundle captured at startup is stale by definition.
     rebuild: async () => {

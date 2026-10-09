@@ -12,6 +12,10 @@ maintained going forward by the `release` skill.
 
 ### Added
 
+- `dev --test-scheduled` enables manual testing of configured cron handlers
+  at `/cdn-cgi/local/scheduled`, with an optional deterministic `scheduledTime`.
+  Automatic dev cron ticks pause while this option is enabled.
+
 - KV contents commands support `--local`, `--data-dir` and `--project-dir`
   for development and standalone stores, without credentials or network access.
   Local binary values and expiration metadata survive export and restore.

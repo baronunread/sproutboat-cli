@@ -32,6 +32,8 @@ export type DevInput = {
   source: string;
   port: number;
   watch: boolean;
+  /** Enable the local scheduled-handler test endpoint on the stable dev port. */
+  testScheduled?: boolean;
   /** Re-read the complete project after a change; throws with a readable message. */
   rebuild: () => Promise<Pick<DevInput, "config" | "sourcePath" | "source">>;
   /** Set internally for an asset-only refresh, where recompiling is unnecessary. */
@@ -143,12 +145,13 @@ async function start(input: DevInput, port: number): Promise<Running> {
     const stateDir = resolve(input.projectDir, ".sproutboat/dev");
     await mkdir(stateDir, { recursive: true });
     const assetsDir = resolve(artifactDir, "assets");
+    const bindings = await readBindings(artifactDir);
     const broker = createBroker({
       db: resolve(stateDir, "state.sqlite"),
       dataDir: resolve(stateDir, "d1"),
       resourceDir: resolve(stateDir, "resources"),
       token: "sproutboat-dev",
-      bindings: await readBindings(artifactDir),
+      bindings: input.testScheduled ? { ...bindings, crons: [] } : bindings,
       secrets: await readDevVars(input.projectDir),
       sproutUrl: `http://127.0.0.1:${port}/`,
       assetsDir: existsSync(assetsDir) ? assetsDir : undefined,
@@ -291,6 +294,30 @@ export async function runDev(input: DevInput): Promise<void> {
       maxRequestBodySize: 5 * 1024 * 1024 * 1024,
       fetch(request, server) {
         const target = new URL(request.url);
+        if (current.testScheduled && target.pathname === "/cdn-cgi/local/scheduled") {
+          if (request.method !== "GET")
+            return new Response("use GET to test scheduled()", { status: 405, headers: { allow: "GET" } });
+          const crons = current.config.triggers?.crons ?? [];
+          const cron = target.searchParams.get("cron") ?? (crons.length === 1 ? crons[0] : undefined);
+          if (!cron || !crons.includes(cron))
+            return new Response("choose a configured cron with ?cron=...", { status: 400 });
+          const timeArg = target.searchParams.get("scheduledTime");
+          const scheduledTime = timeArg === null ? now() : Number(timeArg);
+          if (!Number.isSafeInteger(scheduledTime) || scheduledTime <= 0 || scheduledTime > 8_640_000_000_000_000)
+            return new Response("scheduledTime must be positive Unix milliseconds within the Date range", {
+              status: 400,
+            });
+          return fetch(`http://127.0.0.1:${activePort}/`, {
+            method: "POST",
+            headers: {
+              "x-sb-trigger": "scheduled",
+              "x-sb-token": "sproutboat-dev",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ cron, scheduledTime }),
+            redirect: "manual",
+          }).catch(() => new Response("sprout unavailable", { status: 502 }));
+        }
         const directTransfer = /^\/__sb\/r2\/transfer\/[A-Z][A-Z0-9_]*\/[0-9a-f]{24}$/.test(target.pathname);
         if (directTransfer) server.timeout(request, 255);
         if (directTransfer && !activeTransferPort) return new Response("direct transfers unavailable", { status: 503 });
@@ -309,6 +336,10 @@ export async function runDev(input: DevInput): Promise<void> {
   }
   watchExit(running);
   console.log(ok(`${input.config.name} running on ${leaf(`http://127.0.0.1:${input.port}`)}`));
+  if (input.testScheduled)
+    console.log(
+      dim("  test scheduled(): GET /cdn-cgi/local/scheduled?cron=<expression>&scheduledTime=<Unix milliseconds>"),
+    );
   if (input.watch) console.log(dim("  watching for changes — ctrl-c to stop"));
 
   let watchers: FSWatcher[] = [];
