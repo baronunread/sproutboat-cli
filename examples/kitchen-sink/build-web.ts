@@ -21,5 +21,10 @@ export function buildWebUi(): string {
   const binary = new Uint8Array(256);
   for (let index = 0; index < binary.length; index++) binary[index] = index;
   writeFileSync(join(WEB, "dist", "binary-fixture.bin"), binary);
+  writeFileSync(
+    join(WEB, "dist", "_headers"),
+    "/*\n  X-Asset-Rule: all\n/binary-fixture.bin\n  X-Asset-Rule: binary\n  ! ETag\n",
+  );
+  writeFileSync(join(WEB, "dist", "_redirects"), "/asset-old /about 301\n/asset-post/:slug /about/:slug\n");
   return join(WEB, "dist");
 }

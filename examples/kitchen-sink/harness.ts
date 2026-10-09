@@ -19,7 +19,7 @@ import { checkLocalKv } from "./local-kv";
 import { loadPrelude, wrapNativeFetchHandler, type Bindings } from "../../src/compile";
 import { parseConfig } from "../../src/config";
 import { createBroker, listen } from "../../src/broker";
-import { walkAssets, type AssetManifest } from "../../src/assets";
+import { readAssetRules, walkAssets, type AssetManifest } from "../../src/assets";
 import type { JsonValue } from "../../src/json";
 import { ensurePorffor } from "../../src/porffor-toolchain";
 
@@ -109,6 +109,7 @@ const assetManifest: AssetManifest = {
   notFound: c.assets?.not_found_handling ?? "none",
   runSproutFirst: c.assets?.run_sprout_first ?? false,
   files: walkAssets(assetsDir),
+  ...readAssetRules(assetsDir),
 };
 writeFileSync(join(workdir, "assets.json"), JSON.stringify(assetManifest, null, 2));
 

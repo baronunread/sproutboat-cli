@@ -109,6 +109,23 @@ export async function runConformance(
     binaryAsset.length === 256 && binaryAsset.every((byte, index) => byte === index),
   );
 
+  const redirected = await fetch(base + "/asset-old", { redirect: "manual" });
+  check(
+    "assets: configured redirect precedes SPA fallback",
+    redirected.status === 301 && redirected.headers.get("location") === "/about",
+  );
+  const named = await fetch(base + "/asset-post/example", { redirect: "manual" });
+  check(
+    "assets: named redirect substitutes path",
+    named.status === 302 && named.headers.get("location") === "/about/example",
+  );
+  check("assets: headers apply to SPA fallback", spa.headers.get("x-asset-rule") === "all");
+  const ruled = await fetch(base + "/binary-fixture.bin");
+  check(
+    "assets: later headers replace and remove defaults",
+    ruled.headers.get("x-asset-rule") === "binary" && !ruled.headers.has("etag"),
+  );
+
   // KV (login -> whoami)
   const login = await jget("/login", { method: "POST" });
   const token = String(obj(login.body).token);
