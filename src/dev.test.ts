@@ -473,3 +473,104 @@ test("dev: reload timing separates edit-to-ready latency from route-switch downt
     await rm(projectDir, { recursive: true, force: true });
   }
 });
+
+test("dev: scheduled test endpoint is opt-in and forwards only trusted trigger data", async () => {
+  for (const enabled of [false, true]) {
+    const projectDir = await mkdtemp(join(tmpdir(), "sproutboat-dev-scheduled-"));
+    const publicPort = freePort();
+    const received: Array<{
+      method: string;
+      path: string;
+      trigger: string | null;
+      token: string | null;
+      body: string;
+    }> = [];
+    const factory: NonNullable<DevInput["candidateFactory"]> = async (_input, port) => {
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port,
+        async fetch(request) {
+          received.push({
+            method: request.method,
+            path: new URL(request.url).pathname,
+            trigger: request.headers.get("x-sb-trigger"),
+            token: request.headers.get("x-sb-token"),
+            body: await request.text(),
+          });
+          return enabled ? new Response(null, { status: 204 }) : new Response("application route");
+        },
+      });
+      let resolveExit: (code: number) => void = () => undefined;
+      const exited = new Promise<number>((resolve) => {
+        resolveExit = resolve;
+      });
+      // SAFETY: only coordinator ownership fields are used by this test factory.
+      return {
+        sprout: {
+          kill() {
+            resolveExit(0);
+          },
+          exited,
+        } as Bun.Subprocess,
+        sproutPath: join(projectDir, "fake"),
+        artifactDir: join(projectDir, "candidate"),
+        broker: {} as Running["broker"],
+        stopBroker: () => server.stop(),
+        expected: false,
+        port,
+        enableDispatch() {},
+        disableDispatch() {},
+      };
+    };
+    const task = runDev({
+      projectDir,
+      config: { ...config, triggers: { crons: ["0 3 * * *"] } },
+      sourcePath: join(projectDir, "index.js"),
+      source: "",
+      port: publicPort,
+      watch: false,
+      testScheduled: enabled,
+      now: () => 1_700_000_000_000,
+      candidateFactory: factory,
+      exitOnShutdown: false,
+      rebuild: async () => ({ config, sourcePath: "", source: "" }),
+    });
+    try {
+      await eventually(async () => expect(await tcpReady(publicPort, 100)).toBe(true));
+      const endpoint = `http://127.0.0.1:${publicPort}/cdn-cgi/local/scheduled`;
+      const response = await fetch(endpoint);
+      if (!enabled) {
+        expect(await response.text()).toBe("application route");
+        expect(received[0]?.trigger).toBe(null);
+        expect(received[0]?.path).toBe("/cdn-cgi/local/scheduled");
+        continue;
+      }
+      expect(response.status).toBe(204);
+      expect(received[0]).toEqual({
+        method: "POST",
+        path: "/",
+        trigger: "scheduled",
+        token: "sproutboat-dev",
+        body: JSON.stringify({ cron: "0 3 * * *", scheduledTime: 1_700_000_000_000 }),
+      });
+      const explicit = new URL(endpoint);
+      explicit.searchParams.set("cron", "0 3 * * *");
+      explicit.searchParams.set("scheduledTime", "1700000000123");
+      expect((await fetch(explicit, { headers: { "x-sb-trigger": "queue", "x-sb-token": "spoofed" } })).status).toBe(
+        204,
+      );
+      expect(received[1]?.token).toBe("sproutboat-dev");
+      expect(received[1]?.trigger).toBe("scheduled");
+      expect(JSON.parse(received[1]!.body)).toEqual({ cron: "0 3 * * *", scheduledTime: 1_700_000_000_123 });
+      expect((await fetch(endpoint, { method: "POST" })).status).toBe(405);
+      expect((await fetch(`${endpoint}?cron=invalid`)).status).toBe(400);
+      for (const time of ["", "0", "-1", "NaN", "1.5", "8640000000000001"])
+        expect((await fetch(`${endpoint}?scheduledTime=${time}`)).status).toBe(400);
+      expect(received.length).toBe(2);
+    } finally {
+      process.emit("SIGTERM");
+      await task;
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  }
+});
