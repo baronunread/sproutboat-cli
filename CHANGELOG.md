@@ -10,6 +10,35 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.16.0] - 2026-10-10
+
+### Added
+
+- Proxy and revocable Proxy are accepted in handlers with Porffor alpha-16.
+  Native regression checks cover property traps, enumeration, callable and
+  constructible proxies, revocation, and frozen-property invariants.
+
+- `URLSearchParams` and `FormData` provide live keys, values and entries
+  iterators. `itty-router` 5.0.24 `IttyRouter` passes GET parameters, Unicode
+  POST bodies and a 404 fallback. A basic tRPC 11.19.0 server caller also works.
+
+### Changed
+
+- Pin Porffor alpha-16 (`43087d4`) through `@sproutboat/toolchain` 0.6.0
+  and `@sproutboat/runtime` 0.15.0. Collection iterator methods and `matchAll`
+  now return iterators. Typed-array `from`, `set` offset and `join` fixes are
+  supplied upstream, so their local source patches are removed.
+- Native output handles Unicode console strings, clamped-array ties round
+  to even, and class static initializers use the class as `this`.
+
+### Compatibility limits
+
+- Proxy support alone does not establish compatibility for every package.
+  `qs` 6.16.0 parses and serializes nested query data in a native HTTP probe.
+  Standard `itty-router` 5.0.24 `Router` still hits a labelled-break compiler
+  error. String iteration still splits astral characters into UTF-16 halves.
+
+
 ## [0.15.0] - 2026-10-05
 
 ### Changed

@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@trpc/server": "11.19.0",
+    "itty-router": "5.0.24",
+    "qs": "6.16.0"
+  }
+}

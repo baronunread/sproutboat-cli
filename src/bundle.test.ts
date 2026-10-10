@@ -153,11 +153,6 @@ test("neutraliseExports rejects a module with no default export", () => {
 });
 
 /**
- * The Porffor pin compiles `new Proxy` and then ignores the handler — the
- * trapped property is `undefined`, with no throw. `check` has to reject it, or
- * the first sign of trouble is a 502 from a handler that built cleanly.
- */
-/**
  * Bun already bundles a working node:url polyfill for free under
  * `target: "browser"`. node:path and node:querystring each need a shim,
  * for different reasons: node:path's bundled resolve() calls
@@ -241,22 +236,10 @@ export default { fetch() {
   }
 });
 
-test("Proxy is rejected: the compiler ignores its traps", () => {
-  const viaSource = validateHttpSyncSource(
-    `var d={fetch(){const p=new Proxy({},{get:()=>1});return new Response(p.x);}};export{d as default};`,
-  );
-  expect(viaSource.ok).toBe(false);
-  if (viaSource.ok) throw new Error("unreachable");
-  expect(viaSource.errors.join(" ")).toContain("Proxy is not supported");
-
-  expect(
-    validateHttpSyncSource(`var d={fetch(){return new Response(Proxy.revocable({},{}).proxy);}};export{d as default};`)
-      .ok,
-  ).toBe(false);
-  // A variable that merely mentions the word is not a Proxy construction.
-  expect(
-    validateHttpSyncSource(
-      `var proxyUrl="http://x";var d={fetch(){return new Response(proxyUrl);}};export{d as default};`,
-    ).ok,
-  ).toBe(true);
+test("alpha-16 allows Proxy and revocable Proxy handlers", () => {
+  for (const expression of ["new Proxy({}, { get: () => 1 }).x", "Proxy.revocable({}, {}).proxy"]) {
+    expect(
+      validateHttpSyncSource(`var d={fetch(){return new Response(${expression});}};export{d as default};`).ok,
+    ).toBe(true);
+  }
 });
