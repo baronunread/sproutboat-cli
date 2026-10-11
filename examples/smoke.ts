@@ -23,6 +23,9 @@ import type { JsonValue } from "../src/json";
 
 type Check = (base: string, ok: (name: string, cond: boolean, detail?: JsonValue) => void) => Promise<void>;
 
+const fetch = (url: string, init?: RequestInit) =>
+  globalThis.fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) });
+
 const text = async (url: string, init?: RequestInit) => (await fetch(url, init)).text();
 
 const EXAMPLES = {
@@ -91,8 +94,13 @@ const EXAMPLES = {
     );
     ok(
       "rejects unsupported media",
-      (await fetch(base + "/", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: "a" }))
-        .status === 415,
+      (
+        await fetch(base + "/", {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: "a",
+        })
+      ).status === 415,
     );
   },
 
@@ -245,6 +253,7 @@ for (const name of names) {
 
   const sourcePath = join(dir, config.main);
   const bundle = await bundleHandler(sourcePath, dir);
+  console.log(`building ${name}...`);
   const built = await buildStandalone({
     projectDir: dir,
     config,
@@ -261,34 +270,38 @@ for (const name of names) {
   });
   const base = `http://127.0.0.1:${port}`;
 
-  const deadline = Date.now() + 20_000;
-  let up = false;
-  while (Date.now() < deadline && !up) {
-    try {
-      await fetch(base + "/", { signal: AbortSignal.timeout(2000) });
-      up = true;
-    } catch {
-      await Bun.sleep(100);
-    }
-  }
-
-  console.log(`\n${name}  (${(built.bytes / 1_000_000).toFixed(1)} MB)`);
-  if (!up) {
-    console.log(`  FAIL  never listened on ${port}\n${await new Response(child.stderr).text()}`);
-    failures++;
-  } else {
-    await EXAMPLES[name](base, (check, cond, detail) => {
-      if (cond) console.log("  ok    " + check);
-      else {
-        console.log(`  FAIL  ${check}${detail === undefined ? "" : " — " + JSON.stringify(detail)}`);
-        failures++;
+  try {
+    const deadline = Date.now() + 20_000;
+    let up = false;
+    while (Date.now() < deadline && !up) {
+      try {
+        await fetch(base + "/", { signal: AbortSignal.timeout(2000) });
+        up = true;
+      } catch {
+        await Bun.sleep(100);
       }
-    });
-  }
+    }
 
-  child.kill(9);
-  await child.exited;
-  rmSync(workdir, { recursive: true, force: true });
+    console.log(`\n${name}  (${(built.bytes / 1_000_000).toFixed(1)} MB)`);
+    if (!up) {
+      if (child.exitCode === null) child.kill(9);
+      await child.exited;
+      console.log(`  FAIL  never listened on ${port}\n${await new Response(child.stderr).text()}`);
+      failures++;
+    } else {
+      await EXAMPLES[name](base, (check, cond, detail) => {
+        if (cond) console.log("  ok    " + check);
+        else {
+          console.log(`  FAIL  ${check}${detail === undefined ? "" : " — " + JSON.stringify(detail)}`);
+          failures++;
+        }
+      });
+    }
+  } finally {
+    if (child.exitCode === null) child.kill(9);
+    await child.exited;
+    rmSync(workdir, { recursive: true, force: true });
+  }
 }
 
 console.log(failures === 0 ? `\n${names.length} examples, all green.` : `\n${failures} failed.`);
