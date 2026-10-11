@@ -1,0 +1,8 @@
+{
+  "name": "sproutboat-better-auth-probe",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "better-auth": "1.7.1"
+  }
+}
