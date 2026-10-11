@@ -10,6 +10,24 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.17.0] - 2026-10-11
+
+### Added
+
+- Native Web Streams globals and global timeout/interval functions. HTTP bodies
+  remain buffered.
+- A pinned Better Auth 1.7.1 integration probe covering email/password signup,
+  signed-cookie sessions, wrong-password rejection, signin and signout with
+  an explicit memory database adapter and default password hashing.
+
+### Changed
+
+- Upgrade to Porffor Alpha 17, fixing dynamic number conversion, Math.round
+  ties, negative zero, console precision and class-field captures.
+- Fix lexical local-function return types and Uint8Array base64 options,
+  padding and decoding. AES/JWE stateless auth sessions remain unsupported;
+  native default password hashing currently takes about six seconds.
+
 ## [0.16.0] - 2026-10-10
 
 ### Added
