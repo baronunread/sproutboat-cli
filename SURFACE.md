@@ -76,7 +76,7 @@ usage: sproutboat <init [name] | check [project-dir] | types [project-dir] | dev
 | | |
 | --- | --- |
 | Zig | `0.16.0` (`zig cc -target x86_64-linux-musl`, static) |
-| Provenance stamp | `zig-musl/0.16.0+porffor/43087d4+uws/360c276d` |
+| Provenance stamp | `zig-musl/0.16.0+porffor/731f1b2+uws/360c276d` |
 | Artifact schema | `2` |
 | Runtime | `native-fetch` |
 | Capability profile | `http-sync-v0` |
