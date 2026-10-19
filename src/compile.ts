@@ -120,19 +120,29 @@ let porfforBuildsPruned = false;
  * never removes any (one machine had 1,395 of them, 6.3 GB). Drop the ones not
  * compiled in for a week; the only cost is a recompile. Each dir's `flags`
  * stamp is rewritten on every compile, so its mtime is "last used".
+ *
+ * Age alone does not bound it: every dev session, temp-dir test and scratch
+ * build is a new entry path, so another machine reached 923 dirs (10 GB) in
+ * three days. Keep only the `keep` most recently used as well (~11 MB each).
  */
 export async function prunePorfforBuilds(
   root = resolve(process.env.HOME ?? homedir(), ".cache/porffor/build"),
   now = Date.now(),
+  keep = 100,
 ): Promise<number> {
   porfforBuildsPruned = true;
   const cutoff = now - 7 * 24 * 60 * 60 * 1000;
   const entries: string[] = await readdir(root).catch(() => []);
-  let removed = 0;
+  const dirs: { dir: string; used: number }[] = [];
   for (const name of entries) {
     const dir = resolve(root, name);
     const used = (await stat(resolve(dir, "flags")).catch(() => null)) ?? (await stat(dir).catch(() => null));
-    if (used && used.mtimeMs < cutoff) {
+    if (used) dirs.push({ dir, used: used.mtimeMs });
+  }
+  dirs.sort((a, b) => b.used - a.used);
+  let removed = 0;
+  for (const [index, { dir, used }] of dirs.entries()) {
+    if (used < cutoff || index >= keep) {
       await rm(dir, { recursive: true, force: true });
       removed++;
     }

@@ -265,3 +265,28 @@ test("prunePorfforBuilds drops build dirs unused for a week and keeps recent one
     await rmd(root, { recursive: true, force: true });
   }
 });
+
+test("prunePorfforBuilds keeps only the most recently used dirs past the cap", async () => {
+  const { mkdtemp, mkdir: mk, writeFile: wf, utimes, readdir: rd, rm: rmd } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { prunePorfforBuilds } = await import("./compile");
+  const root = await mkdtemp(join(tmpdir(), "sb-porffor-builds-"));
+  try {
+    const now = Date.now();
+    for (const [name, ageHours] of [
+      ["newest", 1],
+      ["middle", 2],
+      ["oldest", 3],
+    ] as const) {
+      await mk(join(root, name));
+      await wf(join(root, name, "flags"), "cc");
+      const t = (now - ageHours * 3_600_000) / 1000;
+      await utimes(join(root, name, "flags"), t, t);
+    }
+    expect(await prunePorfforBuilds(root, now, 2)).toBe(1);
+    expect((await rd(root)).sort()).toEqual(["middle", "newest"]);
+  } finally {
+    await rmd(root, { recursive: true, force: true });
+  }
+});
