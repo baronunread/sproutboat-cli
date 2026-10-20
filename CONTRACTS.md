@@ -95,6 +95,7 @@ Tables in a resource file, which outlives every redeploy:
 - `ae`
 - `cache`
 - `do_alarm`
+- `do_alarm_delivery`
 - `do_storage`
 - `kv`
 - `mq`
