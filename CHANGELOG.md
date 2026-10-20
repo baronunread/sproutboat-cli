@@ -10,6 +10,35 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.18.0] - 2026-10-20
+
+### Added
+
+- Porffor Alpha 18 (`@sproutboat/toolchain` 0.9, `@sproutboat/runtime` 0.18).
+- Standalone sprouts stream `ReadableStream` response bodies chunk by chunk, so
+  Server-Sent Events and long responses work; a client that disconnects cancels
+  the stream.
+- `HTMLRewriter` (Cloudflare's API, output matching lol-html),
+  `CompressionStream`/`DecompressionStream` (gzip, deflate, deflate-raw),
+  `structuredClone`, `Event`/`EventTarget`/`AbortController`,
+  `TextEncoderStream`/`TextDecoderStream`, and more Web Crypto (SHA-1, MD5,
+  HMAC-SHA1, `exportKey`, `generateKey`).
+- Fetch-spec `Request`, `Response`, `Headers`, `Blob` and `FormData`: byte bodies
+  go out as bytes, body readers read `ReadableStream` bodies, and `JSON.parse`
+  applies its reviver.
+
+### Fixed
+
+- `ctx.waitUntil` work no longer delays the response.
+- `setTimeout(fn, 0)` fires on Linux.
+- An edited compiler patch no longer hides behind a stale Porffor cache.
+
+### Changed
+
+- `Response.redirect` sends the serialized URL (`https://example.com/`), and a
+  204/205/304 response with a body throws, per Fetch and workerd.
+- Porffor's build cache keeps the 100 most recent builds.
+
 ## [0.17.0] - 2026-10-11
 
 ### Added
@@ -877,7 +906,10 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.17.0...v0.18.0
+[0.17.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.12.7...v0.13.0
