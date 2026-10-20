@@ -119,7 +119,9 @@ const EXAMPLES = {
     const response = await fetch(base + "/anything", { redirect: "manual" });
     ok(
       "returns the original 301 redirect",
-      response.status === 301 && response.headers.get("location") === "https://example.com",
+      // Response.redirect sends the parsed URL, serialized (Fetch spec; workerd does the
+      // same): "https://example.com" goes out as "https://example.com/".
+      response.status === 301 && response.headers.get("location") === "https://example.com/",
       {
         status: response.status,
         location: response.headers.get("location"),
