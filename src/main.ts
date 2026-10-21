@@ -6,11 +6,11 @@ import { isBoolean, isSafeInteger, isString, jsonObject, parseJsonValue, type Js
 import type { AssetFiles } from "./assets";
 import { parseConfig, pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
 import { validateHttpSyncSource } from "./source";
-import { buildArtifact } from "./build";
+import { buildArtifact, emitGenerated } from "./build";
 import { generateTypes, TYPES_FILE } from "./types-gen";
 import { bundleHandler, BundleError, type BundleResult } from "./bundle";
 import { runDev } from "./dev";
-import { buildStandalone } from "./standalone-build";
+import { buildStandalone, emitStandalone } from "./standalone-build";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
@@ -348,6 +348,33 @@ async function buildStandaloneBinary(directory: string | undefined, target: "lin
     });
     console.log(ok(`built ${result.outPath} (${(result.bytes / 1_000_000).toFixed(1)} MB)`));
     console.log(dim(`  run it: ${result.outPath}   ·   state lands in ./${project.config.name}.data`));
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * `build --emit-only`: run the build up to and including writing
+ * `sprout.generated.js` (prelude, bindings and handler, exactly what Porffor
+ * would compile), print its path and stop. Every source and config check still
+ * fails the build; no compiler, SQLite or BearSSL is acquired and no binary is
+ * written.
+ */
+async function emitOnly(directory: string | undefined, target: "linux-x86_64" | "host", standalone: boolean) {
+  const project = await readProject(directory);
+  console.log(
+    dim(`Emitting ${standalone ? "the standalone " : ""}${project.config.name} source (${target}, no native compile)…`),
+  );
+  try {
+    const input = {
+      projectDir: project.directory,
+      config: project.config,
+      sourcePath: project.sourcePath,
+      source: project.bundle.code,
+      target,
+    };
+    const { generatedPath } = standalone ? await emitStandalone(input) : await emitGenerated(input);
+    console.log(generatedPath);
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
@@ -1314,8 +1341,10 @@ switch (command) {
   case "build": {
     const hostBuild = args.includes("--target") && args[args.indexOf("--target") + 1] === "host";
     const directory = args.find((arg) => !arg.startsWith("--") && arg !== "host");
-    if (args.includes("--standalone")) await buildStandaloneBinary(directory, hostBuild ? "host" : "linux-x86_64");
-    else await build(directory, hostBuild ? "host" : "linux-x86_64");
+    const target = hostBuild ? "host" : "linux-x86_64";
+    if (args.includes("--emit-only")) await emitOnly(directory, target, args.includes("--standalone"));
+    else if (args.includes("--standalone")) await buildStandaloneBinary(directory, target);
+    else await build(directory, target);
     break;
   }
   case "toolchain":

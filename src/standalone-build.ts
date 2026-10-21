@@ -9,7 +9,7 @@
  */
 import { chmod, cp, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { buildArtifact, type BuildInput } from "./build";
+import { buildArtifact, emitGenerated, type BuildInput } from "./build";
 import type { Bindings } from "./wrap";
 
 export type StandaloneBuildInput = BuildInput & {
@@ -37,11 +37,26 @@ export function unsupportedBindings(bindings: Pick<Partial<Bindings>, "services"
   return reasons;
 }
 
-export async function buildStandalone(input: StandaloneBuildInput): Promise<StandaloneBuildResult> {
+function assertStandaloneSupported(input: BuildInput): void {
   const blocked = unsupportedBindings(input.config);
   if (blocked.length > 0) {
     throw new Error(`cannot build a standalone binary for this project:\n  - ${blocked.join("\n  - ")}`);
   }
+}
+
+/**
+ * `sproutboat build --standalone --emit-only`: the standalone build up to and
+ * including `sprout.generated.js`, byte for byte what a full standalone build
+ * compiles, at the same path. Every check that fails a standalone build fails
+ * this too; nothing native is acquired or compiled and no binary is copied out.
+ */
+export async function emitStandalone(input: BuildInput): Promise<{ generatedPath: string }> {
+  assertStandaloneSupported(input);
+  return emitGenerated({ ...input, transport: "embedded" });
+}
+
+export async function buildStandalone(input: StandaloneBuildInput): Promise<StandaloneBuildResult> {
+  assertStandaloneSupported(input);
   const artifact = await buildArtifact({ ...input, transport: "embedded" });
 
   // The sprout *is* the binary: assets and bindings are compiled into it, and
