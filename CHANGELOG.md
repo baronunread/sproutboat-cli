@@ -10,6 +10,43 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.20.0] - 2026-10-21
+
+### Added
+
+- Workers RPC over service bindings. A target whose default export extends
+  `WorkerEntrypoint` (from `cloudflare:workers`) exposes its methods:
+  `await env.SERVICE.add(2, 3)` runs `add(2, 3)` on it and resolves to the result.
+  - Arguments and results are copied as structured clone does (`Date`, binary data,
+    `Map`, `Set`, `undefined`, `NaN`, `-0`).
+  - An error the method throws rejects the call with the same class and message.
+  - `cloudflare:workers` also provides `DurableObject`, `RpcTarget` and `env`.
+- Compatibility date `2026-10-22` changes how `fetch()` and `env.SERVICE.fetch()`
+  behave in a deployed app:
+  - They return promises and no longer block. The app keeps serving other requests
+    while a call is in flight, concurrent calls overlap, and a deployment can call
+    itself through a binding.
+  - Responses stream: the call resolves when the headers arrive, and `response.body`
+    receives chunks as they come.
+  - Redirects are followed as Fetch does (`redirect: "manual"` and `"error"` work).
+  - A service-binding target that throws makes the caller throw the same error, and
+    the target sees the URL its caller passed.
+
+  Apps with an earlier `compatibility_date` keep getting a `Response` right away, as
+  before. Move the date to `2026-10-22` and rebuild to opt in.
+- `fetch()` and service bindings honour `init.signal`. Aborting stops the work
+  downstream too.
+
+### Fixed
+
+- Every `Set-Cookie` header of a fetched response is kept, not just the last one.
+- A fetched response without a `Content-Type` no longer gains `text/plain`.
+- `atob()` and `btoa()` were wrong for strings from `JSON.parse` or `TextDecoder`;
+  they are now correct for any string.
+- A `fetch` or service call is no longer retried once the broker may have run it.
+
+toolchain 0.11.0, runtime 0.21.1, wire 0.14.
+
 ## [0.19.0] - 2026-10-21
 
 ### Added
