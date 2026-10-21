@@ -10,6 +10,27 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.21.0] - 2026-10-21
+
+### Changed
+
+- Apps compile with Porffor Alpha 19 (`@sproutboat/toolchain` 0.12.0).
+  Binaries are about 1.5% smaller, and build times are unchanged.
+- Alpha 19 brings JavaScript closer to V8, and the changes apply at every
+  compatibility date:
+  - `Error.prototype.stack` is an accessor;
+  - `instanceof` follows the spec, including `Symbol.hasInstance`;
+  - sloppy-mode functions box a primitive `this`;
+  - undeclared names are read from the global object;
+  - using a `let`, `const` or class binding before its declaration throws.
+
+### Fixed
+
+- `JSON.parse` with a reviver now gives the reviver the right `context.source`
+  when the input contains non-ASCII text.
+- `Map.groupBy` works, and private class fields no longer show up as
+  enumerable properties.
+
 ## [0.20.0] - 2026-10-21
 
 ### Added
