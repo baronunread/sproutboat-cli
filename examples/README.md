@@ -59,6 +59,7 @@ PORT=8080 ./dist/kv-example
 ```sh
 bun run examples                    # build each one and drive it
 bun run examples kv d1              # just these
+SMOKE_CONCURRENCY=1 bun run examples  # one at a time (default: 4 at once)
 ```
 
 The website's support table links each binding to the example that

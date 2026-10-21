@@ -4,6 +4,12 @@
  *
  *   bun examples/smoke.ts          # all of them
  *   bun examples/smoke.ts kv d1    # just these
+ *   SMOKE_CONCURRENCY=1 bun examples/smoke.ts   # one at a time (default 4)
+ *
+ * Examples build and run in a pool. Each one already has its own project dir
+ * (and so its own `.sproutboat/` artifact and Porffor unit dirs), and gets its
+ * own temp dir, data dir and port here. The shared toolchain caches are warmed
+ * once before the pool starts, so concurrent builds only ever read them.
  *
  * The website's support table links a binding to the example that demonstrates
  * it, so an example that no longer builds turns that table into a claim nobody
@@ -20,6 +26,12 @@ import { buildStandalone } from "../src/standalone-build";
 import { bundleHandler } from "../src/bundle";
 import { parseConfig } from "../src/config";
 import type { JsonValue } from "../src/json";
+import { prunePorfforBuilds } from "../src/compile";
+import { ensurePorffor } from "../src/porffor-toolchain";
+import { ensurePorfforPatched } from "../src/patch-porffor";
+import { ensureUWebSocketsHost, UwsUnavailableError } from "../src/toolchain";
+import { ensureSqliteObject } from "../src/sqlite";
+import { ensureBearssl } from "../src/bearssl";
 
 type Check = (base: string, ok: (name: string, cond: boolean, detail?: JsonValue) => void) => Promise<void>;
 
@@ -233,11 +245,21 @@ const EXTRA_ENV = {
 type Name = keyof typeof EXAMPLES;
 const isName = (v: string): v is Name => Object.hasOwn(EXAMPLES, v);
 
+// Ports handed out in this run. The kernel picks a free one, but with several
+// examples starting at once two probes can be handed the same port before
+// either child binds it, and then one example's checks talk to another's
+// server. Remembering every port given out rules that out.
+const takenPorts = new Set<number>();
 function freePort(): number {
-  const probe = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
-  const chosen = probe.port;
-  probe.stop(true);
-  return chosen;
+  for (;;) {
+    const probe = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+    const chosen = probe.port;
+    probe.stop(true);
+    if (!takenPorts.has(chosen)) {
+      takenPorts.add(chosen);
+      return chosen;
+    }
+  }
 }
 
 const HERE = import.meta.dir;
@@ -245,37 +267,95 @@ const wanted = process.argv.slice(2);
 for (const name of wanted) if (!isName(name)) throw new Error(`no such example: ${name}`);
 const names: Name[] = wanted.length ? wanted.filter(isName) : Object.keys(EXAMPLES).filter(isName);
 
-let failures = 0;
-for (const name of names) {
-  const dir = name.startsWith("worker-") ? join(HERE, "workers-verbatim", name.slice(7)) : join(HERE, name);
-  const workdir = mkdtempSync(join(tmpdir(), `sb-smoke-${name}-`));
-  const parsed = parseConfig(readFileSync(join(dir, "sproutboat.jsonc"), "utf8"));
-  if (!parsed.ok) throw new Error(`${name}: bad config: ${parsed.errors.join("; ")}`);
-  const config = parsed.value;
+const rawConcurrency = process.env.SMOKE_CONCURRENCY ?? "4";
+const concurrency = Number(rawConcurrency);
+if (!Number.isInteger(concurrency) || concurrency < 1) {
+  throw new Error(`SMOKE_CONCURRENCY must be a positive integer, got "${rawConcurrency}"`);
+}
 
-  const sourcePath = join(dir, config.main);
-  const bundle = await bundleHandler(sourcePath, dir);
-  console.log(`building ${name}...`);
-  const built = await buildStandalone({
-    projectDir: dir,
-    config,
-    sourcePath,
-    source: bundle.code,
-    target: "host",
-    outPath: join(workdir, name),
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+
+// Live children and temp dirs, so an interrupted run does not leave servers
+// listening or temp dirs behind.
+type LiveEntry = { child?: ReturnType<typeof Bun.spawn>; workdir: string };
+const live = new Set<LiveEntry>();
+for (const [signal, code] of [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+] as const) {
+  process.on(signal, () => {
+    for (const entry of live) {
+      if (entry.child && entry.child.exitCode === null) entry.child.kill(9);
+      rmSync(entry.workdir, { recursive: true, force: true });
+    }
+    process.exit(code);
   });
+}
 
-  const port = freePort();
-  const child = Bun.spawn([built.outPath], {
-    stdio: ["ignore", "ignore", "pipe"],
-    env: { ...process.env, ...EXTRA_ENV[name], PORT: String(port), SB_DATA_DIR: join(workdir, "data") },
-  });
-  const base = `http://127.0.0.1:${port}`;
-
+/**
+ * Fill the caches every build shares before any build runs. Each has its own
+ * lock, but a waiter gives up after 30 seconds, and a cold BearSSL or
+ * uSockets build can take longer than that while three other builds wait on
+ * it. Doing it once up front also settles Porffor's build-dir pruning, which
+ * otherwise runs in the background of the first compile and could remove a
+ * stale unit dir another example is compiling into at that moment.
+ */
+async function warmSharedCaches(): Promise<void> {
+  await prunePorfforBuilds();
+  await ensurePorfforPatched(await ensurePorffor());
   try {
+    await ensureUWebSocketsHost();
+  } catch (error) {
+    // compileSprout falls back to Porffor's own git + make build when asked to.
+    if (!(error instanceof UwsUnavailableError && process.env.SPROUTBOAT_BUILD_UWS_FROM_SOURCE === "1")) throw error;
+  }
+  await Promise.all([ensureSqliteObject({ target: "host" }), ensureBearssl({ target: "host" })]);
+}
+
+type Result = { name: Name; failed: number; ms: number; report: string };
+
+async function runExample(name: Name): Promise<Result> {
+  const started = performance.now();
+  const lines: string[] = [];
+  let failed = 0;
+  let size = "";
+  let stderr = "";
+  const entry: LiveEntry = {
+    workdir: mkdtempSync(join(tmpdir(), `sb-smoke-${name}-`)),
+  };
+  live.add(entry);
+  let stderrText: Promise<string> | undefined;
+  try {
+    const dir = name.startsWith("worker-") ? join(HERE, "workers-verbatim", name.slice(7)) : join(HERE, name);
+    const parsed = parseConfig(readFileSync(join(dir, "sproutboat.jsonc"), "utf8"));
+    if (!parsed.ok) throw new Error(`bad config: ${parsed.errors.join("; ")}`);
+    const config = parsed.value;
+
+    const sourcePath = join(dir, config.main);
+    const bundle = await bundleHandler(sourcePath, dir);
+    const built = await buildStandalone({
+      projectDir: dir,
+      config,
+      sourcePath,
+      source: bundle.code,
+      target: "host",
+      outPath: join(entry.workdir, name),
+    });
+    size = `${(built.bytes / 1_000_000).toFixed(1)} MB, built in ${seconds(performance.now() - started)}`;
+
+    const port = freePort();
+    const child = Bun.spawn([built.outPath], {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: { ...process.env, ...EXTRA_ENV[name], PORT: String(port), SB_DATA_DIR: join(entry.workdir, "data") },
+    });
+    entry.child = child;
+    // Drained as it arrives: an undrained pipe blocks a chatty server.
+    stderrText = new Response(child.stderr).text();
+    const base = `http://127.0.0.1:${port}`;
+
     const deadline = Date.now() + 20_000;
     let up = false;
-    while (Date.now() < deadline && !up) {
+    while (Date.now() < deadline && !up && child.exitCode === null) {
       try {
         await fetch(base + "/", { signal: AbortSignal.timeout(2000) });
         up = true;
@@ -284,27 +364,78 @@ for (const name of names) {
       }
     }
 
-    console.log(`\n${name}  (${(built.bytes / 1_000_000).toFixed(1)} MB)`);
     if (!up) {
-      if (child.exitCode === null) child.kill(9);
-      await child.exited;
-      console.log(`  FAIL  never listened on ${port}\n${await new Response(child.stderr).text()}`);
-      failures++;
+      lines.push(
+        child.exitCode === null ? `  FAIL  never listened on ${port}` : `  FAIL  exited with ${child.exitCode}`,
+      );
+      failed++;
     } else {
       await EXAMPLES[name](base, (check, cond, detail) => {
-        if (cond) console.log("  ok    " + check);
+        if (cond) lines.push("  ok    " + check);
         else {
-          console.log(`  FAIL  ${check}${detail === undefined ? "" : " — " + JSON.stringify(detail)}`);
-          failures++;
+          lines.push(`  FAIL  ${check}${detail === undefined ? "" : ": " + JSON.stringify(detail)}`);
+          failed++;
         }
       });
     }
+  } catch (error) {
+    // A build error or a check that threw: the whole message, which for a
+    // failed compile carries Porffor's own output.
+    lines.push(`  FAIL  ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+    failed++;
   } finally {
-    if (child.exitCode === null) child.kill(9);
-    await child.exited;
-    rmSync(workdir, { recursive: true, force: true });
+    if (entry.child) {
+      if (entry.child.exitCode === null) entry.child.kill(9);
+      await entry.child.exited;
+    }
+    if (stderrText) stderr = await stderrText;
+    rmSync(entry.workdir, { recursive: true, force: true });
+    live.delete(entry);
   }
+
+  const ms = performance.now() - started;
+  let report = `\n${name}  (${size ? size + ", " : ""}${seconds(ms)} total)\n${lines.join("\n")}`;
+  if (failed > 0 && stderr.trim()) {
+    report += `\n  --- ${name} stderr ---\n${stderr.trimEnd()}\n  --- end of ${name} stderr ---`;
+  }
+  return { name, failed, ms, report };
 }
 
-console.log(failures === 0 ? `\n${names.length} examples, all green.` : `\n${failures} failed.`);
-process.exit(failures === 0 ? 0 : 1);
+const runStarted = performance.now();
+console.log(`${names.length} examples, ${Math.min(concurrency, names.length)} at a time`);
+try {
+  await warmSharedCaches();
+} catch (error) {
+  console.log(
+    `\nFAIL  could not prepare the shared toolchain caches\n${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+  );
+  process.exit(1);
+}
+
+const results: Result[] = [];
+let next = 0;
+async function worker(): Promise<void> {
+  while (next < names.length) {
+    const name = names[next++];
+    console.log(`building ${name}...`);
+    const result = await runExample(name);
+    results.push(result);
+    // One write per example, so concurrent results never interleave.
+    console.log(`${result.report}\n  [${results.length}/${names.length} done]`);
+  }
+}
+await Promise.all(Array.from({ length: Math.min(concurrency, names.length) }, worker));
+
+const failedNames = names.filter((name) => results.some((r) => r.name === name && r.failed > 0));
+const width = Math.max(...names.map((name) => name.length));
+console.log(`\nsummary (${seconds(performance.now() - runStarted)} wall clock):`);
+for (const name of names) {
+  const result = results.find((r) => r.name === name)!;
+  console.log(`  ${result.failed > 0 ? "FAIL" : "ok  "}  ${name.padEnd(width)}  ${seconds(result.ms).padStart(7)}`);
+}
+console.log(
+  failedNames.length === 0
+    ? `\n${names.length} examples, all green.`
+    : `\n${failedNames.length} of ${names.length} examples failed: ${failedNames.join(", ")}.`,
+);
+process.exit(failedNames.length === 0 ? 0 : 1);
