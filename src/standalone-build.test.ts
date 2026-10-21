@@ -52,27 +52,30 @@ test("emit-only writes the standalone module where a full build does, acquiring 
     expect(generatedPath).toBe(
       join(projectDir, ".sproutboat/porffor-units/linux-x86_64-embedded-release/sprout.generated.js"),
     );
+    // What buildArtifact derives for a project with no bindings; it carries vars
+    // and resources beyond the Bindings type, so it is held in a variable.
+    const bindings = {
+      kv: [],
+      secrets: [],
+      d1: [],
+      r2: [],
+      queues: [],
+      analytics: [],
+      do: [],
+      services: [],
+      crons: [],
+      ratelimiters: [],
+      assets: "",
+      vars: config.vars,
+      resources: {},
+    };
     const emitted = await readFile(generatedPath, "utf8");
     expect(emitted).toBe(
       wrapNativeFetchHandler(
         source,
         await loadPrelude("embedded"),
         config.vars,
-        {
-          kv: [],
-          secrets: [],
-          d1: [],
-          r2: [],
-          queues: [],
-          analytics: [],
-          do: [],
-          services: [],
-          crons: [],
-          ratelimiters: [],
-          assets: "",
-          vars: config.vars,
-          resources: {},
-        },
+        bindings,
         undefined,
         config.compatibility_date,
         config.name,
