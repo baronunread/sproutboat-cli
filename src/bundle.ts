@@ -79,6 +79,9 @@ export async function bundleHandler(entryPath: string, projectDir: string): Prom
       splitting: false,
       sourcemap: "none",
       plugins: [nodeShimsPlugin],
+      // WorkerEntrypoint, DurableObject, RpcTarget and env are runtime globals; the
+      // compiler turns this import into them, so it stays in the bundle as written.
+      external: ["cloudflare:workers"],
     });
   } catch (cause) {
     // An unresolvable specifier arrives as an AggregateError whose `errors`
