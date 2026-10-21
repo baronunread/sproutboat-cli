@@ -27,6 +27,39 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      # The toolchain caches: the patched Porffor source, SQLite and BearSSL
+      # objects and the host uSockets build (~/.cache/sproutboat,
+      # ~/.cache/porffor/deps), and Porffor's per-entry compiled C units
+      # (~/.cache/porffor/build). Every entry is checked before it is used:
+      # the first three against recorded sha256 digests and the exact compiler
+      # command, the units byte for byte against freshly generated C and flags,
+      # so a stale entry is rebuilt rather than trusted. Every binary is still
+      # compiled and linked from scratch. The key carries the toolchain version
+      # and the host C/C++ compiler's version, since the units are LTO objects
+      # only that compiler can link. Not the runner image version: the
+      # ubuntu-latest pool serves several images at once, and keying on it
+      # missed the cache on a rerun of the same commit.
+      - name: Compute the toolchain cache key
+        id: cache-key
+        shell: bash
+        run: |
+          toolchain="$(grep -oE '"@sproutboat/toolchain@[^"]+"' bun.lock | head -1 | tr -d '"')"
+          test -n "$toolchain"
+          compiler="$({ cc --version; c++ --version; } | sha256sum | cut -c1-16)"
+          echo "prefix=toolchain-v2-${{ runner.os }}-${{ runner.arch }}-${toolchain}-cc${compiler}-" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/sproutboat
+            !~/.cache/sproutboat/zig-*
+            ~/.cache/porffor
+          key: ${{ steps.cache-key.outputs.prefix }}${{ hashFiles('bun.lock', 'src/**', 'examples/**') }}
+          restore-keys: ${{ steps.cache-key.outputs.prefix }}
+      # Porffor prunes unit dirs unused for a week. A restored dir keeps its
+      # old mtime, so mark it used now rather than have it pruned mid-run.
+      - name: Mark restored Porffor unit dirs as used
+        shell: bash
+        run: if [ -d ~/.cache/porffor/build ]; then find ~/.cache/porffor/build -name flags -exec touch {} +; fi
       - run: bun install --frozen-lockfile
       - run: bun run kitchen-sink
       - run: bun run kitchen-sink:standalone

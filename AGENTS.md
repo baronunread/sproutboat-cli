@@ -22,6 +22,29 @@ that passes one and not the other is drift, not a flake.
 
 `bun run examples` builds all small examples and drives them. The
 website's support table links to these, so a broken one makes the table lie.
+It runs four at a time; `SMOKE_CONCURRENCY=1 bun run examples` runs them one
+by one.
+
+## Testing unreleased `@sproutboat` packages
+
+To run the CLI against local `@sproutboat/runtime`, `toolchain` or `wire`
+changes, use `scripts/with-local-packages.ts` rather than moving
+`node_modules` entries by hand. It symlinks
+`<sproutboat-packages>/packages/<pkg>` over `node_modules/@sproutboat/<pkg>`,
+runs the command, and always puts the originals back, also when the command
+fails or is interrupted:
+
+    # all three packages that exist in the checkout
+    bun scripts/with-local-packages.ts ../sproutboat-packages -- bun run kitchen-sink
+
+    # just some of them
+    bun scripts/with-local-packages.ts ../sproutboat-packages --only runtime,wire -- bun run examples kv d1
+
+Run `bun install` in the packages checkout first: the linked packages resolve
+their own imports from there. The script refuses to run in the main checkout
+while it has uncommitted changes, so do this from a worktree
+(`git worktree add /tmp/sb-cli-local origin/main`, then `bun install
+--frozen-lockfile` in it).
 
 ## Compiler gaps
 
