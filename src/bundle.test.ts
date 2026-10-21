@@ -243,3 +243,18 @@ test("alpha-16 allows Proxy and revocable Proxy handlers", () => {
     ).toBe(true);
   }
 });
+
+test("cloudflare:workers stays an import for the compiler, and a WorkerEntrypoint default export passes the check", async () => {
+  const dir = project({
+    "src/index.js":
+      `import { WorkerEntrypoint } from "cloudflare:workers";\n` +
+      `export default class Service extends WorkerEntrypoint {\n  add(a, b) { return a + b; }\n}\n`,
+  });
+  try {
+    const { code } = await bundleHandler(join(dir, "src/index.js"), dir);
+    expect(code).toMatch(/^import\s*\{\s*WorkerEntrypoint\s*\}\s*from\s*"cloudflare:workers"/m);
+    expect(validateHttpSyncSource(code)).toEqual({ ok: true });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
