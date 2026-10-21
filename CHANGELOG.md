@@ -10,6 +10,23 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.19.0] - 2026-10-21
+
+### Added
+
+- From compatibility date `2026-10-21`, `Response.body` and `Request.body` are
+  `ReadableStream`s for every body type, as in Fetch and workerd: `res.body.getReader()`,
+  `res.body.pipeThrough(...)` and `new Response(upstream.body)` work on any response,
+  including the incoming request. Apps with an earlier `compatibility_date` keep the raw
+  body (`JSON.parse(request.body)`, as the examples do); move the date and rebuild to opt in.
+
+### Fixed
+
+- `env.BUCKET.put(key, request.body)`, `env.KV.put(key, request.body)` and
+  `fetch(url, { body: request.body })` take the request body, stream or not.
+- A non-ASCII request body is no longer UTF-8 encoded twice by `arrayBuffer()`,
+  `blob()` or KV `put` (`é` arrived as `Ã©`), and R2 `put` accepts bytes.
+
 ## [0.18.0] - 2026-10-20
 
 ### Added
@@ -906,7 +923,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.15.0...v0.16.0
