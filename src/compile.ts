@@ -93,6 +93,13 @@ export type CompileInput = {
    * cannot execute the deploy artifact.
    */
   target?: "linux-x86_64" | "host";
+  /**
+   * Write `generatedPath` exactly as a full compile would, then stop: no
+   * Porffor, no uWebSockets, no compiler, nothing at `outPath`. For callers
+   * that need the wrapped module (prelude, bindings, handler) and never run the
+   * binary, such as a qualification run that only inspects the source.
+   */
+  emitOnly?: boolean;
 };
 
 /**
@@ -197,8 +204,48 @@ export function porfforArgs(
   return args;
 }
 
-/** Compile `sourcePath` to a native binary at `outPath` (mode 0555). */
+/** The wrapped module the compiler sees: `generatedSource` if given, else the source wrapped here. */
+async function generateSource(input: CompileInput): Promise<string> {
+  if (input.generatedSource !== undefined) return input.generatedSource;
+  const [source, prelude] = await Promise.all([
+    input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),
+    loadPrelude(input.transport ?? "broker"),
+  ]);
+  return wrapNativeFetchHandler(
+    source,
+    prelude,
+    input.vars,
+    input.bindings ?? EMPTY_BINDINGS,
+    undefined,
+    input.compatibilityDate,
+    input.appName,
+    input.assets,
+    input.transport,
+    input.versionMetadata,
+  );
+}
+
+/** Write the wrapped module to `generatedPath` (default: beside `outPath`) and return that path. */
+async function writeGenerated(input: CompileInput): Promise<string> {
+  const generatedPath = input.generatedPath ?? resolve(dirname(input.outPath), "sprout.generated.js");
+  const generatedSource = await generateSource(input);
+  await mkdir(dirname(generatedPath), { recursive: true });
+  await writeFile(generatedPath, generatedSource);
+  return generatedPath;
+}
+
+/**
+ * Compile `sourcePath` to a native binary at `outPath` (mode 0555).
+ *
+ * With `emitOnly`, write `generatedPath` and return before any of the native
+ * compile's inputs are acquired. Generation needs only the runtime prelude and
+ * the wrapper, never Porffor itself.
+ */
 export async function compileSprout(input: CompileInput): Promise<void> {
+  if (input.emitOnly) {
+    await writeGenerated(input);
+    return;
+  }
   const porffor = await ensurePorffor();
   await ensurePorfforPatched(porffor);
 
@@ -238,29 +285,7 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   // OS may still be executing. The linker cannot overwrite either, so clear it
   // first rather than failing with "can't write output file".
   await rm(input.outPath, { force: true });
-  const generatedPath = input.generatedPath ?? resolve(outDir, "sprout.generated.js");
-  await mkdir(dirname(generatedPath), { recursive: true });
-  const generatedSource =
-    input.generatedSource ??
-    (await (async () => {
-      const [source, prelude] = await Promise.all([
-        input.source === undefined ? readFile(input.sourcePath, "utf8") : Promise.resolve(input.source),
-        loadPrelude(input.transport ?? "broker"),
-      ]);
-      return wrapNativeFetchHandler(
-        source,
-        prelude,
-        input.vars,
-        input.bindings ?? EMPTY_BINDINGS,
-        undefined,
-        input.compatibilityDate,
-        input.appName,
-        input.assets,
-        input.transport,
-        input.versionMetadata,
-      );
-    })());
-  await writeFile(generatedPath, generatedSource);
+  const generatedPath = await writeGenerated(input);
 
   const launcher = resolve(porffor, "runtime/index.js");
   // A musl build shells `zig` bare (Porffor hardcodes the literal command), so

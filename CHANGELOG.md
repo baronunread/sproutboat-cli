@@ -10,6 +10,16 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Added
+
+- `sproutboat build --standalone --emit-only` writes
+  `.sproutboat/porffor-units/linux-x86_64-embedded-release/sprout.generated.js`,
+  byte for byte what a full standalone build compiles, prints its path and
+  stops. It runs every check that can fail a build, but acquires no Zig,
+  SQLite, BearSSL or Porffor and writes no binary, so it takes well under a
+  second where a full build takes tens of seconds. Without `--standalone` it
+  emits the broker-transport module the same way.
+
 ## [0.21.0] - 2026-10-21
 
 ### Changed

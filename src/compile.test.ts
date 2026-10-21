@@ -1,5 +1,15 @@
 import { expect, test } from "bun:test";
-import { BASELINE_COMPATIBILITY_DATE, porfforArgs, preludePath, wrapNativeFetchHandler } from "./compile";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  BASELINE_COMPATIBILITY_DATE,
+  compileSprout,
+  loadPrelude,
+  porfforArgs,
+  preludePath,
+  wrapNativeFetchHandler,
+} from "./compile";
 import { DEPLOY_TARGET, hostTarget, validateManifest } from "./manifest";
 
 test("wrap: injects prelude + env, keeps the handler body verbatim", () => {
@@ -243,8 +253,6 @@ test("porfforArgs: --musl marks the cross-compile, and only that", () => {
 
 test("prunePorfforBuilds drops build dirs unused for a week and keeps recent ones", async () => {
   const { mkdtemp, mkdir: mk, writeFile: wf, utimes, readdir: rd, rm: rmd } = await import("node:fs/promises");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
   const { prunePorfforBuilds } = await import("./compile");
   const root = await mkdtemp(join(tmpdir(), "sb-porffor-builds-"));
   try {
@@ -289,4 +297,42 @@ test("prunePorfforBuilds keeps only the most recently used dirs past the cap", a
   } finally {
     await rmd(root, { recursive: true, force: true });
   }
+});
+
+test("compileSprout emitOnly writes the wrapped module and compiles nothing", async () => {
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "sb-emit-only-"));
+  try {
+    const source = `export default { fetch() { return new Response("x"); } };`;
+    const generatedPath = join(dir, "units/sprout.generated.js");
+    const outPath = join(dir, "dist/sprout");
+    await compileSprout({
+      sourcePath: join(dir, "missing.js"),
+      source,
+      generatedPath,
+      outPath,
+      vars: {},
+      emitOnly: true,
+    });
+    expect(await readFile(generatedPath, "utf8")).toBe(wrapNativeFetchHandler(source, await loadPrelude("broker"), {}));
+    // Neither the binary nor its directory: the native compile never started.
+    expect(await Bun.file(outPath).exists()).toBe(false);
+    expect(await Bun.file(join(dir, "dist")).exists()).toBe(false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("compileSprout emitOnly still rejects a handler without a default export", async () => {
+  await expect(
+    compileSprout({
+      sourcePath: "/does/not/exist.js",
+      source: "export function fetch() {}",
+      generatedPath: "/tmp/sb-emit-only-never/sprout.generated.js",
+      outPath: "/tmp/sb-emit-only-never/sprout",
+      vars: {},
+      emitOnly: true,
+    }),
+  ).rejects.toThrow(/default-export an object/);
 });

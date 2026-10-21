@@ -202,3 +202,24 @@ Two behaviours worth knowing:
 same checks `bun run kitchen-sink` runs against the broker. If the two ever
 disagree, one of the two implementations of the binding ops has drifted, which
 is the whole risk of having a second one.
+
+## Emitting the source without compiling
+
+`sproutboat build --standalone --emit-only` runs the standalone build up to and
+including the module Porffor would compile, then stops and prints its path:
+
+```sh
+sproutboat build --standalone --emit-only
+# .sproutboat/porffor-units/linux-x86_64-embedded-release/sprout.generated.js
+```
+
+The file is byte for byte what a full `--standalone` build writes at the same
+path: prelude, embedded transport, bindings and the bundled handler. Every check
+that fails a build still fails this one, with the same message and exit code
+(unsupported Node, Bun or Deno APIs, a handler without a default export, service
+bindings, missing or oversized assets). Nothing native is acquired or compiled:
+no Zig, SQLite, BearSSL, Porffor or uWebSockets, and no binary is written. It
+suits tooling that inspects the wrapped source and never runs the binary.
+
+One exception to byte identity: a project with a `version_metadata` binding
+bakes the build time in, so two builds of it never match, emitted or not.

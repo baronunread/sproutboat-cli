@@ -97,10 +97,10 @@ export const COMMANDS: readonly Command[] = [
     name: "build",
     group: "Develop",
     emoji: "🔨",
-    args: "[project-dir] [--target host] [--standalone]",
+    args: "[project-dir] [--target host] [--standalone] [--emit-only]",
     brief: "[project-dir]",
     summary:
-      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process.",
+      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally — not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process. `--emit-only` stops after writing `.sproutboat/porffor-units/<shape>/sprout.generated.js`, the module Porffor would compile, and prints its path: every check still runs, nothing is compiled.",
   },
   {
     name: "toolchain",

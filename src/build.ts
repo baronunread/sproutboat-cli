@@ -111,12 +111,13 @@ async function acquireArtifactLock(artifactDir: string): Promise<string> {
 }
 
 /**
- * Cross-compile a handler into a linux-x86_64 native-fetch server binary with
- * Porffor + Zig — no Docker. The binary is not run here (the build host may not
- * be linux); the control plane starts it once on deploy and rejects it if it
- * does not come up.
+ * Everything a build derives before the native compile: bindings, assets,
+ * version metadata and the wrapped module itself. Every check that can fail a
+ * build on its source or config (a missing asset dir, oversized baked assets,
+ * a handler without a default export) runs here, so `emitGenerated` fails
+ * exactly where `buildArtifact` would.
  */
-export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
+async function prepareBuild(input: BuildInput) {
   const source = input.source ?? (await readFile(input.sourcePath));
   const sourceHash = digest(source);
   const target = input.target ?? "linux-x86_64";
@@ -220,6 +221,93 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     input.transport,
     versionMetadata,
   );
+  return {
+    sourceHash,
+    target,
+    embedded,
+    host,
+    bindings,
+    assetDir,
+    assetManifest,
+    bakedAssets,
+    builtAt,
+    versionId,
+    versionMetadata,
+    generatedSource,
+  };
+}
+
+/**
+ * Porffor caches compiled C units per entry path, so compile from one path per
+ * project and build shape: unchanged units (the uWebSockets server alone is
+ * ~1.75 s of clang) are reused instead of rebuilt, and Porffor keeps one build
+ * dir per shape instead of one per artifact. `sprout.generated.js` lives here.
+ */
+function unitDirFor(input: BuildInput): string {
+  return resolve(
+    input.projectDir,
+    ".sproutboat/porffor-units",
+    `${input.target ?? "linux-x86_64"}-${input.transport ?? "broker"}-${input.optimize ?? "release"}`,
+  );
+}
+
+/**
+ * Write the wrapped module a build would compile, at the same path, and stop.
+ *
+ * Runs every check `buildArtifact` runs before compiling, then hands
+ * `compileSprout` `emitOnly`: no Zig, SQLite, BearSSL, Porffor or uWebSockets
+ * is acquired, nothing is compiled, and no artifact directory is written.
+ */
+export async function emitGenerated(input: BuildInput): Promise<{ generatedPath: string }> {
+  const { bindings, bakedAssets, versionMetadata, generatedSource } = await prepareBuild(input);
+  const unitDir = unitDirFor(input);
+  const generatedPath = input.generatedPath ?? resolve(unitDir, "sprout.generated.js");
+  // Same lock as a full build, so an emit never races a compile reading the file.
+  const unitLock = input.generatedPath ? null : await acquireArtifactLock(unitDir);
+  try {
+    await compileSprout({
+      sourcePath: input.sourcePath,
+      generatedPath,
+      generatedSource,
+      outPath: resolve(unitDir, "sprout"),
+      vars: input.config.vars ?? {},
+      bindings,
+      target: input.target,
+      compatibilityDate: input.config.compatibility_date,
+      transport: input.transport,
+      appName: input.config.name,
+      assets: bakedAssets,
+      optimize: input.optimize,
+      versionMetadata,
+      emitOnly: true,
+    });
+  } finally {
+    if (unitLock) await rm(unitLock, { recursive: true, force: true });
+  }
+  return { generatedPath };
+}
+
+/**
+ * Cross-compile a handler into a linux-x86_64 native-fetch server binary with
+ * Porffor + Zig — no Docker. The binary is not run here (the build host may not
+ * be linux); the control plane starts it once on deploy and rejects it if it
+ * does not come up.
+ */
+export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
+  const {
+    sourceHash,
+    target,
+    embedded,
+    host,
+    bindings,
+    assetDir,
+    assetManifest,
+    bakedAssets,
+    builtAt,
+    versionId,
+    versionMetadata,
+    generatedSource,
+  } = await prepareBuild(input);
   const compileKey = digest(
     JSON.stringify({
       generatedSource,
@@ -248,15 +336,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       const [sqliteObject, tls] = embedded
         ? await Promise.all([ensureSqliteObject({ target, zigBin }), ensureBearssl({ target, zigBin })])
         : [null, null];
-      // Porffor caches compiled C units per entry path, so compile from one
-      // path per project and build shape: unchanged units (the uWebSockets
-      // server alone is ~1.75 s of clang) are reused instead of rebuilt, and
-      // Porffor keeps one build dir per shape instead of one per artifact.
-      const unitDir = resolve(
-        input.projectDir,
-        ".sproutboat/porffor-units",
-        `${input.target ?? "linux-x86_64"}-${input.transport ?? "broker"}-${input.optimize ?? "release"}`,
-      );
+      const unitDir = unitDirFor(input);
       const unitLock = input.generatedPath ? null : await acquireArtifactLock(unitDir);
       try {
         await compileSprout({
