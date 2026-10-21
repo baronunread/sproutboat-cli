@@ -34,15 +34,19 @@ jobs:
       # the first three against recorded sha256 digests and the exact compiler
       # command, the units byte for byte against freshly generated C and flags,
       # so a stale entry is rebuilt rather than trusted. Every binary is still
-      # compiled and linked from scratch. The key carries the runner image (the
-      # system clang that wrote the LTO objects) and the toolchain version.
+      # compiled and linked from scratch. The key carries the toolchain version
+      # and the host C/C++ compiler's version, since the units are LTO objects
+      # only that compiler can link. Not the runner image version: the
+      # ubuntu-latest pool serves several images at once, and keying on it
+      # missed the cache on a rerun of the same commit.
       - name: Compute the toolchain cache key
         id: cache-key
         shell: bash
         run: |
           toolchain="$(grep -oE '"@sproutboat/toolchain@[^"]+"' bun.lock | head -1 | tr -d '"')"
           test -n "$toolchain"
-          echo "prefix=toolchain-v1-${{ runner.os }}-${{ runner.arch }}-${ImageOS}-${ImageVersion}-${toolchain}-" >> "$GITHUB_OUTPUT"
+          compiler="$({ cc --version; c++ --version; } | sha256sum | cut -c1-16)"
+          echo "prefix=toolchain-v2-${{ runner.os }}-${{ runner.arch }}-${toolchain}-cc${compiler}-" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
         with:
           path: |
