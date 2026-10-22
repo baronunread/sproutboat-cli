@@ -10,6 +10,8 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.22.0] - 2026-10-22
+
 ### Added
 
 - `sproutboat build --standalone --emit-only` writes
@@ -30,6 +32,12 @@ maintained going forward by the `release` skill.
   works at every date. `bun run examples` now also builds the d1 example at
   `2026-10-22` (`d1@2026-10-22`), so an example that only works before that
   date fails the run.
+
+### Changed
+
+- `@sproutboat/toolchain` 0.12.1: heap-backed BigInts stay alive through
+  conservative garbage collection, which fixes crashes and wrong checksums in
+  BigInt-heavy code such as CRC64 and LTX encoding. `@sproutboat/wire` 0.14.1.
 
 ## [0.21.0] - 2026-10-21
 
