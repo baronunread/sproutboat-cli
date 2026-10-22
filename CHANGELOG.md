@@ -10,6 +10,19 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.23.0] - 2026-10-22
+
+### Added
+
+- Experimental local backup of a D1 database to LTX files, in standalone
+  binaries (`@sproutboat/runtime` 0.22.0). It's off by default. To turn it on, set
+  the compatibility date to `2026-10-22` or later, `SB_LTX_ENABLE=1`, and
+  `SB_LTX_DATABASE=<binding>`. Every committed transaction is then written to a
+  durable LTX file, and the app resumes from the last one after a restart.
+  - Only one process may write to the database.
+  - Files stay on local disk; uploading them is not part of this release.
+  - See the runtime's `LTX_REPLICATION.md` for limits and recovery behaviour.
+
 ## [0.22.0] - 2026-10-22
 
 ### Added
