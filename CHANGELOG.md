@@ -10,6 +10,40 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.24.0] - 2026-10-22
+
+### Changed
+
+- `fetch(Request)`, `fetch(Request, init)` and `new Request(request, init)` behave
+  as in workerd from compatibility date `2026-10-23` (`@sproutboat/runtime` 0.23.0,
+  `@sproutboat/toolchain` 0.13.0). This covers outgoing `fetch()`, service
+  bindings and Durable Object stubs.
+  - The Request's method, headers, body, redirect mode and signal apply unless
+    `init` replaces them.
+  - A body can be used only once: sending or copying a used Request throws.
+  - GET and HEAD refuse a body, and an incoming GET has `request.body === null`.
+  - Unknown methods, `CONNECT` and `redirect: "error"` throw, as in workerd.
+  - The headers of incoming requests, fetched responses and
+    `Response.redirect()` are immutable. Copy them to change them.
+
+  Apps with an earlier date keep the old behaviour. Move `compatibility_date` to
+  `2026-10-23` to opt in.
+
+### Fixed
+
+- These apply at every date:
+  - `Request.signal` exists, and `fetch()` aborts with a Request's signal.
+  - A `ReadableStream` body in an outgoing `fetch()` is sent as its bytes. It
+    used to go out as the text `[object ReadableStream]`.
+  - `clone()` of a Request or Response with a stream body gives both copies
+    the whole body.
+  - A copy of an incoming request keeps its raw bytes.
+
+### Added
+
+- `examples/request`, built at `2026-10-23` and checked by `bun run examples`:
+  forwarding an incoming request and the Request rules above.
+
 ## [0.23.0] - 2026-10-22
 
 ### Added
@@ -1023,7 +1057,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.23.0...v0.24.0
 [0.19.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.16.0...v0.17.0
