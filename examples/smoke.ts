@@ -19,7 +19,7 @@
  * because that needs no broker, no control plane and no ports beyond the one
  * it listens on — and it exercises the binding ops end to end all the same.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildStandalone } from "../src/standalone-build";
@@ -155,6 +155,20 @@ const EXAMPLES = {
   },
 
   d1: async (base, ok) => {
+    const created = await (await fetch(base + "/", { method: "POST", body: '{"title":"read the docs"}' })).json();
+    ok("insert returns a row id", Number(created.id) > 0, created);
+    const rows = await (await fetch(base + "/")).json();
+    ok(
+      "select returns the row",
+      rows.some((r: { title: string }) => r.title === "read the docs"),
+      rows,
+    );
+  },
+
+  // The d1 example rebuilt at compatibility date 2026-10-22, where request.body is a
+  // ReadableStream and fetch() is asynchronous. It catches an example handler that only
+  // works before that date, which no example's own config would.
+  "d1@2026-10-22": async (base, ok) => {
     const created = await (await fetch(base + "/", { method: "POST", body: '{"title":"read the docs"}' })).json();
     ok("insert returns a row id", Number(created.id) > 0, created);
     const rows = await (await fetch(base + "/")).json();
@@ -321,15 +335,22 @@ async function runExample(name: Name): Promise<Result> {
   let size = "";
   let stderr = "";
   const entry: LiveEntry = {
-    workdir: mkdtempSync(join(tmpdir(), `sb-smoke-${name}-`)),
+    workdir: mkdtempSync(join(tmpdir(), `sb-smoke-${name.replace("@", "-")}-`)),
   };
   live.add(entry);
   let stderrText: Promise<string> | undefined;
   try {
-    const dir = name.startsWith("worker-") ? join(HERE, "workers-verbatim", name.slice(7)) : join(HERE, name);
+    // "<example>@<date>" is that example built at another compatibility date, from a
+    // copy in its own temp dir so its build output never meets the plain example's.
+    const [example, compatDate] = name.split("@");
+    const source = example.startsWith("worker-")
+      ? join(HERE, "workers-verbatim", example.slice(7))
+      : join(HERE, example);
+    const dir = compatDate ? join(entry.workdir, "project") : source;
+    if (compatDate) cpSync(source, dir, { recursive: true, filter: (path) => !path.includes("/.sproutboat") });
     const parsed = parseConfig(readFileSync(join(dir, "sproutboat.jsonc"), "utf8"));
     if (!parsed.ok) throw new Error(`bad config: ${parsed.errors.join("; ")}`);
-    const config = parsed.value;
+    const config = compatDate ? { ...parsed.value, compatibility_date: compatDate } : parsed.value;
 
     const sourcePath = join(dir, config.main);
     const bundle = await bundleHandler(sourcePath, dir);

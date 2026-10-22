@@ -7,10 +7,10 @@
 // which is the point — the request does not wait for the work.
 
 export default {
-  fetch(request) {
+  async fetch(request) {
     schema();
     if (request.method === "POST") {
-      env.JOBS.send(JSON.parse(request.body || "{}"));
+      env.JOBS.send(JSON.parse((await request.text()) || "{}"));
       return new Response("queued\n", { status: 202 });
     }
     return new Response(JSON.stringify(env.DB.prepare("SELECT * FROM sent ORDER BY id").all().results), {

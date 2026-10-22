@@ -7,9 +7,9 @@
 //   curl localhost:8080/                                    # points so far
 
 export default {
-  fetch(request) {
+  async fetch(request) {
     if (request.method === "POST") {
-      const body = JSON.parse(request.body || "{}");
+      const body = JSON.parse((await request.text()) || "{}");
       env.EVENTS.writeDataPoint({ blobs: [String(body.path || "/")], doubles: [1], indexes: ["pageview"] });
       return new Response("recorded\n", { status: 202 });
     }

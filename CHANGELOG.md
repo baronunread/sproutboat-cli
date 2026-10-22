@@ -20,6 +20,17 @@ maintained going forward by the `release` skill.
   second where a full build takes tens of seconds. Without `--standalone` it
   emits the broker-transport module the same way.
 
+### Fixed
+
+- The `d1`, `queue` and `analytics` examples read the request body with
+  `await request.text()` rather than as `request.body`. From compatibility date
+  `2026-10-21`, `request.body` is a `ReadableStream`, as in Workers, so
+  `JSON.parse(request.body)` threw `SyntaxError: Unexpected token` and a D1
+  example moved to a current date answered every POST with a 500. The new form
+  works at every date. `bun run examples` now also builds the d1 example at
+  `2026-10-22` (`d1@2026-10-22`), so an example that only works before that
+  date fails the run.
+
 ## [0.21.0] - 2026-10-21
 
 ### Changed
