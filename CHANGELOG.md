@@ -10,6 +10,23 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.27.0] - 2026-10-22
+
+Built on `@sproutboat/runtime` 0.27.1.
+
+### Fixed
+
+- Bodies of megabytes no longer take hundreds of megabytes of memory. Turning
+  bytes into text and text into bytes made one string per character, so reading
+  a 5 MiB R2 object with `text()` peaked at about 400 MiB, and R2 multipart
+  uploads with real (5 MiB) parts ran sproutd's workers out of memory. On a
+  standalone build, at 5 MiB: `put()` of a string 82 to 16 MiB, `get()` and
+  `text()` 400 to 26 MiB, `request.text()` 402 to 24 MiB.
+- R2 `uploadPart()` stores an `ArrayBuffer` or a typed array as its bytes, at
+  every date. It stored the text `[object ArrayBuffer]`.
+- From compatibility date `2026-10-26`, `uploadPart()` takes what `put()` takes
+  (a `ReadableStream` or a `Blob` too) and stores text as UTF-8, as in Workers.
+
 ## [0.26.0] - 2026-10-22
 
 Built on `@sproutboat/runtime` 0.27.0 and `@sproutboat/wire` 0.16.0.
