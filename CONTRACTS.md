@@ -79,6 +79,7 @@ Ops:
 - `r2.get`
 - `r2.head`
 - `r2.list`
+- `r2.md5`
 - `r2.multipart.abort`
 - `r2.multipart.complete`
 - `r2.multipart.create`

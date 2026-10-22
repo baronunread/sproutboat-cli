@@ -10,6 +10,42 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.26.0] - 2026-10-22
+
+Built on `@sproutboat/runtime` 0.27.0 and `@sproutboat/wire` 0.16.0.
+
+### Changed
+
+- R2 behaves as in Workers from compatibility date `2026-10-26`:
+  - `get`, `put`, `head`, `delete`, `list` and `createMultipartUpload` return
+    Promises, and errors reject them.
+  - An object's `etag` is the MD5 of its bytes, with `checksums.md5`. Objects
+    written before keep their old etag.
+  - Objects have `uploaded` as a `Date`, `version`, `storageClass`, `range` and
+    `writeHttpMetadata(headers)`. A body has `body` (a `ReadableStream`),
+    `bodyUsed`, `text()`, `json()`, `arrayBuffer()` and `blob()`.
+  - `get(key, { range, onlyIf })` takes `{ offset, length }`, `{ suffix }` or a
+    `Range` header, and `etagMatches`, `etagDoesNotMatch`, `uploadedBefore`,
+    `uploadedAfter` or `If-*` headers. When the condition fails it returns the
+    object without a body.
+  - `put(key, value, { onlyIf, httpMetadata })` takes a `ReadableStream` or a
+    `Blob`, and `httpMetadata` as `Headers`. When the condition fails it returns
+    `null`.
+  - `delete([keys])` deletes several keys.
+  - `list({ prefix, limit, cursor, delimiter, include })` pages at up to 1,000
+    entries, groups keys into `delimitedPrefixes`, and returns `httpMetadata` and
+    `customMetadata` only when `include` asks for them.
+  - A value of the wrong type and a key longer than 1,024 bytes fail with R2's
+    errors.
+
+  Apps with an earlier date keep the synchronous R2. Move `compatibility_date`
+  to `2026-10-26` to opt in.
+
+### Fixed
+
+- An R2 `list()` prefix matches exactly, at every compatibility date. It used
+  SQL `LIKE`, so it ignored case and read `_` and `%` as wildcards.
+
 ## [0.25.0] - 2026-10-22
 
 Built on `@sproutboat/runtime` 0.26.0 and `@sproutboat/wire` 0.15.0.
