@@ -10,6 +10,61 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.25.0] - 2026-10-22
+
+Built on `@sproutboat/runtime` 0.26.0 and `@sproutboat/wire` 0.15.0.
+
+### Changed
+
+- KV behaves as in Workers from compatibility date `2026-10-25`:
+  - `get`, `getWithMetadata`, `put`, `delete` and `list` return Promises, and
+    errors reject them.
+  - `get(key, type)` takes `"text"`, `"json"`, `"arrayBuffer"` and `"stream"`;
+    `get([keys])` returns a `Map`.
+  - `put()` takes strings, bytes and `ReadableStream`s, with `expiration`,
+    `expirationTtl` and `metadata`; `getWithMetadata()` returns the metadata.
+  - `list({ prefix, limit, cursor })` returns each key's `expiration` and
+    `metadata`, `list_complete` and `cursor`, and pages at up to 1,000 keys.
+  - Bad keys, values, expirations, metadata and limits fail with KV's own errors.
+
+  Apps with an earlier date keep the synchronous KV. Move `compatibility_date`
+  to `2026-10-25` to opt in.
+- D1 behaves as in workerd from compatibility date `2026-10-24`:
+  - every call except `bind()` returns a Promise, and errors reject it;
+  - `meta` has D1's keys, `raw({ columnNames: true })` and `first("name")` work
+    as in D1, and `withSession()` returns a session;
+  - parameters, parameter counts and foreign keys are checked as in D1, and
+    errors read `D1_ERROR: <message>: SQLITE_<CODE>`;
+  - `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` and `RELEASE` are refused, and
+    `exec()` runs line by line, all or nothing.
+
+  Apps with an earlier date keep the synchronous D1.
+
+### Added
+
+- A storage quota for an app's data directory (KV, D1, R2, Durable Object
+  storage, queues): `SB_STORAGE_MAX_BYTES`, 10 GiB by default. Past it, writes
+  fail with an error that says so, and reads and deletes keep working. The size
+  is measured at most once a second, so the write that crosses the limit is
+  accepted. With LTX capture on, an over-quota D1 database refuses every write
+  until the app is under its quota again.
+
+### Fixed
+
+- These apply at every date:
+  - D1 bytes are no longer lost: a `Uint8Array`, `DataView` or `ArrayBuffer`
+    parameter stored NULL in a standalone sprout, with every parameter after it.
+  - A standalone sprout's D1 `batch()` is one transaction, as in D1.
+  - `meta.changes` is 0 for a statement that only reads.
+  - A KV `list()` prefix matches exactly. It used SQL `LIKE`, so `a_` also
+    listed `ab`, and `a` also listed `AB`.
+- The quota counts a D1 database's WAL file. While the app is over its quota,
+  the runtime now checkpoints and truncates the WAL before measuring again, so
+  `DELETE` then `VACUUM` is enough to get back under it.
+- LTX capture starts when a worker's filesystem sandbox allows writes only
+  under its own state directory: its scratch index file now lives in the
+  database's replication spool, not the global temporary directory.
+
 ## [0.24.0] - 2026-10-22
 
 ### Changed
