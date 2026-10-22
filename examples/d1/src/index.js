@@ -2,15 +2,19 @@
 //
 //   curl -X POST localhost:8080/ -d '{"title":"read the docs"}'
 //   curl localhost:8080/
+//
+// The request body is read with `await request.text()`. From compatibility date
+// 2026-10-21, `request.body` is a ReadableStream, as in Workers, so reading it as
+// a string (`JSON.parse(request.body)`) only works at earlier dates.
 
 export default {
-  fetch(request) {
+  async fetch(request) {
     env.DB.exec(
       "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, done INTEGER DEFAULT 0)",
     );
 
     if (request.method === "POST") {
-      const { title } = JSON.parse(request.body || "{}");
+      const { title } = JSON.parse((await request.text()) || "{}");
       const res = env.DB.prepare("INSERT INTO todos (title) VALUES (?)")
         .bind(String(title || "untitled"))
         .run();
