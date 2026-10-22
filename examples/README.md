@@ -12,6 +12,7 @@ Small enough to read in a sitting. Every handler here is the same code that runs
 | [`cron`](cron) | Cron Triggers | `scheduled()` on a `*/1 * * * *` expression |
 | [`durable-object`](durable-object) | Durable Objects | one instance per name, its own storage, an alarm |
 | [`assets`](assets) | Static assets | files from a directory, with `/api/*` kept for the handler |
+| [`request`](request) | — | `new Request(request, init)` as in Workers (compatibility date `2026-10-23`) |
 
 Two larger ones:
 

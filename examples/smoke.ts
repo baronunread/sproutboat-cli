@@ -230,6 +230,38 @@ const EXAMPLES = {
     );
   },
 
+  // Request semantics from compatibility date 2026-10-23, as workerd has them.
+  request: async (base, ok) => {
+    const forwarded = await (
+      await fetch(base + "/forward", { method: "POST", headers: { "x-from": "client" }, body: "hi é" })
+    ).json();
+    ok(
+      "a copy of the incoming request keeps its method, headers and body",
+      JSON.stringify(forwarded) ===
+        JSON.stringify({
+          url: "https://upstream.example/echo",
+          method: "POST",
+          from: "client",
+          body: "hi é",
+          incomingUsed: true,
+        }),
+      forwarded,
+    );
+    const rules = await (await fetch(base + "/rules")).json();
+    ok(
+      "init merges, clone() tees, a used body cannot be copied, GET refuses a body, incoming headers are immutable",
+      JSON.stringify(rules) ===
+        JSON.stringify({
+          merged: ["PUT", [["x-b", "2"]], "abc", "abc"],
+          originalUsed: true,
+          copyUsed: "TypeError: Cannot reconstruct a Request with a used body.",
+          getWithBody: "TypeError: Request with a GET or HEAD method cannot have a body.",
+          immutable: "TypeError: Can't modify immutable headers.",
+        }),
+      rules,
+    );
+  },
+
   "outbound-fetch": async (base, ok) => {
     ok("fetches a public host", (await text(base + "/")).startsWith("example.com answered with 200"));
     ok("refuses a private address", (await fetch(base + "/blocked")).status === 403);
