@@ -12,7 +12,7 @@ maintained going forward by the `release` skill.
 
 ## [0.30.0] - 2026-10-23
 
-Built on `@sproutboat/runtime` 0.29.0, `@sproutboat/toolchain` 0.15.0 and
+Built on `@sproutboat/runtime` 0.29.1, `@sproutboat/toolchain` 0.15.0 and
 `@sproutboat/wire` 0.18.0.
 
 ### Fixed
@@ -32,7 +32,9 @@ Built on `@sproutboat/runtime` 0.29.0, `@sproutboat/toolchain` 0.15.0 and
     concurrency. Ten concurrent increments used to end at 1.
   - Storage methods return Promises, and `transaction()` and `sync()` are
     available.
-  - Values keep their type: Date, Map, Set, bytes, BigInt and more.
+  - Values keep their type: Date, Map, Set, RegExp, BigInt, `Uint8Array`,
+    `DataView`, `ArrayBuffer` and more. Other typed arrays throw a DataCloneError
+    in `put()`, for now: store their bytes in a `Uint8Array`.
     `put(key, undefined)` throws, as on Workers.
   - `list()` takes `start`, `startAfter`, `end` and `reverse`.
   - `deleteAll()` also removes the alarm.
