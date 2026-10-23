@@ -10,6 +10,27 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.29.0] - 2026-10-23
+
+Built on `@sproutboat/runtime` 0.28.0, `@sproutboat/toolchain` 0.15.0 and
+`@sproutboat/wire` 0.17.0.
+
+### Added
+
+- Offline restore of a captured D1 database, inside the app's own executable.
+  `sproutboat build --standalone --with-restore` adds an `ltx-restore` command:
+  `./my-app ltx-restore --generation DIR --output NEW_DB [--txid N]` rebuilds a
+  SQLite database from one generation of LTX files written by native capture.
+  The target needs no Node, Bun or SQLite CLI. The restore checks every
+  checksum and TXID in the chain, then runs SQLite's integrity check on the
+  result. It refuses to run while capture is still writing, and never
+  overwrites an existing file or touches the destination's `-wal`/`-shm`
+  sidecars. On success it prints the TXID, checksum and size as JSON. See
+  `docs/native-ltx-restore.md`.
+- The restore code is compiled separately from the app and runs before any app
+  code starts. Builds without `--with-restore` are unchanged, and there an
+  `ltx-restore` argument does nothing.
+
 ## [0.28.0] - 2026-10-23
 
 Built on `@sproutboat/runtime` 0.28.0, `@sproutboat/toolchain` 0.14.0 and
