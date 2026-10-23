@@ -25,10 +25,12 @@ can make shared Worker code easier to reuse.
 
 ## Choosing a part size
 
-The default inbound request-body limit is 1 MiB. Use 512 KiB to 900 KiB parts
-when each part arrives in its own HTTP request, leaving room for application
-framing. Raising `SB_REQUEST_BODY_MAX` also raises the amount one request can
-make the process allocate, so small parts are the safer default.
+From compatibility date `2026-10-27` request bodies stream and the default
+inbound limit is 100 MiB: a handler can read a part of R2's usual 5 MiB or
+more from `request.body` as it arrives. Before that date the limit is 1 MiB and
+the body is held whole, so use 512 KiB to 900 KiB parts when each part arrives
+in its own HTTP request; raising `SB_REQUEST_BODY_MAX` there raises what one
+request can make the process allocate.
 
 Part numbers range from 1 to 10,000. Supply the returned `{ partNumber, etag }`
 records to `complete()` in ascending order. Every part except the last must

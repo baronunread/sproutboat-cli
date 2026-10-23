@@ -1,0 +1,8 @@
+{
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "upload",
+  "main": "src/index.js",
+  // From 2026-10-27 request bodies stream: the handler reads an upload as it arrives,
+  // so a large one never sits in memory whole.
+  "compatibility_date": "2026-10-27",
+}
