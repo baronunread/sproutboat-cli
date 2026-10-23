@@ -25,3 +25,12 @@ to its upstream source.
 The complete Apache-2.0 notice for uWebSockets and uSockets is retained in the
 embedded source archive. Porffor and BearSSL retain their MIT notices in the
 source archives acquired at the revisions above.
+
+## Optional native LTX restore
+
+The trusted restore codec is adapted from `platformatic/sqlite-js-stream` at
+`a5b830d5f1e408c54a04285c2199019b40154c25` (Apache-2.0), with streaming/checksum
+and native integration changes by OpenAI Codex (GPT-6.1). See
+`vendor/ltx-restore/LICENSE` and `NOTICE` for Platformatic, Litestream and LTX
+attribution. LZ4JS 0.2.0 declares the ISC license in its retained package metadata under
+`vendor/ltx-restore/lz4js/`.

@@ -1,0 +1,32 @@
+sqlite-js-stream
+Copyright Platformatic
+
+This product is a port of Litestream:
+
+  Litestream
+  https://github.com/benbjohnson/litestream
+  Copyright 2018-2025 Ben Johnson
+  Licensed under the Apache License, Version 2.0.
+
+The LTX file format and related design are derived from:
+
+  ltx (superfly) - https://github.com/superfly/ltx
+  Copyright the ltx authors
+  Licensed under the Apache License, Version 2.0.
+
+This product includes adaptations of documentation from the litestream repository
+(docs/ARCHITECTURE.md, docs/SQLITE_INTERNALS.md, docs/LTX_FORMAT.md, docs/PATTERNS.md),
+used under the Apache License, Version 2.0, with attribution.
+
+Portions of the WAL / LTX format descriptions are based on the SQLite documentation
+(https://www.sqlite.org/wal.html), which is in the public domain.
+
+Workspace modifications to ltx/crc64.ts include the two-word CRC reference loop
+and an optional bridge to Sproutboat's existing native capture CRC kernel.
+The bridge is prototype code by OpenAI Codex (GPT-6.1), not an upstream API.
+
+Native restore adaptation in Sproutboat CLI:
+- Streaming reader and bounded decoder, checksum and native bytes ABI integration.
+- Separate trusted startup/controller and publication checks.
+AI assistance: OpenAI Codex (GPT-6.1).
+Upstream snapshot: platformatic/sqlite-js-stream a5b830d5f1e408c54a04285c2199019b40154c25.

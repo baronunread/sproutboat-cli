@@ -1,0 +1,120 @@
+// Trusted offline controller. Called only by the native restore startup unit.
+export function restoreControl(op: string, first: string, second: string): string {
+  let result = '';
+  Porffor.c`
+    const char *ov, *av, *bv; size_t on, an, bn; char *oo = 0, *ao = 0, *bo = 0;
+    porf_native_fetch_read_value(op, &ov, &on, &oo);
+    porf_native_fetch_read_value(first, &av, &an, &ao);
+    porf_native_fetch_read_value(second, &bv, &bn, &bo);
+    char a[4096], b[4096], out[8192] = "ERROR: restore operation failed";
+    static int owner = -1;
+    static char pending[4096] = "";
+    if (an >= sizeof(a) || bn >= sizeof(b) || memchr(av, 0, an) || memchr(bv, 0, bn)) {
+      snprintf(out, sizeof(out), "ERROR: invalid restore path");
+    } else {
+      memcpy(a, av, an); a[an] = 0; memcpy(b, bv, bn); b[bn] = 0;
+      if (on && ov[0] == 's') {
+        char directory[4096], lockpath[4096];
+        if (!realpath(a, directory)) snprintf(out, sizeof(out), "ERROR: source generation does not exist");
+        else {
+          snprintf(lockpath, sizeof(lockpath), "%s", directory);
+          char *slash = strrchr(lockpath, '/');
+          if (slash) *slash = 0;
+          size_t n = strlen(lockpath);
+          if (n + 6 >= sizeof(lockpath)) snprintf(out, sizeof(out), "ERROR: source path too long");
+          else {
+            memcpy(lockpath + n, ".lock", 6);
+            owner = open(lockpath, O_RDWR | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+            int lockerr = owner < 0 && errno != ENOENT;
+            struct stat lockst;
+            if (owner >= 0 && (fstat(owner, &lockst) || !S_ISREG(lockst.st_mode) || flock(owner, LOCK_EX | LOCK_NB))) lockerr = 1;
+            if (lockerr) snprintf(out, sizeof(out), "ERROR: source capture is active or cannot be locked");
+            else {
+              DIR *dir = opendir(directory);
+              uint64_t count = 0, max = 0; int bad = !dir;
+              struct dirent *entry;
+              while (dir && (entry = readdir(dir))) {
+                size_t len = strlen(entry->d_name);
+                if (len < 4 || strcmp(entry->d_name + len - 4, ".ltx")) continue;
+                unsigned long long lo = 0, hi = 0; char canonical[64];
+                if (len != 37 || sscanf(entry->d_name, "%16llx-%16llx.ltx", &lo, &hi) != 2 || !lo || lo != hi) { bad = 1; break; }
+                snprintf(canonical, sizeof(canonical), "%016llx-%016llx.ltx", lo, hi);
+                if (strcmp(canonical, entry->d_name)) { bad = 1; break; }
+                count++; if (hi > max) max = hi;
+              }
+              if (dir) closedir(dir);
+              if (bad || !count || count != max) snprintf(out, sizeof(out), "ERROR: expected one complete contiguous capture generation");
+              else snprintf(out, sizeof(out), "%llu", (unsigned long long)count);
+            }
+          }
+        }
+      } else if (on && ov[0] == 't') {
+        struct stat st; int bad = 0; char path[4096];
+        const char *suffixes[] = {"", "-wal", "-shm", "-journal"};
+        for (int i = 0; i < 4; i++) {
+          if (snprintf(path, sizeof(path), "%s%s", a, suffixes[i]) >= sizeof(path)) { bad = 1; break; }
+          if (!lstat(path, &st) || errno != ENOENT) { bad = 1; break; }
+        }
+        if (bad) snprintf(out, sizeof(out), "ERROR: output or SQLite sidecar already exists");
+        else if (snprintf(path, sizeof(path), "%s.restore-XXXXXX", a) >= sizeof(path)) snprintf(out, sizeof(out), "ERROR: output path too long");
+        else {
+          int fd = mkstemp(path);
+          if (fd >= 0) { close(fd); snprintf(pending, sizeof(pending), "%s", path); snprintf(out, sizeof(out), "%s", path); }
+          else snprintf(out, sizeof(out), "ERROR: cannot create temporary output");
+        }
+      } else if (on && ov[0] == 'i') {
+        // Immutable is safe here: the privately owned temporary database is closed for writing.
+        char uri[12320]; size_t p = 5; memcpy(uri, "file:", 5);
+        for (size_t i = 0; i < an; i++) {
+          unsigned char c = (unsigned char)a[i];
+          if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '/' || c == '_' || c == '-' || c == '.') uri[p++] = c;
+          else { snprintf(uri + p, 4, "%%%02X", c); p += 3; }
+        }
+        memcpy(uri + p, "?immutable=1", 13);
+        sqlite3 *db = 0; sqlite3_stmt *stmt = 0; int ok = 0;
+        if (!sqlite3_open_v2(uri, &db, 1 | 0x40 | 0x8000, 0) &&
+            !sqlite3_exec(db, "PRAGMA cache_size=-1024; PRAGMA mmap_size=0; PRAGMA temp_store=FILE", 0, 0, 0) &&
+            !sqlite3_prepare_v2(db, "PRAGMA integrity_check(1)", -1, &stmt, 0) && sqlite3_step(stmt) == 100) {
+          const unsigned char *text = sqlite3_column_text(stmt, 0);
+          ok = text && !strcmp((const char*)text, "ok") && sqlite3_step(stmt) == 101;
+        }
+        if (stmt) sqlite3_finalize(stmt);
+        if (db) sqlite3_close(db);
+        snprintf(out, sizeof(out), "%s", ok ? "ok" : "ERROR: restored database failed integrity_check");
+      } else if (on && ov[0] == 'p') {
+        struct stat st; int bad = 0; char path[4096];
+        const char *suffixes[] = {"", "-wal", "-shm", "-journal"};
+        for (int i = 0; i < 4; i++) {
+          if (snprintf(path, sizeof(path), "%s%s", b, suffixes[i]) >= sizeof(path) || !lstat(path, &st) || errno != ENOENT) { bad = 1; break; }
+        }
+        snprintf(path, sizeof(path), "%s", b);
+        char *slash = strrchr(path, '/');
+        if (slash) { if (slash == path) slash[1] = 0; else *slash = 0; }
+        else snprintf(path, sizeof(path), ".");
+        int dir = open(path, O_RDONLY | O_DIRECTORY);
+        if (bad || dir < 0 || link(a, b)) snprintf(out, sizeof(out), "ERROR: output publication refused");
+        else if (fsync(dir) || unlink(a) || fsync(dir)) snprintf(out, sizeof(out), "ERROR: publication durability failed; output may exist");
+        else { pending[0] = 0; snprintf(out, sizeof(out), "ok"); }
+        if (dir >= 0) close(dir);
+      } else if (on && ov[0] == 'u') {
+        int rc = unlink(a); snprintf(out, sizeof(out), "%s", !rc || errno == ENOENT ? "ok" : "ERROR: temporary cleanup failed");
+      } else if (on && ov[0] == 'r') {
+        if (owner >= 0) { close(owner); owner = -1; }
+        snprintf(out, sizeof(out), "ok");
+      } else if (on && ov[0] == 'q') {
+        // This startup command owns cleanup at exit, including cross-function JS throws.
+        int code = atoi(a);
+        if (pending[0] && unlink(pending) && errno != ENOENT) {
+          fprintf(stderr, "temporary cleanup failed: %s\n", pending); code = 1;
+        }
+        if (owner >= 0) close(owner);
+        if (sb_cli_restore_stdout >= 0) { dup2(sb_cli_restore_stdout, 1); close(sb_cli_restore_stdout); }
+        fprintf(code ? stderr : stdout, "%s\n", b); exit(code);
+      }
+    }
+    result = porf_box((f64)porf_native_fetch_alloc_bytestring(out, strlen(out)), 195);
+    if (oo) free(oo); if (ao) free(ao); if (bo) free(bo);
+  `;
+  if (result.startsWith('ERROR:')) throw new Error(result);
+  return result;
+}
