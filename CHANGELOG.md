@@ -10,6 +10,44 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.31.0] - 2026-10-23
+
+Built on `@sproutboat/runtime` 0.30.0, `@sproutboat/toolchain` 0.15.0 and
+`@sproutboat/wire` 0.19.0.
+
+### Added
+
+- More of Durable Objects like workerd, from compatibility date `2026-10-29`:
+  - **RPC on stubs.** In a class that extends `DurableObject` from
+    `cloudflare:workers`, `await stub.method(args)` calls the method through
+    the object's input gate.
+    - Arguments and results are copied as structured clone does, so Date, Map,
+      BigInt, `Uint8Array` and the like keep their type.
+    - A function argument becomes a callback.
+    - A getter is read with `await stub.prop`.
+    - A throw rejects the caller with the same error.
+  - **Ids are 64 hex digits** and have `equals()` and `name`. `idFromString`
+    rejects malformed ids and ids from another namespace.
+  - `namespace.getByName(name)`, `namespace.jurisdiction()`, and `stub.id` and
+    `stub.name`.
+  - **`ctx.storage.sql`**: each object has its own SQLite database.
+    - `exec()` returns cursors with `toArray()`, `one()`, `raw()` and iteration.
+    - `storage.transactionSync()` and `sql.databaseSize` are available.
+    - Foreign keys are enforced.
+    - `BEGIN` and `SAVEPOINT` are refused, as on Workers.
+- On the sproutd Durable Objects suite, these bring do.js from 67 to 93 of 105
+  and do-rpc.js from 1 to 17 of 17.
+
+### Changed
+
+- From `2026-10-29`, an exception thrown inside a Durable Object rejects
+  `stub.fetch()` with that error, as on Workers. It used to come back as a 500
+  response.
+- Moving an app to `2026-10-29` keeps its Durable Object data. Storage and
+  alarms of objects created with `idFromName` before that date move to the new
+  64-hex ids on first use. `idFromString` still accepts the `name:` and `uid:`
+  ids that earlier dates gave out.
+
 ## [0.30.0] - 2026-10-23
 
 Built on `@sproutboat/runtime` 0.29.1, `@sproutboat/toolchain` 0.15.0 and
@@ -1246,7 +1284,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.30.0...v0.31.0
 [0.24.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.23.0...v0.24.0
 [0.19.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.17.0...v0.18.0

@@ -62,6 +62,7 @@ Ops:
 - `do.alarm.delete`
 - `do.alarm.get`
 - `do.alarm.set`
+- `do.sql`
 - `do.storage.delete`
 - `do.storage.delete_all`
 - `do.storage.get`
