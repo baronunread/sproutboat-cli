@@ -10,6 +10,41 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.30.0] - 2026-10-23
+
+Built on `@sproutboat/runtime` 0.29.0, `@sproutboat/toolchain` 0.15.0 and
+`@sproutboat/wire` 0.18.0.
+
+### Fixed
+
+- Queues lost data in standalone executables. `sendBatch()` stored every
+  message body as the text `"[object Object]"`, and a consumer whose `queue()`
+  threw had its whole batch acked. Now the bodies arrive intact, and a throw
+  retries every message the consumer had not acked or retried, as on Workers.
+  `send()` and `sendBatch()` also honour `delaySeconds` there. These fixes
+  apply at every compatibility date.
+
+### Added
+
+- Durable Objects like workerd from compatibility date `2026-10-28`:
+  - An input gate: while a storage read is in flight, no other request or alarm
+    enters the object, so read-then-write updates are no longer lost under
+    concurrency. Ten concurrent increments used to end at 1.
+  - Storage methods return Promises, and `transaction()` and `sync()` are
+    available.
+  - Values keep their type: Date, Map, Set, bytes, BigInt and more.
+    `put(key, undefined)` throws, as on Workers.
+  - `list()` takes `start`, `startAfter`, `end` and `reverse`.
+  - `deleteAll()` also removes the alarm.
+  Earlier dates keep synchronous JSON storage.
+- From `2026-10-28`, `sendBatch(messages, { delaySeconds })` delays the whole
+  batch.
+
+### Changed
+
+- A Durable Object `list({ prefix })` matches the prefix exactly at every date.
+  `_` and `%` were wildcards, and case was ignored.
+
 ## [0.29.0] - 2026-10-23
 
 Built on `@sproutboat/runtime` 0.28.0, `@sproutboat/toolchain` 0.15.0 and
