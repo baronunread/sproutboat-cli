@@ -311,7 +311,7 @@ export const ENV_VARS: readonly EnvVar[] = [
   {
     name: "SB_REQUEST_BODY_MAX",
     purpose:
-      "Largest inbound request body the runtime accepts, in bytes (default 1048576). Anything larger is refused with 413 before the handler runs.",
+      "Largest inbound request body the runtime accepts, in bytes. From compatibility date 2026-10-27 bodies stream and the default is 104857600 (100 MiB); before it the body is held whole and the default is 1048576. A larger Content-Length is refused with 413 before the handler runs; a chunked body that grows past it closes the connection.",
   },
   {
     name: "SB_EXTRA_CFLAGS",

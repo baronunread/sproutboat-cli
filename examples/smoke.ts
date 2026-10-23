@@ -230,6 +230,26 @@ const EXAMPLES = {
     );
   },
 
+  // Streamed request bodies from compatibility date 2026-10-27.
+  upload: async (base, ok) => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        controller.enqueue(encoder.encode("first "));
+        await Bun.sleep(400);
+        controller.enqueue(new Uint8Array(8 * 1024 * 1024));
+        controller.close();
+      },
+    });
+    const init: RequestInit & { duplex: string } = { method: "POST", body, duplex: "half" };
+    const counted = await (await fetch(base + "/", init)).json();
+    ok(
+      "the handler reads the body as it arrives",
+      counted.bytes === 6 + 8 * 1024 * 1024 && counted.spreadMs > 200,
+      counted,
+    );
+  },
+
   // Request semantics from compatibility date 2026-10-23, as workerd has them.
   request: async (base, ok) => {
     const forwarded = await (

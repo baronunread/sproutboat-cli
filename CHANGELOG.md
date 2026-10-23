@@ -10,6 +10,29 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.28.0] - 2026-10-23
+
+Built on `@sproutboat/runtime` 0.28.0, `@sproutboat/toolchain` 0.14.0 and
+`@sproutboat/wire` 0.17.0.
+
+### Added
+
+- Request bodies stream from compatibility date `2026-10-27`, as in Workers.
+  The handler runs as soon as a request's headers arrive, and `request.body`
+  hands out the bytes as they come in. The server pauses the connection while
+  more than 1 MiB waits unread, so a 128 MiB upload read through the stream
+  peaks at 38 MiB. `text()`, `json()`, `arrayBuffer()` and `bytes()` still read
+  the whole body (as Promises). New example: `examples/upload`.
+- From the same date `SB_REQUEST_BODY_MAX` defaults to 100 MiB (it stays 1 MiB
+  before it, where the body is held whole). A larger `Content-Length` gets
+  `413 Payload Too Large` before the handler runs.
+- On the platform, `fetch()` and service bindings send a `ReadableStream`
+  request body as it is read, instead of reading it to the end first. A
+  streamed body can't follow a 307 or 308 redirect, as in Workers.
+
+Earlier dates are unchanged: the handler gets the whole body, and
+`request.text()` answers at once.
+
 ## [0.27.0] - 2026-10-22
 
 Built on `@sproutboat/runtime` 0.27.1.
