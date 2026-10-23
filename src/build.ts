@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { NATIVE_RESTORE_IDENTITY } from "./native-restore";
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { readAssetRules, walkAssets, type AssetManifest } from "./assets";
@@ -54,6 +55,8 @@ export type BuildInput = {
   outputDirectory?: string;
   /** Stable compiler input used only by the local dev loop. */
   generatedPath?: string;
+  /** Include trusted offline restore startup in a standalone executable. */
+  withRestore?: boolean;
 };
 
 export type BuildOutput = {
@@ -79,7 +82,7 @@ async function integrationIdentity(): Promise<string> {
     const executable = await stat(process.execPath);
     return `release:${cliVersion}:${executable.size}:${executable.mtimeMs}`;
   }
-  const files = ["build.ts", "compile.ts", "sqlite.ts", "bearssl.ts", "toolchain.ts"].map((file) =>
+  const files = ["build.ts", "compile.ts", "sqlite.ts", "bearssl.ts", "toolchain.ts", "native-restore.ts"].map((file) =>
     resolve(import.meta.dir, file),
   );
   // Hash the patch implementation and its local modules so a Unicode patch
@@ -118,6 +121,10 @@ async function acquireArtifactLock(artifactDir: string): Promise<string> {
  * exactly where `buildArtifact` would.
  */
 async function prepareBuild(input: BuildInput) {
+  if (input.withRestore && input.reuseSproutPath)
+    throw new Error("--with-restore cannot reuse a previously compiled sprout");
+  if (input.withRestore && input.transport !== "embedded")
+    throw new Error("--with-restore is available only with --standalone");
   const source = input.source ?? (await readFile(input.sourcePath));
   const sourceHash = digest(source);
   const target = input.target ?? "linux-x86_64";
@@ -247,7 +254,7 @@ function unitDirFor(input: BuildInput): string {
   return resolve(
     input.projectDir,
     ".sproutboat/porffor-units",
-    `${input.target ?? "linux-x86_64"}-${input.transport ?? "broker"}-${input.optimize ?? "release"}`,
+    `${input.target ?? "linux-x86_64"}-${input.transport ?? "broker"}-${input.optimize ?? "release"}${input.withRestore ? "-restore" : ""}`,
   );
 }
 
@@ -280,6 +287,7 @@ export async function emitGenerated(input: BuildInput): Promise<{ generatedPath:
       optimize: input.optimize,
       versionMetadata,
       emitOnly: true,
+      withRestore: input.withRestore,
     });
   } finally {
     if (unitLock) await rm(unitLock, { recursive: true, force: true });
@@ -318,6 +326,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       porffor: [PORFFOR_COMMIT_FULL, PORFFOR_ARCHIVE_SHA256],
       native: embedded ? [sqliteStamp(), bearsslStamp()] : [],
       integration: await integrationIdentity(),
+      nativeRestore: input.withRestore ? NATIVE_RESTORE_IDENTITY : null,
     }),
   ).slice("sha256:".length);
   const artifactId = versionMetadata
@@ -356,6 +365,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
           extraCflags: tls ? ["-I", tls.includeDir] : [],
           optimize: input.optimize,
           versionMetadata,
+          withRestore: input.withRestore,
         });
       } finally {
         if (unitLock) await rm(unitLock, { recursive: true, force: true });

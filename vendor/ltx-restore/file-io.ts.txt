@@ -1,0 +1,54 @@
+import { ByteReader } from './ltx/byte-reader.ts';
+
+// Explicit build-only ABI. The toolchain validates buffers, paths and offsets.
+declare function __Porffor_sproutboat_file_ctl_v1(operation: number, path: string, fd: number, position: number): number;
+declare function __Porffor_sproutboat_file_io_v1(operation: number, fd: number, data: Uint8Array, offset: number, length: number, position: number): number;
+
+export class FileSink {
+  fd: number;
+  pos = 0;
+  constructor(path: string) {
+    this.fd = __Porffor_sproutboat_file_ctl_v1(1, path, 0, 0);
+    if (this.fd < 0) throw new Error('cannot open output');
+  }
+  write(data: Uint8Array): void {
+    if (__Porffor_sproutboat_file_io_v1(1, this.fd, data, 0, data.length, this.pos) !== data.length) throw new Error('short file write');
+    this.pos += data.length;
+  }
+  sync(): void { if (__Porffor_sproutboat_file_ctl_v1(4, '', this.fd, 0) !== 0) throw new Error('fsync failed'); }
+  readAt(data: Uint8Array, offset: number): void {
+    if (__Porffor_sproutboat_file_io_v1(0, this.fd, data, 0, data.length, offset) !== data.length) throw new Error('short output read');
+  }
+  writeAt(data: Uint8Array, offset: number): void {
+    if (__Porffor_sproutboat_file_io_v1(1, this.fd, data, 0, data.length, offset) !== data.length) throw new Error('short output write');
+  }
+  truncate(size: number): void {
+    if (__Porffor_sproutboat_file_ctl_v1(5, '', this.fd, size) !== 0) throw new Error('truncate failed');
+    this.pos = size;
+  }
+  close(): void { if (this.fd >= 0) { __Porffor_sproutboat_file_ctl_v1(3, '', this.fd, 0); this.fd = -1; } }
+}
+
+export class FileReader extends ByteReader {
+  fd: number;
+  private size: number;
+  constructor(path: string) {
+    super(new Uint8Array(0));
+    this.fd = __Porffor_sproutboat_file_ctl_v1(0, path, 0, 0);
+    if (this.fd < 0) throw new Error('cannot open input');
+    this.size = __Porffor_sproutboat_file_ctl_v1(2, '', this.fd, 0);
+    if (this.size < 0) { this.close(); throw new Error('cannot stat input'); }
+  }
+  get length(): number { return this.size; }
+  get remaining(): number { return this.size - this.pos; }
+  slice(start: number, end: number): Uint8Array {
+    const n = end - start;
+    if (start < 0 || n < 0 || n > 131072 || end > this.size) throw new Error('invalid bounded file read');
+    const data = new Uint8Array(n);
+    if (__Porffor_sproutboat_file_io_v1(0, this.fd, data, 0, data.length, start) !== n) throw new Error('short file read');
+    return data;
+  }
+  readFull(n: number): Uint8Array { const data = this.slice(this.pos, this.pos + n); this.pos += n; return data; }
+  readByte(): number { return this.readFull(1)[0]; }
+  close(): void { if (this.fd >= 0) { __Porffor_sproutboat_file_ctl_v1(3, '', this.fd, 0); this.fd = -1; } }
+}

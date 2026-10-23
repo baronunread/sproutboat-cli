@@ -14,6 +14,7 @@ import { chmod, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/pr
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
+import { buildNativeRestore } from "./native-restore";
 import { ensureUWebSockets, ensureUWebSocketsHost, resolveHostCompiler, UwsUnavailableError } from "./toolchain";
 import { ensurePorffor } from "./porffor-toolchain";
 // The prelude + transports live in @sproutboat/runtime (next to wrap.ts, which
@@ -100,6 +101,8 @@ export type CompileInput = {
    * binary, such as a qualification run that only inspects the source.
    */
   emitOnly?: boolean;
+  /** Trusted offline restore startup, standalone builds only. Never a tenant compiler flag. */
+  withRestore?: boolean;
 };
 
 /**
@@ -242,6 +245,8 @@ async function writeGenerated(input: CompileInput): Promise<string> {
  * the wrapper, never Porffor itself.
  */
 export async function compileSprout(input: CompileInput): Promise<void> {
+  if (input.withRestore && (input.transport !== "embedded" || input.emitOnly))
+    throw new Error("--with-restore requires a standalone native compile, without --emit-only");
   if (input.emitOnly) {
     await writeGenerated(input);
     return;
@@ -298,13 +303,30 @@ export async function compileSprout(input: CompileInput): Promise<void> {
     ? [process.execPath, "__porffor", launcher]
     : [process.execPath, resolve(import.meta.dir, "main.ts"), "__porffor", launcher];
 
+  const restoreObjects = input.withRestore
+    ? await buildNativeRestore({
+        directory: dirname(generatedPath),
+        prelude: await loadPrelude("embedded"),
+        porfforCommand: command,
+        cc: hostCompiler?.cc ?? [input.zigBin!, "cc", "-target", "x86_64-linux-musl"],
+        cxx: hostCompiler?.cxx ?? [input.zigBin!, "c++", "-target", "x86_64-linux-musl"],
+        cflags: input.extraCflags ?? [],
+        macho: input.target === "host" && process.platform === "darwin",
+      })
+    : [];
+
   const child = Bun.spawn(
     [...command, ...porfforArgs(generatedPath, input.outPath, input.target, input.optimize, hostCompiler?.usingZig)],
     {
       cwd: outDir,
       stdout: "pipe",
       stderr: "pipe",
-      env: compileEnv(path, input.extraLink, input.extraCflags, hostCompiler),
+      env: compileEnv(
+        path,
+        [...(input.extraLink ?? []), ...restoreObjects],
+        [...(input.extraCflags ?? []), ...(input.withRestore ? ["-Dmain=sb_app_main"] : [])],
+        hostCompiler,
+      ),
     },
   );
   let timedOut = false;

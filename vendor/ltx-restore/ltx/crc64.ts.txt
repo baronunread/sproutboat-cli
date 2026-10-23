@@ -1,0 +1,73 @@
+/** CRC-64 ISO, compatible with Go hash/crc64. BigInt is used only at the API boundary. */
+import { updateNativeCrc64 } from '../crc64-native.ts';
+const HI = new Uint32Array(256);
+const LO = new Uint32Array(256);
+// Prototype controls: profiling flag, elapsed milliseconds, byte count, native backend.
+export const CRC_PROFILE = new Float64Array(4);
+for (let i = 0; i < 256; i++) {
+  let hi = 0, lo = i;
+  for (let j = 0; j < 8; j++) {
+    const carry = lo & 1;
+    lo = ((lo >>> 1) | ((hi & 1) << 31)) >>> 0;
+    hi >>>= 1;
+    if (carry) hi = (hi ^ 0xd8000000) >>> 0;
+  }
+  HI[i] = hi;
+  LO[i] = lo;
+}
+
+export class Crc64 {
+  private hi = 0xffffffff;
+  private lo = 0xffffffff;
+  private native = false;
+  private nativeState = new Uint8Array(8);
+
+  constructor() {
+    this.native = CRC_PROFILE[3] === 1;
+    this.nativeState.fill(255);
+  }
+
+  update(buf: Uint8Array): void {
+    const started = CRC_PROFILE[0] ? performance.now() : 0;
+    if (this.native) {
+      updateNativeCrc64(this.nativeState, buf);
+    } else {
+      let hi = this.hi, lo = this.lo;
+      for (let i = 0; i < buf.length; i++) {
+        const t = (lo ^ buf[i]) & 0xff;
+        const nextLo = ((lo >>> 8) | (hi << 24)) >>> 0;
+        hi = (HI[t] ^ (hi >>> 8)) >>> 0;
+        lo = (LO[t] ^ nextLo) >>> 0;
+      }
+      this.hi = hi;
+      this.lo = lo;
+    }
+    if (CRC_PROFILE[0]) {
+      CRC_PROFILE[1] += performance.now() - started;
+      CRC_PROFILE[2] += buf.length;
+    }
+  }
+
+  reset(): void {
+    this.hi = 0xffffffff;
+    this.lo = 0xffffffff;
+    this.nativeState.fill(255);
+  }
+
+  sum64(): bigint {
+    if (this.native) {
+      const s = this.nativeState;
+      const hi = (s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3]) >>> 0;
+      const lo = (s[4] << 24 | s[5] << 16 | s[6] << 8 | s[7]) >>> 0;
+      return (BigInt((hi ^ 0xffffffff) >>> 0) << 32n) | BigInt((lo ^ 0xffffffff) >>> 0);
+    }
+    return (BigInt((this.hi ^ 0xffffffff) >>> 0) << 32n) |
+      BigInt((this.lo ^ 0xffffffff) >>> 0);
+  }
+}
+
+export function crc64ISO(buf: Uint8Array): bigint {
+  const h = new Crc64();
+  h.update(buf);
+  return h.sum64();
+}

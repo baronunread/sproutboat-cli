@@ -1,0 +1,96 @@
+import { Decoder } from './ltx/decoder.ts';
+import { ChecksumFlag, lockPgno } from './ltx/constants.ts';
+import { checksumPageWithHasher } from './ltx/checksum.ts';
+import { Crc64, CRC_PROFILE } from './ltx/crc64.ts';
+import { FileReader, FileSink } from './file-io.ts';
+import { restoreControl } from './restore-native.ts';
+declare function __sbEnv(name: string): string;
+
+// Only the immutable, single-TXID files emitted by the native capture writer are accepted.
+// A copied generation or a stopped writer is required. Never restore over an existing DB.
+export function restoreGeneration(source: string, output: string, target: string): string {
+  let temporary = '';
+  let sink: FileSink | null = null;
+  try {
+    const available = BigInt(restoreControl('scan', source, ''));
+    const last = target ? BigInt(target) : available;
+    if (last < 1n || last > available) throw new Error('requested TXID is outside this generation');
+    temporary = restoreControl('temp', output, '');
+    sink = new FileSink(temporary);
+    let checksum = ChecksumFlag, pageSize = 0, pages = 0;
+    const hash = new Crc64();
+    for (let txid = 1n; txid <= last; txid++) {
+      const hex = txid.toString(16).padStart(16, '0');
+      const input = new FileReader(source + '/' + hex + '-' + hex + '.ltx');
+      try {
+        const decoder = new Decoder(new Uint8Array(0));
+        decoder.setReader(input); decoder.setRetainPageIndex(false); decoder.decodeHeader();
+        const h = decoder.Header();
+        if (h.flags !== 0 || h.minTXID !== txid || h.maxTXID !== txid ||
+            h.preApplyChecksum !== (txid === 1n ? 0n : checksum) ||
+            (pageSize !== 0 && h.pageSize !== pageSize)) throw new Error('LTX chain continuity failed');
+        pageSize = h.pageSize;
+        const lock = lockPgno(pageSize), data = new Uint8Array(pageSize), old = new Uint8Array(pageSize);
+        for (let pgno = h.commit + 1; pgno <= pages; pgno++) {
+          if (pgno === lock) continue;
+          sink.readAt(old, (pgno - 1) * pageSize);
+          checksum = ChecksumFlag | (checksum ^ checksumPageWithHasher(hash, pgno, old));
+        }
+        let previous = 0, growth = pages + 1;
+        for (;;) {
+          const ph = decoder.decodePage(data);
+          if (!ph) break;
+          const pgno = ph.pgno;
+          if (pgno <= previous || pgno === lock || ph.flags !== 1) throw new Error('invalid LTX page order or flags');
+          previous = pgno;
+          if (pgno <= pages) {
+            sink.readAt(old, (pgno - 1) * pageSize);
+            checksum = ChecksumFlag | (checksum ^ checksumPageWithHasher(hash, pgno, old));
+          } else {
+            if (growth === lock) growth++;
+            if (pgno !== growth) throw new Error('missing newly allocated page');
+            growth++;
+          }
+          checksum = ChecksumFlag | (checksum ^ checksumPageWithHasher(hash, pgno, data));
+          sink.writeAt(data, (pgno - 1) * pageSize);
+        }
+        if (growth === lock) growth++;
+        if (h.commit > pages && growth !== h.commit + 1) throw new Error('incomplete database growth');
+        decoder.close();
+        if (checksum !== decoder.Trailer().postApplyChecksum) throw new Error('database checksum mismatch');
+        pages = h.commit; sink.truncate(pages * pageSize);
+      } finally { input.close(); }
+    }
+    // Verify physical output once, independent of incremental checksum accounting.
+    let physical = ChecksumFlag;
+    const page = new Uint8Array(pageSize);
+    for (let pgno = 1; pgno <= pages; pgno++) {
+      if (pgno === lockPgno(pageSize)) continue;
+      sink.readAt(page, (pgno - 1) * pageSize);
+      physical = ChecksumFlag | (physical ^ checksumPageWithHasher(hash, pgno, page));
+    }
+    if (physical !== checksum) throw new Error('physical database checksum mismatch');
+    sink.sync(); sink.close(); sink = null;
+    restoreControl('integrity', temporary, '');
+    restoreControl('publish', temporary, output);
+    temporary = '';
+    const result = { txid: last.toString(), checksum: checksum.toString(16), bytes: pages * pageSize };
+    if (CRC_PROFILE[0]) {
+      result.crcMs = CRC_PROFILE[1];
+      result.crcBytes = CRC_PROFILE[2];
+    }
+    return JSON.stringify(result);
+  } finally {
+    if (sink) sink.close();
+    try { if (temporary) restoreControl('unlink', temporary, ''); }
+    finally { restoreControl('release', '', ''); }
+  }
+}
+
+export function restoreStartup(): void {
+  try {
+    CRC_PROFILE[3] = 1;
+    const result = restoreGeneration(__sbEnv('SB_LTX_RESTORE_GENERATION'), __sbEnv('SB_LTX_RESTORE_OUTPUT'), __sbEnv('SB_LTX_RESTORE_TXID'));
+    restoreControl('quit', '0', result);
+  } catch (error) { restoreControl('quit', '1', String(error)); }
+}

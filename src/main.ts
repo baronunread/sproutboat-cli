@@ -335,7 +335,11 @@ async function build(directory?: string, target: "linux-x86_64" | "host" = "linu
  * *this* machine either way in phase 0 — cross-compiling both halves comes with
  * the embedded backend, which removes the launcher entirely.
  */
-async function buildStandaloneBinary(directory: string | undefined, target: "linux-x86_64" | "host") {
+async function buildStandaloneBinary(
+  directory: string | undefined,
+  target: "linux-x86_64" | "host",
+  withRestore = false,
+) {
   const project = await readProject(directory);
   console.log(dim(`Building a standalone ${project.config.name} (${target})…`));
   try {
@@ -345,6 +349,7 @@ async function buildStandaloneBinary(directory: string | undefined, target: "lin
       sourcePath: project.sourcePath,
       source: project.bundle.code,
       target,
+      withRestore,
     });
     console.log(ok(`built ${result.outPath} (${(result.bytes / 1_000_000).toFixed(1)} MB)`));
     console.log(dim(`  run it: ${result.outPath}   ·   state lands in ./${project.config.name}.data`));
@@ -1339,11 +1344,17 @@ switch (command) {
     await dev(args);
     break;
   case "build": {
+    const withRestore = args.includes("--with-restore");
+    if (withRestore && (!args.includes("--standalone") || args.includes("--emit-only")))
+      usageError(
+        "--with-restore requires --standalone without --emit-only",
+        "build --standalone --with-restore [--target host] [project-dir]",
+      );
     const hostBuild = args.includes("--target") && args[args.indexOf("--target") + 1] === "host";
     const directory = args.find((arg) => !arg.startsWith("--") && arg !== "host");
     const target = hostBuild ? "host" : "linux-x86_64";
     if (args.includes("--emit-only")) await emitOnly(directory, target, args.includes("--standalone"));
-    else if (args.includes("--standalone")) await buildStandaloneBinary(directory, target);
+    else if (args.includes("--standalone")) await buildStandaloneBinary(directory, target, withRestore);
     else await build(directory, target);
     break;
   }

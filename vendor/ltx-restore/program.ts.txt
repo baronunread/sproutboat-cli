@@ -1,0 +1,3 @@
+import { restoreStartup } from './restore.ts';
+restoreStartup();
+export default { fetch() { throw new Error('restore startup must exit'); } };

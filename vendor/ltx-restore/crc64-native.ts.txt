@@ -1,0 +1,7 @@
+declare function __Porffor_sproutboat_crc64_v1(state: Uint8Array, data: Uint8Array, offset: number, length: number): void;
+
+// The compiler owns the versioned view validation and CRC boundary.
+// Only the trusted restore build enables --sb-native-bytes-v1.
+export function updateNativeCrc64(state: Uint8Array, data: Uint8Array): void {
+  __Porffor_sproutboat_crc64_v1(state, data, 0, data.length);
+}
