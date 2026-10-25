@@ -12,7 +12,7 @@ maintained going forward by the `release` skill.
 
 ## [0.32.0] - 2026-10-25
 
-Built on `@sproutboat/runtime` 0.31.0, `@sproutboat/toolchain` 0.16.0 and
+Built on `@sproutboat/runtime` 0.31.0, `@sproutboat/toolchain` 0.16.1 and
 `@sproutboat/wire` 0.19.1.
 
 ### Added
@@ -41,6 +41,10 @@ Built on `@sproutboat/runtime` 0.31.0, `@sproutboat/toolchain` 0.16.0 and
 - Smaller idle sprouts: once a sprout goes quiet, the idle collection returns
   all of its freed heap to the OS, not only runs of 256 KiB or more. Compiled
   apps get a new toolchain fingerprint, so they rebuild once.
+- Faster allocation-heavy handlers: a collection after a request keeps 16 MiB
+  of heap above its top, as plain Porffor does, instead of unmapping it. The
+  idle collection still trims it. On othello, `regex-scan` took about 3,600 page
+  faults and 17 ms more per request before this.
 
 ## [0.31.0] - 2026-10-23
 
