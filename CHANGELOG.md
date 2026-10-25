@@ -10,6 +10,37 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.33.0] - 2026-10-25
+
+Built on `@sproutboat/runtime` 0.32.0, `@sproutboat/wire` 0.20.0 and
+`@sproutboat/config` 0.6.0.
+
+### Added
+
+- **Queue names and consumer settings.** A `queues` entry may be
+  `{ "binding": "JOBS", "queue": "jobs", "max_batch_size": 10, "max_batch_timeout": 1,
+  "max_retries": 3, "retry_delay": 0, "dead_letter_queue": "failed" }`. The settings
+  are named as in wrangler's `queues.consumers`, and `id` is optional there. `batch.queue`
+  is the queue's name. The build bakes the settings into `bindings.json` as `queueConfig`,
+  and `deploy` pins a provisioned id into such an object. These apply at every compatibility
+  date.
+- **Queues like Cloudflare's from compatibility date 2026-10-31.**
+  - `send()` and `sendBatch()` return Promises of the queue's backlog, and `metrics()` is new.
+  - Bodies keep their content type (`json`, `text`, `bytes`, `v8`).
+  - Arguments are checked with workerd's errors.
+  - Messages carry `timestamp` as a Date of when they were sent, and `retry({ delaySeconds })`.
+  - The first of `ack()` and `retry()` wins.
+  - By default a retry is immediate, with at most 3 retries before the message is dropped or
+    sent to the dead letter queue.
+  - Queues conformance: 17/46 before, 41/46 after, standalone and through `sproutboat dev`.
+    The other 5 cases follow Cloudflare's documented behaviour where miniflare differs: real
+    backlog metrics, and first call wins.
+
+### Changed
+
+- `types/sproutboat.d.ts`: the Queues types follow Workers (`QueueSendResult`,
+  `QueueMetrics`, readonly message fields, `metadata`, retry options).
+
 ## [0.32.0] - 2026-10-25
 
 Built on `@sproutboat/runtime` 0.31.0, `@sproutboat/toolchain` 0.16.1 and

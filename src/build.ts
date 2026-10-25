@@ -3,7 +3,7 @@ import { NATIVE_RESTORE_IDENTITY } from "./native-restore";
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { readAssetRules, walkAssets, type AssetManifest } from "./assets";
-import { resourceRefs, type SproutboatConfig } from "./config";
+import { queueSettings, resourceRefs, type SproutboatConfig } from "./config";
 import { ensureSqliteObject } from "./sqlite";
 import { sqliteStamp } from "./sqlite";
 import { bearsslStamp, ensureBearssl } from "./bearssl";
@@ -149,6 +149,9 @@ async function prepareBuild(input: BuildInput) {
     d1: refsByKind.d1.map((ref) => ref.binding),
     r2: refsByKind.r2.map((ref) => ref.binding),
     queues: refsByKind.queue.map((ref) => ref.binding),
+    // Each queue's name and consumer settings (runtime 0.32): the sprout names batches and
+    // applies retries with them, the broker batches with them. Older readers ignore it.
+    queueConfig: queueSettings(input.config.queues),
     analytics: input.config.analytics_engine_datasets ?? [],
     do: Object.entries(input.config.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
     services: input.config.services ?? [],

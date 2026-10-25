@@ -174,31 +174,64 @@ declare global {
 
   // ------------------------------------------------------------ Queues
 
+  type QueuesContentType = "json" | "text" | "bytes" | "v8";
+
   interface QueueSendOptions {
+    delaySeconds?: number;
+    /** From compatibility date 2026-10-31. */
+    contentType?: QueuesContentType;
+  }
+
+  /** Cloudflare's QueueMetrics; `oldestMessageTimestamp` in ms since the epoch. */
+  interface QueueMetrics {
+    backlogCount: number;
+    backlogBytes: number;
+    oldestMessageTimestamp?: number;
+  }
+
+  interface QueueSendResult {
+    metadata: { metrics: QueueMetrics };
+  }
+
+  /**
+   * From compatibility date 2026-10-31, send() and sendBatch() return Promises of the queue's
+   * backlog after the send, as on Workers; earlier dates return nothing at once.
+   */
+  interface Queue<Body = unknown> {
+    send(body: Body, options?: QueueSendOptions): Promise<QueueSendResult>;
+    sendBatch(
+      messages: Iterable<{ body: Body; delaySeconds?: number; contentType?: QueuesContentType }>,
+      options?: { delaySeconds?: number },
+    ): Promise<QueueSendResult>;
+    /** From compatibility date 2026-10-31. */
+    metrics(): Promise<QueueMetrics>;
+  }
+
+  interface QueueRetryOptions {
     delaySeconds?: number;
   }
 
-  interface Queue<Body = unknown> {
-    /** Returns immediately. The batch reaches `queue()` out of band. */
-    send(body: Body, options?: QueueSendOptions): void;
-    sendBatch(messages: Array<{ body: Body; delaySeconds?: number }>): void;
-  }
-
   interface QueueMessage<Body = unknown> {
-    id: string;
-    timestamp: number;
-    body: Body;
-    /** Mark as handled. A message neither acked nor retried counts as acked. */
+    readonly id: string;
+    /** When it was sent: a Date from compatibility date 2026-10-31, epoch ms before. */
+    readonly timestamp: Date;
+    readonly body: Body;
+    /** 1 on the first delivery. */
+    readonly attempts: number;
+    /** Mark as handled. A message neither acked nor retried counts as acked (retried if queue() throws). */
     ack(): void;
-    /** Hand it back for another attempt. */
-    retry(): void;
+    /** Hand it back for another attempt. The first of ack() and retry() wins. */
+    retry(options?: QueueRetryOptions): void;
   }
 
   interface MessageBatch<Body = unknown> {
-    queue: string;
-    messages: Array<QueueMessage<Body>>;
+    /** The queue's name (`queue` in sproutboat.jsonc, else the binding name). */
+    readonly queue: string;
+    readonly messages: ReadonlyArray<QueueMessage<Body>>;
+    /** From compatibility date 2026-10-31. */
+    readonly metadata: { metrics: QueueMetrics };
     ackAll(): void;
-    retryAll(): void;
+    retryAll(options?: QueueRetryOptions): void;
   }
 
   // --------------------------------------------------- Durable Objects
