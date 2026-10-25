@@ -12,7 +12,7 @@ maintained going forward by the `release` skill.
 
 ## [0.32.0] - 2026-10-25
 
-Built on `@sproutboat/runtime` 0.31.0, `@sproutboat/toolchain` 0.16.0 and
+Built on `@sproutboat/runtime` 0.31.0, `@sproutboat/toolchain` 0.16.1 and
 `@sproutboat/wire` 0.19.1.
 
 ### Added
@@ -41,6 +41,11 @@ Built on `@sproutboat/runtime` 0.31.0, `@sproutboat/toolchain` 0.16.0 and
 - Smaller idle sprouts: once a sprout goes quiet, the idle collection returns
   all of its freed heap to the OS, not only runs of 256 KiB or more. Compiled
   apps get a new toolchain fingerprint, so they rebuild once.
+- Faster allocation-heavy handlers in standalone executables and on sproutd: a
+  collection after a request no longer hands the top of the heap back to the OS,
+  only the idle collection does. A string-building and regex handler that made
+  about 3,600 page faults per request on Linux now makes almost none, and runs a
+  quarter faster.
 
 ## [0.31.0] - 2026-10-23
 
