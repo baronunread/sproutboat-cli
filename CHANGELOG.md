@@ -10,6 +10,38 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.32.0] - 2026-10-25
+
+Built on `@sproutboat/runtime` 0.31.0, `@sproutboat/toolchain` 0.16.0 and
+`@sproutboat/wire` 0.19.1.
+
+### Added
+
+- **Cron-only and queue-only Workers.** A Worker may export only `scheduled()`
+  or `queue()`, with no `fetch()`, as on workerd. Cloudflare's `cron-trigger`
+  and `multiple-cron-triggers` examples used to be refused at build. An HTTP
+  request to such a Worker answers 500 and logs workerd's "Handler does not
+  export a fetch() function.".
+- Queue consumers and `scheduled()` may be `WorkerEntrypoint` methods.
+- Apps built for sproutd get their crons, queue messages and Durable Object
+  alarms delivered by the daemon, which starts an app that was shut down while
+  idle (sproutd B22). Standalone executables and the platform keep their own
+  timers.
+
+### Fixed
+
+- A standalone executable whose only binding-like setting is `triggers.crons`
+  now runs its crons. Before, they started only when some other binding existed.
+- In standalone executables, `scheduled()` gets `env` from compatibility date
+  `2026-09-28`, as on the platform. A throw in it is logged instead of being
+  left unhandled.
+
+### Performance
+
+- Smaller idle sprouts: once a sprout goes quiet, the idle collection returns
+  all of its freed heap to the OS, not only runs of 256 KiB or more. Compiled
+  apps get a new toolchain fingerprint, so they rebuild once.
+
 ## [0.31.0] - 2026-10-23
 
 Built on `@sproutboat/runtime` 0.30.0, `@sproutboat/toolchain` 0.15.0 and
@@ -1284,7 +1316,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.30.0...v0.31.0
 [0.24.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.23.0...v0.24.0
 [0.19.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.18.0...v0.19.0
