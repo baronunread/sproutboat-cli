@@ -74,6 +74,7 @@ Ops:
 - `kv.list`
 - `kv.put`
 - `ping`
+- `queue.metrics`
 - `queue.send`
 - `queue.send_batch`
 - `r2.delete`

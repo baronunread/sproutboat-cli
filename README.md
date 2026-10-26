@@ -129,7 +129,7 @@ complete export. Existing output files require `--force`.
   "kv_namespaces": ["CACHE"],                 // bare name, or { "binding": "CACHE", "id": "kv_..." }
   "d1_databases": ["DB"],
   "r2_buckets": ["UPLOADS"],
-  "queues": ["JOBS"],
+  "queues": ["JOBS"],                         // or { "binding": "JOBS", "queue": "jobs", "max_retries": 3, "dead_letter_queue": "failed" }
   "analytics_engine_datasets": ["METRICS"],   // bare name only, no id
   "durable_objects": { "COUNTER": "Counter" },
   "ratelimiters": [{ "binding": "API", "limit": 100, "period": 60 }], // env.API.limit({ key })
