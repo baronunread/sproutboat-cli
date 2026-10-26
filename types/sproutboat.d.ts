@@ -272,6 +272,46 @@ declare global {
     id: DurableObjectId;
     /** Synchronous, like every other binding. */
     storage: DurableObjectStorage;
+    /**
+     * The WebSocket hibernation API, from compatibility date 2026-10-30. Messages and
+     * closes on an accepted socket go to the class's `webSocketMessage` and
+     * `webSocketClose`. On sproutd an open socket keeps the app's worker running.
+     */
+    acceptWebSocket(ws: WebSocket, tags?: string[]): void;
+    getWebSockets(tag?: string): WebSocket[];
+    getTags(ws: WebSocket): string[];
+    setWebSocketAutoResponse(pair?: WebSocketRequestResponsePair): void;
+    getWebSocketAutoResponse(): WebSocketRequestResponsePair | null;
+  }
+
+  // ---------------------------------------------------------- WebSockets
+
+  /**
+   * From compatibility date 2026-10-30, as in workerd. Return the client end in a
+   * `new Response(null, { status: 101, webSocket: client })` and talk on the server end.
+   * Client sockets are carried by sproutd; a standalone or platform sprout answers a 101
+   * with 501 for now. Inbound messages are capped at 32 MiB (1009 above it). Outbound
+   * WebSockets (`new WebSocket(url)`) are not supported.
+   */
+  class WebSocketPair {
+    0: WebSocket;
+    1: WebSocket;
+  }
+  class WebSocketRequestResponsePair {
+    constructor(request: string, response: string);
+    readonly request: string;
+    readonly response: string;
+  }
+  interface ResponseInit {
+    webSocket?: WebSocket | null;
+  }
+  interface Response {
+    readonly webSocket: WebSocket | null;
+  }
+  interface WebSocket {
+    accept(): void;
+    serializeAttachment(value: unknown): void;
+    deserializeAttachment(): unknown;
   }
 
   // -------------------------------------------------- Analytics Engine
@@ -366,6 +406,9 @@ declare global {
     fetch(request: Request): Response | Promise<Response>;
     /** Runs after `storage.setAlarm`, with no request in flight. */
     alarm?(): void | Promise<void>;
+    /** A message on a socket taken with `state.acceptWebSocket` (from 2026-10-30). */
+    webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;
+    webSocketClose?(ws: WebSocket, code: number, reason: string, wasClean: boolean): void | Promise<void>;
   }
 
   // ------------------------------------------------------- Version metadata
