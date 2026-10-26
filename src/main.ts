@@ -235,7 +235,7 @@ async function readProject(directory = process.cwd()) {
   } catch (cause) {
     fail(cause instanceof BundleError ? cause.message : String(cause));
   }
-  const supported = validateHttpSyncSource(bundle.code);
+  const supported = validateHttpSyncSource(bundle.code, project.config.compatibility_date);
   if (!supported.ok) fail(supported.errors.join("\n"));
   return { ...project, sourcePath, source, bundle };
 }
