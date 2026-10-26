@@ -87,8 +87,9 @@ declare global {
    * Bindings from sproutboat.jsonc, for project "${config.name}".
    *
    * ${handlerNote}
-   * Every call on these is synchronous, so \`await\` is allowed and does
-   * nothing.
+   * These types are the synchronous calls. From compatibility date 2026-10-24 (D1),
+   * 2026-10-25 (KV) and 2026-10-26 (R2) the calls return Promises, as on Workers.
+   * \`await\` works at every date.
    */
   const env: {
 ${body}

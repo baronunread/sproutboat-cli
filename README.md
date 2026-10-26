@@ -146,7 +146,9 @@ store instead.
 The handler is `export default { fetch(request) }`. It may import from other
 files in the project and from its own `node_modules`, and may also export
 `scheduled(event)` / `queue(batch)` handlers and Durable Object classes. `env`
-is a global, not a parameter, and every binding call is synchronous.
+is a global, not a parameter. Binding calls are synchronous until the compatibility
+date that makes each one return a Promise, as on Workers (D1 from 2026-10-24, KV from
+2026-10-25, R2 from 2026-10-26); `await` works at every date, so always await them.
 [`examples/kitchen-sink/`](examples/kitchen-sink) uses every binding.
 
 For objects larger than one request, use resumable R2 multipart uploads. The

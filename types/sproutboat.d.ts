@@ -6,7 +6,10 @@
  * generates a project's `sproutboat-env.d.ts`, which references this file and
  * declares `env` with that project's bindings.
  *
- * Bindings are synchronous. Before compatibility date 2026-09-28, `env` is a
+ * Bindings are synchronous in these declarations, which describe the behaviour before the
+ * compatibility date that makes each one return a Promise (D1 2026-10-24, KV 2026-10-25,
+ * R2 2026-10-26); from that date, `await` the call, as on Workers. `await` works at every
+ * date. Before compatibility date 2026-09-28, `env` is a
  * global only and `ctx` is the second handler argument. From that date, `env`
  * is also passed as the second argument and `ctx` as the third.
  */
@@ -22,7 +25,7 @@ declare global {
   }
 
   interface KVNamespace {
-    /** The stored string, or `null`. Synchronous: no `await`. An expired key reads as absent. */
+    /** The stored string, or `null`. Synchronous before 2026-10-25 (a Promise from then). An expired key reads as absent. */
     get(key: string): string | null;
     put(key: string, value: string, options?: KVPutOptions): void;
     delete(key: string): void;

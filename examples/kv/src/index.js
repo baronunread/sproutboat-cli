@@ -1,4 +1,5 @@
-// KV: a key-value store. Every binding call is synchronous — no await.
+// KV: a key-value store. At this compatibility date every binding call is synchronous,
+// so there is no await. From 2026-10-25 KV calls return Promises, as on Workers: await them.
 //
 //   curl -X PUT localhost:8080/hello -d 'world'
 //   curl localhost:8080/hello

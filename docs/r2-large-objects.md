@@ -20,8 +20,9 @@ completedParts.push(resumed.uploadPart(2, finalChunk));
 const object = resumed.complete(completedParts);
 ```
 
-The methods are synchronous in compiled sprout code. `await` is harmless and
-can make shared Worker code easier to reuse.
+Before compatibility date `2026-10-26` the methods are synchronous in compiled
+sprout code; from that date they return Promises, as on Workers. `await` works at
+every date and keeps shared Worker code unchanged.
 
 ## Choosing a part size
 

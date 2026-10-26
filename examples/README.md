@@ -1,6 +1,6 @@
 # Examples
 
-Small enough to read in a sitting. Every handler here is the same code that runs on the deployed platform. Binding calls are synchronous. The `env` object is also passed as the second handler argument from compatibility date `2026-09-28`.
+Small enough to read in a sitting. Every handler here is the same code that runs on the deployed platform. Binding calls are synchronous before the compatibility date that makes each one return a Promise (D1 `2026-10-24`, KV `2026-10-25`, R2 `2026-10-26`); `await` works at every date, so the D1 example awaits. The `env` object is also passed as the second handler argument from compatibility date `2026-09-28`.
 
 | Example | Binding | What it shows |
 | --- | --- | --- |
