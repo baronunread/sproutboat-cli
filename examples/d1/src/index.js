@@ -1,4 +1,6 @@
-// D1: a SQL database. prepare().bind().run() / .first() / .all(), all synchronous.
+// D1: a SQL database. prepare().bind().run() / .first() / .all(). From compatibility
+// date 2026-10-24 these (and batch() and exec()) return Promises, as on Workers; before
+// that date they are synchronous. `await` works at both, so this example awaits.
 //
 //   curl -X POST localhost:8080/ -d '{"title":"read the docs"}'
 //   curl localhost:8080/
@@ -9,19 +11,20 @@
 
 export default {
   async fetch(request) {
-    env.DB.exec(
+    await env.DB.exec(
       "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, done INTEGER DEFAULT 0)",
     );
 
     if (request.method === "POST") {
       const { title } = JSON.parse((await request.text()) || "{}");
-      const res = env.DB.prepare("INSERT INTO todos (title) VALUES (?)")
+      const res = await env.DB.prepare("INSERT INTO todos (title) VALUES (?)")
         .bind(String(title || "untitled"))
         .run();
       return json({ id: res.meta.last_row_id }, 201);
     }
 
-    return json(env.DB.prepare("SELECT id, title, done FROM todos ORDER BY id").all().results);
+    const { results } = await env.DB.prepare("SELECT id, title, done FROM todos ORDER BY id").all();
+    return json(results);
   },
 };
 

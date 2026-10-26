@@ -6,7 +6,11 @@
  * generates a project's `sproutboat-env.d.ts`, which references this file and
  * declares `env` with that project's bindings.
  *
- * Bindings are synchronous. Before compatibility date 2026-09-28, `env` is a
+ * KV, D1 and R2 are synchronous before the compatibility date that makes each one return a
+ * Promise (D1 2026-10-24, KV 2026-10-25, R2 2026-10-26): `KVNamespace`, `D1Database` and
+ * `R2Bucket` are the synchronous types, `KVNamespaceAsync`, `D1DatabaseAsync` and
+ * `R2BucketAsync` the Promise types, and `sproutboat types` gives each binding the one for the
+ * project's date. `await` works at every date. Before compatibility date 2026-09-28, `env` is a
  * global only and `ctx` is the second handler argument. From that date, `env`
  * is also passed as the second argument and `ctx` as the third.
  */
@@ -22,12 +26,39 @@ declare global {
   }
 
   interface KVNamespace {
-    /** The stored string, or `null`. Synchronous: no `await`. An expired key reads as absent. */
+    /** The stored string, or `null`. Synchronous before 2026-10-25 (a Promise from then). An expired key reads as absent. */
     get(key: string): string | null;
     put(key: string, value: string, options?: KVPutOptions): void;
     delete(key: string): void;
     /** Keys under `prefix` (all keys when omitted). Expired keys are omitted. */
     list(prefix?: string): string[];
+  }
+
+  /**
+   * KV from compatibility date 2026-10-25: every method returns a Promise, as on Workers.
+   * `sproutboat types` picks this type for a project at or after that date.
+   */
+  interface KVNamespaceAsync {
+    get(key: string, type?: "text"): Promise<string | null>;
+    get<T = unknown>(key: string, type: "json"): Promise<T | null>;
+    get(key: string, type: "arrayBuffer"): Promise<ArrayBuffer | null>;
+    get(key: string, type: "stream"): Promise<ReadableStream | null>;
+    getWithMetadata<M = unknown>(
+      key: string,
+      type?: "text" | "json" | "arrayBuffer" | "stream",
+    ): Promise<{ value: unknown; metadata: M | null; cacheStatus: string | null }>;
+    put(
+      key: string,
+      value: string | ArrayBuffer | ArrayBufferView | ReadableStream,
+      options?: KVPutOptions & { metadata?: unknown },
+    ): Promise<void>;
+    delete(key: string): Promise<void>;
+    list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
+      keys: Array<{ name: string; expiration?: number; metadata?: unknown }>;
+      list_complete: boolean;
+      cursor?: string;
+      cacheStatus: string | null;
+    }>;
   }
 
   // ---------------------------------------------------------------- D1
@@ -61,6 +92,48 @@ declare global {
     batch(statements: D1PreparedStatement[]): D1Result[];
     /** Runs a whole script. Use this for multi-statement DDL. */
     exec(sql: string): void;
+  }
+
+  /** D1 from compatibility date 2026-10-24: workerd's meta, with D1's keys. */
+  interface D1MetaAsync {
+    served_by: string;
+    duration: number;
+    changes: number;
+    last_row_id: number;
+    changed_db: boolean;
+    size_after: number;
+    rows_read: number;
+    rows_written: number;
+  }
+
+  interface D1ResultAsync<T = Record<string, unknown>> {
+    results: T[];
+    success: boolean;
+    meta: D1MetaAsync;
+  }
+
+  /**
+   * From compatibility date 2026-10-24 `all()`, `run()`, `first()` and `raw()` return Promises, as
+   * on Workers. `sproutboat types` picks this type for a project at or after that date.
+   */
+  interface D1PreparedStatementAsync {
+    /** Positional `?` parameters, in order. Bytes bind as a BLOB. */
+    bind(...values: Array<string | number | boolean | null | ArrayBuffer | ArrayBufferView>): D1PreparedStatementAsync;
+    all<T = Record<string, unknown>>(): Promise<D1ResultAsync<T>>;
+    run<T = Record<string, unknown>>(): Promise<D1ResultAsync<T>>;
+    first<T = Record<string, unknown>>(): Promise<T | null>;
+    first<T = unknown>(column: string): Promise<T | null>;
+    raw<T = unknown[]>(options?: { columnNames?: false }): Promise<T[]>;
+    raw<T = unknown[]>(options: { columnNames: true }): Promise<[string[], ...T[]]>;
+  }
+
+  interface D1DatabaseAsync {
+    prepare(sql: string): D1PreparedStatementAsync;
+    batch<T = Record<string, unknown>>(statements: D1PreparedStatementAsync[]): Promise<D1ResultAsync<T>[]>;
+    /** Runs a script line by line and counts the lines. */
+    exec(sql: string): Promise<{ count: number; duration: number }>;
+    /** A Sproutboat addition: an online, integrity-checked copy of the database. */
+    backup(name?: string): Promise<{ path: string; bytes: number }>;
   }
 
   // ---------------------------------------------------------------- R2
@@ -170,6 +243,65 @@ declare global {
     head(key: string): R2ObjectHead | null;
     delete(key: string): void;
     list(options?: R2ListOptions): R2Objects;
+  }
+
+  /**
+   * R2 from compatibility date 2026-10-26: every method returns a Promise, as on Workers, and
+   * `uploaded` is a Date. `sproutboat types` picks these types for a project at or after that date.
+   */
+  interface R2ObjectAsync {
+    key: string;
+    size: number;
+    etag: string;
+    httpEtag: string;
+    checksums: { md5?: ArrayBuffer };
+    uploaded: Date;
+    httpMetadata?: R2HttpMetadata;
+    customMetadata?: Record<string, string>;
+    range?: { offset: number; length: number };
+  }
+
+  interface R2ObjectBodyAsync extends R2ObjectAsync {
+    body: ReadableStream;
+    bodyUsed: boolean;
+    arrayBuffer(): Promise<ArrayBuffer>;
+    text(): Promise<string>;
+    json<T = unknown>(): Promise<T>;
+    blob(): Promise<Blob>;
+  }
+
+  interface R2MultipartUploadAsync {
+    key: string;
+    uploadId: string;
+    uploadPart(
+      partNumber: number,
+      value: string | ArrayBuffer | ArrayBufferView | ReadableStream | Blob,
+    ): Promise<R2UploadedPart>;
+    complete(parts: R2UploadedPart[]): Promise<R2ObjectAsync>;
+    abort(): Promise<void>;
+  }
+
+  interface R2BucketAsync extends Pick<R2Bucket, "createUploadUrl" | "createDownloadUrl"> {
+    head(key: string): Promise<R2ObjectAsync | null>;
+    get(
+      key: string,
+      options?: { range?: { offset?: number; length?: number; suffix?: number }; onlyIf?: unknown },
+    ): Promise<R2ObjectBodyAsync | null>;
+    put(
+      key: string,
+      value: string | ArrayBuffer | ArrayBufferView | ReadableStream | Blob | null,
+      options?: { httpMetadata?: R2HttpMetadata | Headers; customMetadata?: Record<string, string>; onlyIf?: unknown },
+    ): Promise<R2ObjectAsync | null>;
+    delete(keys: string | string[]): Promise<void>;
+    list(options?: {
+      prefix?: string;
+      limit?: number;
+      cursor?: string;
+      delimiter?: string;
+      include?: Array<"httpMetadata" | "customMetadata">;
+    }): Promise<{ objects: R2ObjectAsync[]; truncated: boolean; cursor?: string; delimitedPrefixes: string[] }>;
+    createMultipartUpload(key: string, options?: R2PutOptions): Promise<R2MultipartUploadAsync>;
+    resumeMultipartUpload(key: string, uploadId: string): R2MultipartUploadAsync;
   }
 
   // ------------------------------------------------------------ Queues

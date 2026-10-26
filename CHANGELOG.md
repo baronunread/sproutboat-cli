@@ -10,6 +10,27 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.37.0] - 2026-10-27
+
+Built on `@sproutboat/runtime` 0.34.1, `@sproutboat/toolchain` 0.19.1 and
+`@sproutboat/wire` 0.20.2.
+
+### Fixed
+
+- **A failed binding call you do not await no longer ends the process.** An un-awaited
+  `db.prepare("INSERT ...").run()` that broke a foreign key used to take the whole binary down, even
+  with a `try` / `catch` around the call. As on Workers, an unhandled rejection is now logged
+  (`Uncaught (in promise) ...`), fires `unhandledrejection` when the app has a listener
+  (`addEventListener("unhandledrejection", ...)`), and the process and other requests keep going. An
+  un-awaited `async function` that throws is reported the same way. At every compatibility date.
+
+### Changed
+
+- **Types for the Promise bindings.** `sproutboat types` gives D1 (from compatibility date 2026-10-24),
+  KV (2026-10-25) and R2 (2026-10-26) bindings the Promise types (`D1DatabaseAsync`,
+  `KVNamespaceAsync`, `R2BucketAsync`); earlier dates keep the synchronous ones.
+- Docs, examples and type comments no longer say binding calls are synchronous at every date.
+
 ## [0.36.0] - 2026-10-26
 
 Built on `@sproutboat/runtime` 0.34.0, `@sproutboat/toolchain` 0.19.0 and
