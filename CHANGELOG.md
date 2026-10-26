@@ -10,6 +10,28 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.34.0] - 2026-10-26
+
+Built on `@sproutboat/runtime` 0.33.0, `@sproutboat/toolchain` 0.17.0 and
+`@sproutboat/wire` 0.20.1.
+
+### Added
+
+- **WebSockets from compatibility date 2026-10-30.** `WebSocketPair`, `WebSocket`
+  (`accept`, `send`, `close`, listeners), `new Response(null, { status: 101, webSocket })`,
+  `response.webSocket`, `WebSocketRequestResponsePair`, and the Durable Object hibernation API
+  (`acceptWebSocket`, `getWebSockets`, `getTags`, auto-responses, attachments,
+  `webSocketMessage` and `webSocketClose`). Behaviour follows workerd. Sockets reaching a client
+  are carried by sproutd (B19); a standalone executable or the platform answers a 101 with 501
+  for now, while a pair whose ends both stay in the worker (a Worker and its Durable Object)
+  works everywhere. Outbound `new WebSocket(url)` is not supported yet.
+- Streamed request bodies on sproutd (B19), from compatibility date 2026-10-27.
+
+### Changed
+
+- `types/sproutboat.d.ts` declares the WebSocket types and the hibernation handlers.
+- The toolchain moves to 0.17.0, so compiled apps get a new fingerprint and rebuild once.
+
 ## [0.33.0] - 2026-10-25
 
 Built on `@sproutboat/runtime` 0.32.0, `@sproutboat/wire` 0.20.0 and

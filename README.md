@@ -168,7 +168,8 @@ Windows, build from WSL.
 ## Limits
 
 Capability profile `http-sync-v0`: one synchronous `fetch` handler, optional
-`scheduled` / `queue` handlers, no streaming, no WebSockets. Binding values are
+`scheduled` / `queue` handlers. WebSockets (from compatibility date 2026-10-30) need
+a host that carries them (sproutd). Binding values are
 text/JSON, one at a time over a 32 MiB loopback frame. Sprout uploads cap at
 16 MiB, assets at 64 MiB / 4096 files.
 
