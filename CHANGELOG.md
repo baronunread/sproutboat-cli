@@ -10,6 +10,32 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.36.0] - 2026-10-26
+
+Built on `@sproutboat/runtime` 0.34.0, `@sproutboat/toolchain` 0.19.0 and
+`@sproutboat/wire` 0.20.2.
+
+### Added
+
+- **WebSockets everywhere, from compatibility date 2026-11-01.** Standalone executables and the
+  platform carry the client end of a 101 response (before the date they answer 501), and the
+  platform edge proxies the upgrade.
+- **Outbound WebSockets, from 2026-11-01.** `new WebSocket(url, protocols)` and
+  `fetch(url, { headers: { Upgrade: "websocket" } })` (the Response's `webSocket`, then
+  `accept()`); returning that Response from a handler relays the client's socket to the upstream.
+  `ws`, `wss`, `http` and `https` URLs. `sproutboat check` and `build` accept `WebSocket(` from
+  that date and refuse it before. They run on standalone executables and sproutd; `sproutboat dev`
+  and the platform (broker transport) reject `fetch` upgrades for now.
+- **Hibernation on sproutd, from 2026-11-01.** A Durable Object's hibernatable socket no longer
+  keeps its worker running: the worker is reaped while the socket idles, the auto-response is
+  answered without waking it, and a message or close starts a worker that constructs the object
+  again with `getWebSockets()` as it was.
+
+### Changed
+
+- `types/sproutboat.d.ts` and the README describe the above. The toolchain moves to 0.19.0, so
+  compiled apps get a new fingerprint and rebuild once.
+
 ## [0.35.0] - 2026-10-26
 
 Built on `@sproutboat/runtime` 0.33.0, `@sproutboat/toolchain` 0.18.0 and

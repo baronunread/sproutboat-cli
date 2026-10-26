@@ -275,7 +275,10 @@ declare global {
     /**
      * The WebSocket hibernation API, from compatibility date 2026-10-30. Messages and
      * closes on an accepted socket go to the class's `webSocketMessage` and
-     * `webSocketClose`. On sproutd an open socket keeps the app's worker running.
+     * `webSocketClose`. On sproutd an open socket keeps the app's worker running before
+     * compatibility date 2026-11-01; from it the worker is reaped while the socket idles and
+     * the object is constructed again (with `getWebSockets()` as it was) when a message or
+     * close arrives.
      */
     acceptWebSocket(ws: WebSocket, tags?: string[]): void;
     getWebSockets(tag?: string): WebSocket[];
@@ -289,9 +292,12 @@ declare global {
   /**
    * From compatibility date 2026-10-30, as in workerd. Return the client end in a
    * `new Response(null, { status: 101, webSocket: client })` and talk on the server end.
-   * Client sockets are carried by sproutd; a standalone or platform sprout answers a 101
-   * with 501 for now. Inbound messages are capped at 32 MiB (1009 above it). Outbound
-   * WebSockets (`new WebSocket(url)`) are not supported.
+   * Client sockets are carried by sproutd, and from compatibility date 2026-11-01 by
+   * standalone and platform sprouts too (before it they answer a 101 with 501). Inbound
+   * messages are capped at 32 MiB (1009 above it). From 2026-11-01 `new WebSocket(url,
+   * protocols)` and `fetch(url, { headers: { Upgrade: "websocket" } })` connect out; the
+   * Response's `webSocket` needs `accept()`, and returning it from a handler relays the client.
+   * Outbound sockets need the embedded transport (standalone, sproutd), not `sproutboat dev`.
    */
   class WebSocketPair {
     0: WebSocket;
