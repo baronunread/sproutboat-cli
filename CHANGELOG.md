@@ -10,6 +10,19 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.35.0] - 2026-10-26
+
+Built on `@sproutboat/runtime` 0.33.0, `@sproutboat/toolchain` 0.18.0 and
+`@sproutboat/wire` 0.20.1.
+
+### Changed
+
+- **Faster string building in compiled apps.** The toolchain moves to 0.18.0: `s += e;` in a
+  loop on a local string appends in place instead of copying the whole string, `replace(regex, fn)`
+  joins its pieces once, and `charCodeAt` and `JSON.parse` read characters directly. On sproutd's
+  heavy set that is about 40% more requests per second, with regex-scan 7 ms instead of 35 ms.
+  Compiled apps get a new fingerprint and rebuild once.
+
 ## [0.34.0] - 2026-10-26
 
 Built on `@sproutboat/runtime` 0.33.0, `@sproutboat/toolchain` 0.17.0 and
