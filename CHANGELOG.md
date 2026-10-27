@@ -10,6 +10,22 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.39.0] - 2026-10-27
+
+Built on `@sproutboat/runtime` 0.34.3, `@sproutboat/toolchain` 0.19.3 and
+`@sproutboat/wire` 0.20.2.
+
+### Performance
+
+- **D1 queries cost less CPU in standalone builds.** A D1 call no longer goes through `JSON.stringify` and
+  `JSON.parse` on both sides of the in-process dispatch, and from compatibility date 2026-10-24 the rows of a
+  strict D1 result are built as JS arrays in C straight from the SQLite cells instead of being written as JSON
+  and parsed again. Same results and error messages.
+- **`atob` is faster.** Each character is looked up in a 128-entry table, and the same pass validates, so a JWT
+  check (three base64url decodes) costs less. Same output and same `InvalidCharacterError` cases.
+- **`JSON.stringify` of strings is faster.** Each character is read straight from the string and stored when it
+  needs no escape. The output is byte-identical.
+
 ## [0.38.0] - 2026-10-27
 
 Built on `@sproutboat/runtime` 0.34.2, `@sproutboat/toolchain` 0.19.2 and
