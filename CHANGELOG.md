@@ -10,6 +10,23 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.38.0] - 2026-10-27
+
+Built on `@sproutboat/runtime` 0.34.2, `@sproutboat/toolchain` 0.19.2 and
+`@sproutboat/wire` 0.20.2.
+
+### Performance
+
+- **A request costs about a quarter of the CPU it did.** Most of it was one thing: Porffor's `globalThis`
+  rebuilt the whole global object (one write per top-level binding) on every read, and a plain request
+  made about eleven reads. A read of `globalThis` now rewrites only the bindings that changed, the
+  runtime's own request path reads no `globalThis` at all, the client IP and trusted-proxy headers are
+  read once per process, and `x-sb-cpu-ms` is added to your Response instead of building a second one.
+  Measured on one pinned x86 core, a 404 from a standalone binary went from 319 to 89 microseconds of CPU
+  per request when saturated (3,100 to 11,000 requests per second on that core); a small JSON 200 from
+  322 to 78. `globalThis.x` in your own code is cheap too: 20,000 reads with 600 top-level functions took
+  9.3 s before and a few milliseconds now. Nothing in the responses changes.
+
 ## [0.37.0] - 2026-10-27
 
 Built on `@sproutboat/runtime` 0.34.1, `@sproutboat/toolchain` 0.19.1 and

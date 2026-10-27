@@ -92,7 +92,7 @@ test("wrap: declared bindings emit one install line after `const env`", () => {
     },
   );
   expect(out).toContain(
-    `const env = {"V":"1"};\nglobalThis.env = env;\n__sbInstallFetch();\n__sbInstallBindings(env, {"kv":["CACHE"]`,
+    `const env = {"V":"1"};\nglobalThis.env = env;\n__sbSetEnv(env);\n__sbInstallFetch();\n__sbInstallBindings(env, {"kv":["CACHE"]`,
   );
   expect(out).toContain(`fetch(request) { return __sbEntry(__sbUserHandlers, request); }`);
   expect(out).toContain(`const __sbHandlers = { fetch() { return new Response("x"); } };`);
