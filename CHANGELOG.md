@@ -10,6 +10,22 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.41.0] - 2026-10-28
+
+Built on `@sproutboat/runtime` 0.34.5, `@sproutboat/toolchain` 0.19.5 and
+`@sproutboat/wire` 0.20.2.
+
+### Performance
+
+- **`JSON.stringify` returns an 8-bit string when it can**, and skips the zeroed buffer for a plain string.
+  The feed endpoint of the API-challenge app goes from about 475 to 415 us of CPU per request.
+- **A strict D1 row's text goes into one arena**, and ASCII text becomes a JS string in one copy
+  (standalone binaries). The feed endpoint gains about 16 us per request.
+- **The client address is folded once per distinct address**, not on every request.
+  About 1.5% of a request.
+- Together, on the API-challenge mix on one pinned x86 core, the stack holds 3,200 req/s or more at the bar
+  (p95 under 500 ms, p99 under 1 s, errors under 1%) where the previous release held 2,800.
+
 ## [0.40.0] - 2026-10-28
 
 Built on `@sproutboat/runtime` 0.34.4, `@sproutboat/toolchain` 0.19.4 and
