@@ -10,6 +10,33 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.42.0] - 2026-10-28
+
+Built on `@sproutboat/runtime` 0.35.0, `@sproutboat/toolchain` 0.20.0 and
+`@sproutboat/wire` 0.20.3.
+
+### Changed
+
+- **A standalone binary opens its SQLite databases in EXCLUSIVE locking mode by default.** The lock is
+  taken once and held, so a transaction no longer takes and releases file locks around itself (about two
+  `fcntl` calls per request), and the WAL index lives in memory instead of a `-shm` file. The page cache
+  stays at 2 MB; `SB_SQLITE_CACHE_MB=<n>` (1 to 4096) sizes it. **While the binary runs, no other process can
+  open its databases:** the `sqlite3` shell, `sproutboat kv|d1 --local --data-dir` and several copies behind
+  `SO_REUSEPORT` are locked out. Set `SB_SQLITE_EXCLUSIVE=0` to keep shared locking. Databases under LTX
+  replication are never exclusive. sproutd and the broker are unchanged.
+
+### Performance
+
+- **A request's fixed cost drops its text round trips, regular expressions and repeated lookups**: the CPU
+  stamp and the streamed-body probe return numbers, `Headers` checks names and values in C, the ingress
+  header reads scan the stored names, and an empty `waitUntil` list creates no coroutine.
+- **A strict D1 query in a standalone binary takes a direct lane**, with no statement closures, no regular
+  expression for the transaction check and a result header built as JS values instead of JSON text.
+- **No 88 KiB `mmap` and `munmap` for every statement that builds a temporary table** (`INSERT ...
+  RETURNING`, sorts). On the API-challenge create endpoint that is about 930 to 700 us of CPU per request.
+- **A response's plain-ASCII header names, header values and body are written straight from the heap**
+  instead of through a `malloc`ed copy (standalone binaries).
+
 ## [0.41.0] - 2026-10-28
 
 Built on `@sproutboat/runtime` 0.34.5, `@sproutboat/toolchain` 0.19.5 and
