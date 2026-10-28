@@ -10,6 +10,24 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.40.0] - 2026-10-28
+
+Built on `@sproutboat/runtime` 0.34.4, `@sproutboat/toolchain` 0.19.4 and
+`@sproutboat/wire` 0.20.2.
+
+### Performance
+
+- **A standalone binary collects garbage every 8 requests**, and once it has been quiet for about 50 ms,
+  instead of after every response. On the API-challenge mix at 900 req/s the CPU per request goes from about
+  550 to about 470 us, and the feed endpoint from 940 to 750 us, for about 2 MiB more resident memory.
+  `SB_GC_EVERY=<n>` sets the interval (`1` restores a collection after each request). A request that needs
+  more heap than is free still collects when it allocates. sproutd's collector and density are untouched.
+- **JWT verification costs less CPU.** `atob` decodes in C for the usual input and falls back to the
+  existing code for everything else, `TextEncoder.encode` sizes and fills the array in two C passes, the
+  `ArrayBuffer` returned by `crypto.subtle.sign` and `digest` is copied with one `memcpy`, and the
+  constant-time compare behind `verify` runs in C. A typical `authenticate()` goes from 21.5 to 7 us on an
+  M-series host. What throws, and what it throws, is unchanged.
+
 ## [0.39.0] - 2026-10-27
 
 Built on `@sproutboat/runtime` 0.34.3, `@sproutboat/toolchain` 0.19.3 and
