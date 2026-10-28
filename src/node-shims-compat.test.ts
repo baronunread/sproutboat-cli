@@ -121,3 +121,15 @@ test("node:url shim matches real node:url for absolute URLs", async () => {
   for (const [from, to] of resolveCases)
     assert.equal(shimUrl.resolve(from, to), realUrl.resolve(from, to), `resolve(${from}, ${to})`);
 });
+
+test("node:async_hooks shim hands out the runtime's AsyncLocalStorage", async () => {
+  class Stand {}
+  Object.assign(globalThis, { AsyncLocalStorage: Stand });
+  try {
+    const shim = await loadShim("node:async_hooks");
+    assert.equal(shim.AsyncLocalStorage, Stand);
+    assert.equal(shim.default.AsyncLocalStorage, Stand);
+  } finally {
+    Reflect.deleteProperty(globalThis, "AsyncLocalStorage");
+  }
+});
