@@ -141,8 +141,10 @@ export const COMMANDS: readonly Command[] = [
     name: "tail",
     group: "Ship",
     emoji: "📡",
-    args: "[project-dir] [--sprout]",
-    summary: "Print recent request logs; --sprout prints the running sprout + broker stdout/stderr instead.",
+    args: "[project-dir] [--format pretty|json] [--status ok|error|<code>|5xx] [--method GET,POST] [--sampling-rate <0..1>] [--search <text>] [--outcome <name>] [--recent] [--sprout]",
+    brief: "[--status 5xx] [--search <text>]",
+    summary:
+      "Stream live request events, console output and exceptions (like wrangler tail); --recent prints the last 100 request records, --sprout the running sprout + broker stdout/stderr.",
   },
 
   ...storageCommands,

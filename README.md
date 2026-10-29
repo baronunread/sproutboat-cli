@@ -70,7 +70,7 @@ The everyday loop:
 | `init [name]` | Scaffold `sproutboat.jsonc` + `src/index.js` |
 | `dev [--port <n>]` | Run it here against a real broker, rebuilding on save |
 | `deploy` | Build, provision bindings, upload, wait until the URL serves |
-| `tail [--sprout]` | Recent request logs, or the running sprout's output |
+| `tail [filters]` | Live request events, console output and exceptions, like `wrangler tail` |
 | `rollback <id>` | Re-activate a previous version |
 
 Then `check`, `build`, `versions`, `delete`, `login` / `logout` / `whoami`, and
@@ -78,6 +78,45 @@ one command per storage product — `kv`, `d1`, `r2`, `queues`, `secrets`,
 `domains` — each with the same five verbs.
 
 Run `sproutboat` with no arguments for the grouped list.
+
+### Live tail
+
+`sproutboat tail` streams one app's events as they happen. Each request prints
+its time, method, URL, status, outcome and CPU and wall milliseconds; the app's
+`console.*` output and uncaught exceptions print as their own lines.
+
+```sh
+sproutboat tail                                  # pretty, colored
+sproutboat tail --status 5xx --search checkout   # server-side filters
+sproutboat tail --format json | jq 'select(.outcome != "ok")'
+sproutboat tail --recent                         # the last 100 request records (the old behaviour)
+sproutboat tail --sprout                         # the sprout's raw stdout/stderr
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--format pretty\|json` | Colored lines (default), or one JSON event per line |
+| `--status` | `ok` (below 400), `error` (5xx or a platform failure), a code like `404`, or a class like `5xx`; repeat or comma-separate |
+| `--method` | `GET,POST`; repeat or comma-separate. Console-only events have no method, so this hides them |
+| `--sampling-rate` | Keep this fraction of events, 0 to 1 |
+| `--search` | Case-insensitive substring over the URL, console messages and exception text |
+| `--outcome` | `ok`, `exception`, `exceededWallTime`, `canceled`, `unavailable`, `noRoute`, `proxyError`, ... |
+
+Things to know:
+
+- **Console lines are not tied to a request.** Concurrent requests share one
+  process and the runtime does not tag a line with a request id, so console
+  output is printed on its own, flush left, and never indented under a request.
+  Lines carry the time the control plane saw them (about one second of
+  resolution). The runtime sends `console.log`, `warn` and `error` to the same
+  stream without a level, so they all show as `log`; uncaught exceptions are
+  recognised and shown as errors with their stack.
+- The server caps the stream at ten minutes and the CLI reconnects; events in
+  the gap are not replayed. It also caps events per second and reports the
+  count it dropped on stderr, which keeps stdout clean for `--format json`.
+- Needs a control plane with `GET /api/projects/<name>/tail` (Sproutboat
+  platform after v0.12.0). Against an older one, use `--recent`.
+- Ctrl-C stops the stream and exits 0.
 [`SURFACE.md`](SURFACE.md) is the generated inventory: every command, every
 argument, every env var, kept honest by a drift test.
 

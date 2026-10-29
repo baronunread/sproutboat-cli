@@ -20,6 +20,7 @@ import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
 import { pathToFileURL } from "node:url";
 import { inspectToolchain } from "./toolchain";
+import { parseTailArgs, runTail, TAIL_USAGE, tailQuery } from "./tail";
 
 // A compiled Bun executable is not a general-purpose `bun` command. Porffor
 // is acquired after installation, so run its external ESM launcher through an
@@ -607,7 +608,7 @@ async function deploy(args: string[]) {
   if (!args.includes("--no-wait") && !(await waitForHealthy(deployed.url, 90_000))) {
     console.warn(
       amber(
-        "  ! not serving after 90s — Caddy may still be issuing the cert, or the sprout is crashing (`sproutboat tail`)",
+        "  ! not serving after 90s — Caddy may still be issuing the cert, or the sprout is crashing (`sproutboat tail`, `tail --sprout`)",
       ),
     );
   }
@@ -781,14 +782,33 @@ async function rollback(args: string[]) {
 }
 
 async function tail(args: string[]) {
-  const sproutLog = args.includes("--sprout");
-  const dir = args.find((arg) => !arg.startsWith("-"));
-  const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(dir), apiCredentials()]);
-  const path = sproutLog ? "logs/sprout" : "logs/recent";
-  const response = await fetch(`${apiUrl}/api/projects/${project.config.name}/${path}`, {
-    headers: { "x-api-key": token },
-  });
-  process.stdout.write(await responseText(response, "could not read logs"));
+  const result = parseTailArgs(args);
+  if ("error" in result) usageError(result.error, TAIL_USAGE);
+  const parsed = result.args;
+  const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(parsed.dir), apiCredentials()]);
+  const base = `${apiUrl}/api/projects/${project.config.name}`;
+  if (parsed.recent || parsed.sprout) {
+    const response = await fetch(`${base}/logs/${parsed.sprout ? "sprout" : "recent"}`, {
+      headers: { "x-api-key": token },
+    });
+    process.stdout.write(await responseText(response, "could not read logs"));
+    return;
+  }
+  // Ctrl-C (or a terminated pipe reader) ends the stream and exits 0.
+  const controller = new AbortController();
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => controller.abort());
+  process.stdout.on("error", () => controller.abort());
+  const query = tailQuery(parsed);
+  try {
+    await runTail({
+      url: `${base}/tail${query ? `?${query}` : ""}`,
+      headers: { "x-api-key": token },
+      format: parsed.format,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
 }
 
 type DomainView = {
