@@ -32,7 +32,7 @@ test("management commands work without application source or build artifacts", a
       ["versions", "list"],
       ["versions", "view", "v1"],
       ["rollback", "v1"],
-      ["tail"],
+      ["tail", "--recent"],
       ["tail", "--sprout"],
     ]) {
       const child = Bun.spawn([process.execPath, join(import.meta.dir, "main.ts"), ...args, directory], {

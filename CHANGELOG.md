@@ -10,6 +10,22 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Added
+
+- **`sproutboat tail` is a live tail.** It streams the app's request events, `console.*` output and uncaught
+  exceptions from the control plane (`GET /api/projects/<name>/tail`, Server-Sent Events) in the shape of a
+  Workers tail event. Pretty colored lines by default, one JSON event per line with `--format json`. Server-side
+  filters: `--status ok|error|<code>|5xx`, `--method GET,POST`, `--sampling-rate 0.1`, `--search <text>`,
+  `--outcome <name>`. It reconnects when the server's ten minute cap closes the stream, reports dropped events on
+  stderr, and exits 0 on Ctrl-C. Console lines are separate events, not attached to a request (the runtime does not
+  tag them with a request id).
+
+### Changed
+
+- **`sproutboat tail` with no flags no longer prints and exits.** The old dump of the last 100 request records is
+  `sproutboat tail --recent`; `--sprout` is unchanged. Live tail needs a control plane newer than v0.12.0; against
+  an older one the command says so and points at `--recent`.
+
 ## [0.44.0] - 2026-10-29
 
 Built on `@sproutboat/runtime` 0.36.0, `@sproutboat/toolchain` 0.21.0 and
