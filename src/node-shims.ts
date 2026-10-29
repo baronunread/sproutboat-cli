@@ -371,7 +371,17 @@ export { NodeURL as URL, NodeURLSearchParams as URLSearchParams, urlFormat as fo
 export default { URL: NodeURL, URLSearchParams: NodeURLSearchParams, format: urlFormat, parse: urlParse, resolve: urlResolve };
 `;
 
+// AsyncLocalStorage comes from the runtime (sproutboat-packages: the prelude defines it on globalThis,
+// over an async context kept by the patched Porffor). Bun's own node:async_hooks polyfill builds but
+// its AsyncLocalStorage is not a constructor in a compiled handler. Aliased, like the node:url shim.
+const NODE_ASYNC_HOOKS_SHIM = `
+const SbAsyncLocalStorage = globalThis.AsyncLocalStorage;
+export { SbAsyncLocalStorage as AsyncLocalStorage };
+export default { AsyncLocalStorage: SbAsyncLocalStorage };
+`;
+
 export const NODE_SHIMS = {
+  "node:async_hooks": NODE_ASYNC_HOOKS_SHIM,
   "node:path": NODE_PATH_SHIM,
   "node:querystring": NODE_QUERYSTRING_SHIM,
   "node:url": NODE_URL_SHIM,
