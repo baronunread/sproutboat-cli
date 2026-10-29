@@ -10,6 +10,21 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.43.0] - 2026-10-29
+
+Built on `@sproutboat/runtime` 0.35.0, `@sproutboat/toolchain` 0.20.1 and
+`@sproutboat/wire` 0.20.3.
+
+### Fixed
+
+- **A collection no longer frees the entries block of Promise's pending-rejections array.** In a long-running
+  native process (a standalone binary, or a worker under sproutd), the first rejections that grew that array
+  past its static capacity moved its entries to the heap, and the collector then skipped the whole array as
+  malformed. Every collection freed the block, and the next rejection wrote into memory that now belonged to
+  another object: a string or an array of a request suspended at an `await` could change silently. A
+  standalone binary showed it in about 1 fresh process in 5 under interleaved requests, with no failure
+  reported anywhere. Rebuild standalone binaries to pick up the fix.
+
 ## [0.42.0] - 2026-10-28
 
 Built on `@sproutboat/runtime` 0.35.0, `@sproutboat/toolchain` 0.20.0 and
