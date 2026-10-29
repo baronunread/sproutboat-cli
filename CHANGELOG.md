@@ -10,6 +10,8 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.45.0] - 2026-10-29
+
 ### Added
 
 - **`sproutboat tail` is a live tail.** It streams the app's request events, `console.*` output and uncaught
