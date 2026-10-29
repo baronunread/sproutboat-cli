@@ -10,6 +10,29 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.44.0] - 2026-10-29
+
+Built on `@sproutboat/runtime` 0.36.0, `@sproutboat/toolchain` 0.21.0 and
+`@sproutboat/wire` 0.20.4.
+
+### Added
+
+- **`AsyncLocalStorage`** from `node:async_hooks`, as Workers has it: `run`, `exit`, `getStore` and the static
+  `snapshot`. `enterWith` and `disable` throw, as there. The store follows a request across awaits,
+  microtasks, timers, intervals, async `fetch`, WebSocket callbacks and `ctx.waitUntil`, and requests
+  interleaved in one process never see each other's. The static `bind` is not provided: Porffor compiles a
+  `.bind(` call on a function value to `Function.prototype.bind`, so use `snapshot()`. The import used to
+  build and then throw "not a constructor" when the app ran, so there is no compatibility date for it. Cost: a
+  promise reaction is 56 bytes instead of 40.
+
+### Changed
+
+- **`x-sb-cpu-ms` is per request when requests interleave in one process.** A request is charged the thread
+  CPU time of the slices in which it ran, not the process delta across its handler, so a request is no longer
+  charged for its neighbours' work. From compatibility date `2026-11-02` an async handler is stamped too
+  (logs show it as `cpuMs`); earlier dates still send no stamp for an async handler. A synchronous
+  handler's stamp is thread time, which leaves out the egress threads.
+
 ## [0.43.0] - 2026-10-29
 
 Built on `@sproutboat/runtime` 0.35.0, `@sproutboat/toolchain` 0.20.1 and

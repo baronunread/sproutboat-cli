@@ -8,9 +8,9 @@
         "@sproutboat/artifact": "^0.3.0",
         "@sproutboat/assets": "^0.3.0",
         "@sproutboat/config": "^0.6.0",
-        "@sproutboat/runtime": "^0.35.0",
-        "@sproutboat/toolchain": "^0.20.1",
-        "@sproutboat/wire": "^0.20.3",
+        "@sproutboat/runtime": "^0.36.0",
+        "@sproutboat/toolchain": "^0.21.0",
+        "@sproutboat/wire": "^0.20.4",
       },
       "devDependencies": {
         "@oxlint/plugins": "1.85.0",
@@ -22,10 +22,10 @@
         "typescript": "7.0.2",
       },
       "optionalDependencies": {
-        "@sproutboat/cli-darwin-arm64": "0.43.0",
-        "@sproutboat/cli-darwin-x64": "0.43.0",
-        "@sproutboat/cli-linux-arm64": "0.43.0",
-        "@sproutboat/cli-linux-x64": "0.43.0",
+        "@sproutboat/cli-darwin-arm64": "0.44.0",
+        "@sproutboat/cli-darwin-x64": "0.44.0",
+        "@sproutboat/cli-linux-arm64": "0.44.0",
+        "@sproutboat/cli-linux-x64": "0.44.0",
       },
     },
   },
@@ -114,11 +114,11 @@
 
     "@sproutboat/config": ["@sproutboat/config@0.6.0", "", {}, "sha512-fx7B412Sy4YEDXMSaUx07+GyAOQDOaGSW7kO4hmA1SZBUsRX3evx+zH7tyFv6b0PHxP+htkySl+8wZUdWc0vjA=="],
 
-    "@sproutboat/runtime": ["@sproutboat/runtime@0.35.0", "", {}, "sha512-cmd2hBuRQU+gdWtEZzRv0jTPbjTcUtFRwX8/3eAHjjZL36Djqc9hCV5hxoXeKZOdTiLwPkGjL5Ksw+nVp8UNCw=="],
+    "@sproutboat/runtime": ["@sproutboat/runtime@0.36.0", "", {}, "sha512-wl5q3+7kyMkihbqLVsZuCM/B+DJOapKjVM8OO0OytA1M5SwtvkjO36bg+qXsH7clFADCDnmG4AkHfu76KN2ZJA=="],
 
-    "@sproutboat/toolchain": ["@sproutboat/toolchain@0.20.1", "", {}, "sha512-A5n4Nag+xSn9sZVxStgfN1+ISklY+ARDj8rzYsvY/YN7xH0CtnJ4g01koehvTdKj8XSz1vuefzfrDJOtHgCegA=="],
+    "@sproutboat/toolchain": ["@sproutboat/toolchain@0.21.0", "", {}, "sha512-W7wwVY7x9o9MxdPUiEMCuaspS/T4+WtKHjHwcNqNDcSWkWCUjGlzRUeVdZfv3/1vxhpVUPr7vnGaekMuyT3yNg=="],
 
-    "@sproutboat/wire": ["@sproutboat/wire@0.20.3", "", { "dependencies": { "@sproutboat/assets": "^0.3.0", "@sproutboat/runtime": "^0.35.0" } }, "sha512-vPKouBbY2Ar98j7OBqB0UMb39KrQCpSZORBqa1+issm5vMZd8tm0w7LtYWi6mIRQUmbqAbhc2ZXhxw5+yiwe3A=="],
+    "@sproutboat/wire": ["@sproutboat/wire@0.20.4", "", { "dependencies": { "@sproutboat/assets": "^0.3.0", "@sproutboat/runtime": "^0.36.0" } }, "sha512-8Ygw91S+fV7zQQlOE/EUgXqCUHzq6KjTqvfWAWv9qAFBOSHb3oAaRoYrybw/zC8fcRwmdTyDytIsMBSCEnQTwA=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
