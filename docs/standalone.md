@@ -144,7 +144,11 @@ microseconds and a handful of indexed reads is around a hundred, so a single
 core clears well over ten thousand requests a second.
 
 When one core is not enough, run several copies of the binary on the **same
-`$PORT` and the same `SB_DATA_DIR`**. uWebSockets listens with `SO_REUSEPORT`,
+`$PORT` and the same `SB_DATA_DIR`, with `SB_SQLITE_EXCLUSIVE=0`**. A standalone
+binary opens its SQLite files in exclusive locking mode by default (one process
+holds the lock for as long as it runs), so a second copy cannot open them; set
+`SB_SQLITE_EXCLUSIVE=0` on every copy to go back to shared locking, which costs
+some of the speed the exclusive lock buys. uWebSockets listens with `SO_REUSEPORT`,
 so on Linux the kernel load-balances incoming connections across every copy,
 and each copy is an independent runtime on its own core. The shared SQLite
 files are safe across processes: WAL allows any number of readers plus one
@@ -154,7 +158,7 @@ wait for the lock rather than fail. A process manager owns the fan-out:
 ```ini
 # systemd: four workers, restarted independently
 [Service]
-Environment=PORT=8080 SB_DATA_DIR=/var/lib/notes
+Environment=PORT=8080 SB_DATA_DIR=/var/lib/notes SB_SQLITE_EXCLUSIVE=0
 ExecStart=/usr/local/bin/notes
 [Install]
 WantedBy=multi-user.target
@@ -162,7 +166,9 @@ WantedBy=multi-user.target
 
 installed as a template (`notes@.service`) and enabled `notes@{1,2,3,4}`, or
 any equivalent. macOS `SO_REUSEPORT` does not load-balance, so a host build
-scales only on the deploy target.
+scales only on the deploy target. "Restarting without dropping a request" below is for one binary on one
+socket. Copies that each bind their own `SO_REUSEPORT` socket close it when they
+are replaced, and the connections waiting on it are reset.
 
 ## Building for another machine
 

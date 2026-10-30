@@ -34,18 +34,11 @@ test("the uSockets listen hook is added once, to the real bsd.c of the pinned uW
   try {
     await mkdir(join(dir, "src"), { recursive: true });
     const archive = join(import.meta.dir, "..", "vendor", "uwebsockets-360c276d-musl.tar.xz");
-    const untar = Bun.spawnSync([
-      "tar",
-      "-xJf",
-      archive,
-      "-C",
-      dir,
-      "--strip-components=3",
-      "--include=*/uSockets/src/bsd.c",
-    ]);
+    // -O writes one member to stdout: the same flags work in GNU tar and bsdtar.
+    const member = "uWebSockets-360c276d609d59af56ae6932adb95154ace9f15f-musl/uSockets/src/bsd.c";
+    const untar = Bun.spawnSync(["tar", "-xJOf", archive, member]);
     expect(untar.exitCode).toBe(0);
-    const bsd = join(dir, "bsd.c");
-    await Bun.write(join(dir, "src", "bsd.c"), await readFile(bsd));
+    await Bun.write(join(dir, "src", "bsd.c"), untar.stdout);
     await patchUSocketsListenHook(dir);
     const once = await readFile(join(dir, "src", "bsd.c"), "utf8");
     expect(once).toContain("sb_inherited_listen_fd(host, port)");
