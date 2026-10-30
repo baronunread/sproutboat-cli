@@ -82,6 +82,7 @@ test("emit-only writes the standalone module where a full build does, acquiring 
         undefined,
         "embedded",
         undefined,
+        "auto",
       ),
     );
     expect(await readdir(cache)).toEqual([]);

@@ -21,6 +21,7 @@ import { createBroker, listen } from "../../src/broker";
 import { walkAssets, type AssetManifest } from "../../src/assets";
 import type { JsonValue } from "../../src/json";
 import { ensurePorffor } from "../../src/porffor-toolchain";
+import { ensureBearssl } from "../../src/bearssl";
 
 /**
  * A port nothing is listening on.
@@ -119,9 +120,17 @@ const gen = join(workdir, "sprout.generated.js");
 const bin = join(workdir, "sprout.bin");
 writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"), "utf8"), prelude, vars, bindings));
 
+// The sprout uses crypto.subtle, so the compile needs BearSSL as a broker build gets it from the CLI.
+const tls = await ensureBearssl({ target: "host" });
+
 console.log("compiling sprout (host native)…");
 const compile = Bun.spawnSync(["node", PORF, "native", gen, "-o", bin], {
-  env: { ...process.env, PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}` },
+  env: {
+    ...process.env,
+    PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}`,
+    SB_EXTRA_CFLAGS: `-I ${tls.includeDir}`,
+    SB_EXTRA_LINK: tls.objects.slice(0, -1).join(" "),
+  },
   stdout: "pipe",
   stderr: "pipe",
 });
