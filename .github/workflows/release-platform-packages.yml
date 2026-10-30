@@ -29,11 +29,11 @@ jobs:
           # binary can't be executed on the runner that built it; the arch check
           # below stands in for the cold-cache smoke test.
           - name: macOS x64
-            runner: macos-14
+            runner: macos-15
             dir: darwin-x64
             cross: true
           - name: macOS arm64
-            runner: macos-14
+            runner: macos-15
             dir: darwin-arm64
           - name: Linux x64
             runner: ubuntu-24.04
