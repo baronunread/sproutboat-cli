@@ -21,7 +21,7 @@ import { ensureZig, esbuildVersion, porfforVersion, toolchainStamp } from "./too
 import { PORFFOR_ARCHIVE_SHA256, PORFFOR_COMMIT_FULL } from "./porffor-toolchain";
 import { version as toolchainPackageVersion } from "@sproutboat/toolchain/package.json" with { type: "json" };
 import { version as cliVersion } from "../package.json" with { type: "json" };
-import { wrapNativeFetchHandler } from "./wrap";
+import { reachesSubtle, wrapNativeFetchHandler } from "./wrap";
 
 export type BuildInput = {
   projectDir: string;
@@ -230,8 +230,13 @@ async function prepareBuild(input: BuildInput) {
     bakedAssets,
     input.transport,
     versionMetadata,
+    // Drop crypto.subtle (about 330 KB, and BearSSL on the link line) from a handler that never names it.
+    "auto",
   );
+  // The broker transport links no BearSSL of its own; a handler that uses crypto.subtle needs it.
+  const subtle = !embedded && reachesSubtle(source.toString());
   return {
+    subtle,
     sourceHash,
     target,
     embedded,
@@ -309,6 +314,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     sourceHash,
     target,
     embedded,
+    subtle,
     host,
     bindings,
     assetDir,
@@ -327,7 +333,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       toolchain: toolchainStamp(),
       toolchainPackageVersion,
       porffor: [PORFFOR_COMMIT_FULL, PORFFOR_ARCHIVE_SHA256],
-      native: embedded ? [sqliteStamp(), bearsslStamp()] : [],
+      native: embedded ? [sqliteStamp(), bearsslStamp()] : subtle ? [bearsslStamp()] : [],
       integration: await integrationIdentity(),
       nativeRestore: input.withRestore ? NATIVE_RESTORE_IDENTITY : null,
     }),
@@ -347,7 +353,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       const zigBin = host ? undefined : await ensureZig();
       const [sqliteObject, tls] = embedded
         ? await Promise.all([ensureSqliteObject({ target, zigBin }), ensureBearssl({ target, zigBin })])
-        : [null, null];
+        : [null, subtle ? await ensureBearssl({ target, zigBin }) : null];
       const unitDir = unitDirFor(input);
       const unitLock = input.generatedPath ? null : await acquireArtifactLock(unitDir);
       try {
@@ -364,7 +370,11 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
           transport: input.transport,
           appName: input.config.name,
           assets: bakedAssets,
-          extraLink: [...(sqliteObject ? [sqliteObject] : []), ...(tls ? tls.objects : [])],
+          // Without TLS (broker), the trust anchors are not wanted: only crypto.subtle uses the library.
+          extraLink: [
+            ...(sqliteObject ? [sqliteObject] : []),
+            ...(tls ? (embedded ? tls.objects : tls.objects.slice(0, -1)) : []),
+          ],
           extraCflags: tls ? ["-I", tls.includeDir] : [],
           optimize: input.optimize,
           versionMetadata,
