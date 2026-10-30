@@ -97,10 +97,10 @@ export const COMMANDS: readonly Command[] = [
     name: "build",
     group: "Develop",
     emoji: "🔨",
-    args: "[project-dir] [--target host] [--standalone] [--with-restore] [--emit-only]",
+    args: "[project-dir] [--target host|linux-x64|linux-arm64] [--standalone] [--deploy-files] [--with-restore] [--emit-only]",
     brief: "[project-dir]",
     summary:
-      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally, not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process. `--with-restore` adds an offline `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command to a standalone executable; it runs before app initialization. `--emit-only` stops after writing `.sproutboat/porffor-units/<shape>/sprout.generated.js`, the module Porffor would compile, and prints its path: every check still runs, nothing is compiled.",
+      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally, not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process; add `--target linux-arm64` for an aarch64 box (the default is `linux-x64`) and `--deploy-files` to write a Dockerfile, a systemd socket and service, a fly.toml and a push script beside it. `--with-restore` adds an offline `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command to a standalone executable; it runs before app initialization. `--emit-only` stops after writing `.sproutboat/porffor-units/<shape>/sprout.generated.js`, the module Porffor would compile, and prints its path: every check still runs, nothing is compiled.",
   },
   {
     name: "toolchain",

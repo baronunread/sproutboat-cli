@@ -5,7 +5,7 @@ bindings. No control plane, no edge, no Bun on the target: copy the file to a
 machine and run it.
 
 ```sh
-sproutboat build --standalone            # ~2 MB: SQLite and TLS compiled in
+sproutboat build --standalone            # ~6.5 MB, static: SQLite and the TLS client compiled in
 PORT=3000 ./dist/hello                   # serves on $PORT (default 8080)
 ```
 
@@ -163,6 +163,239 @@ WantedBy=multi-user.target
 installed as a template (`notes@.service`) and enabled `notes@{1,2,3,4}`, or
 any equivalent. macOS `SO_REUSEPORT` does not load-balance, so a host build
 scales only on the deploy target.
+
+## Building for another machine
+
+`sproutboat build --standalone` builds a static Linux binary from any machine,
+macOS included, with no Docker and no Linux box:
+
+```sh
+sproutboat build --standalone                          # linux-x64, the default
+sproutboat build --standalone --target linux-arm64     # a Raspberry Pi, Graviton, Ampere
+sproutboat build --standalone --target host            # this machine, to run it here
+```
+
+`linux-x86_64` and `linux-amd64` mean `linux-x64`; `linux-aarch64` means
+`linux-arm64`. Only `--standalone` takes `linux-arm64`: the platform that
+`deploy` targets runs x86_64.
+
+How it is built, so it is the same on every machine: the pinned Zig (see
+`sproutboat toolchain doctor`) cross-compiles everything with `zig cc -target
+<arch>-linux-musl` and links it statically against musl. musl, not glibc,
+because a glibc binary is only static if you give up name resolution and
+`dlopen`, and the binary then needs the build machine's glibc version on the
+box. A musl binary needs nothing from the box: no libc, no certificates (the
+Mozilla roots are compiled in), no `/etc/passwd`. That is also what lets the
+container image below start `FROM scratch`. Porffor's generated C, uSockets
+(built from the vendored source, patched for the restart hook), SQLite and
+BearSSL are all compiled for the target architecture; the first build for a new
+architecture compiles them (about a minute) and caches the objects under
+`~/.cache/sproutboat`.
+
+Check it: `file dist/app` says `ELF 64-bit LSB executable, ARM aarch64 ...,
+statically linked`. The x86_64 binary built on macOS runs on a Linux x86_64 box
+unchanged; build and test an arm64 one on arm64 Linux hardware (or in an arm64
+container: `docker run --rm --platform linux/arm64 -v $PWD/dist:/t alpine /t/app`).
+
+## Restarting without dropping a request
+
+Replacing a running binary used to reset about one request in a few thousand.
+The cause is in the kernel, not the server: closing a listening socket resets
+every connection that has completed its handshake and is waiting to be
+accepted, and a restart closes it (the old process exits, or closes its own
+`SO_REUSEPORT` listener once the new one is up). Draining first does not help,
+because one more connection can arrive between the last `accept()` and the
+`close()`.
+
+So the fix is never to let a restart be the last close of the socket. The
+binary supports two ways to keep it open, and both use systemd's
+`sd_listen_fds` convention (`LISTEN_PID`, `LISTEN_FDS`, the socket in fd 3), so
+the binary has one way in:
+
+- **systemd socket activation.** systemd owns the socket. The binary serves on
+  it instead of binding `$PORT`. `systemctl restart` stops and starts the
+  service while the socket stays open: connections wait in the queue (up to
+  `Backlog=`) and the new binary accepts them. Nothing is reset. This is the
+  one to use on a VPS.
+- **`kill -USR2`**, for a box without systemd, or any supervisor that is not a
+  socket holder. The running binary starts the file now on disk (its own path,
+  or `SB_EXEC_PATH`) as a child that inherits the listening socket, then drains
+  and exits. The same swap, done by the binary itself.
+
+Both end the same way for the old process, which drains: it stops accepting,
+adds `Connection: close` to every response (so a keep-alive client stops
+reusing the connection, which is what would otherwise be reset in the one
+instant the process exits), and exits once nothing is in flight. `SIGTERM` and
+`SIGINT` do that too, with no successor. A second signal exits at once.
+
+|                         | default | what it does |
+| ----------------------- | ------- | ------------ |
+| `SB_DRAIN_SECONDS`      | 10      | the longest a draining process stays, then it exits. |
+| `SB_DRAIN_QUIET_MS`     | 200     | a connection that saw traffic this recently still counts as busy. |
+| `SB_EXEC_PATH`          | its own file | what `SIGUSR2` starts. Set it when you deploy to `releases/<id>/app` behind a `current` symlink: the running file is the old release. |
+
+"In flight" is read from the kernel for each connection: unread or unsent
+bytes, a request that arrived and has no answer yet, or traffic in the last
+`SB_DRAIN_QUIET_MS`. An idle keep-alive connection is not busy and is closed
+when the process exits. One case is not covered: a handler that waits longer
+than `SB_DRAIN_QUIET_MS` on something that is not a socket, a bare
+`setTimeout`, say, while its request sits unanswered. That connection looks
+like the one a request is waiting on, so it is waited for; but the timer is
+not, so raise `SB_DRAIN_SECONDS` rather than `SB_DRAIN_QUIET_MS` for handlers
+that do that.
+
+The one thing neither mechanism changes is the gap itself. A standalone binary
+holds its SQLite files exclusively (see "Concurrency and scaling"), so the new
+process cannot initialise until the old one has exited: for the length of the
+drain plus the new binary's start-up (milliseconds to a couple of hundred
+milliseconds for a small app, longer under a long request) a request waits in
+the queue instead of being answered. It is delayed, not failed. Timers inside
+the process (cron triggers, queue batches, Durable Object alarms) do not run in
+the gap, as in any restart. With
+`SB_SQLITE_EXCLUSIVE=0` nothing holds the files and you can run two copies at
+once, but the zero-drop guarantee does not need it, and it costs the speed the
+exclusive lock buys.
+
+Measured on a 2-core Linux x86_64 box with three fresh-connection and three
+keep-alive clients hammering one port while the binary is replaced: 200 swaps by
+`systemctl restart` served 115,386 requests with 0 failed, 200 swaps by
+`kill -USR2` served 134,272 with 0 failed, and 100 swaps of an app writing to D1
+on every other request lost none of 32,128 acknowledged writes. A swap takes a
+median of 80 ms; the slowest request in the run waited 101 ms. The old recipe
+(start the new copy on the same port, then `SIGTERM` the old) failed 134 of
+283,966 requests over 200 swaps and needed 597 retries.
+The harness is `packages/runtime/test/standalone-restart-stress.py` in the
+sproutboat-packages repository.
+
+### On a VPS: systemd
+
+`--deploy-files` writes the two units and a script next to the binary:
+
+```sh
+sproutboat build --standalone --deploy-files
+./dist/app.deploy/deploy-vps.sh user@host      # scp + install + restart, first time and every time
+```
+
+`deploy-vps.sh` copies the binary to `/opt/<name>/<name>` (atomically, so the
+running file is never half written), installs `<name>.socket` and
+`<name>.service`, and runs `systemctl enable --now <name>.socket` and
+`systemctl restart <name>.service`. The units:
+
+```ini
+# /etc/systemd/system/notes.socket
+[Socket]
+ListenStream=8080
+Backlog=4096
+TriggerLimitIntervalSec=0
+[Install]
+WantedBy=sockets.target
+```
+
+```ini
+# /etc/systemd/system/notes.service
+[Unit]
+Requires=notes.socket
+[Service]
+ExecStart=/opt/notes/notes
+StateDirectory=notes
+Environment=SB_DATA_DIR=/var/lib/notes
+EnvironmentFile=-/etc/notes.env
+DynamicUser=yes
+KillSignal=SIGTERM
+Environment=SB_DRAIN_SECONDS=20
+TimeoutStopSec=30
+Restart=on-failure
+```
+
+`TriggerLimitIntervalSec=0` matters: by default systemd gives up on a socket
+that triggers more than 200 starts in 2 seconds and closes it, and under load a
+restart can do that. Every later deploy is the same command: `build`, then `deploy-vps.sh`. Secrets
+go in `/etc/notes.env` (`KEY=value` per line, mode 0600), never in the binary.
+TLS is yours: Caddy or nginx on :443 proxying to `127.0.0.1:8080`. The socket
+listens on every address by default; use `ListenStream=127.0.0.1:8080` when a
+proxy on the same box is the only client.
+
+Without the script: `scp dist/app host:/tmp/app.new && ssh host 'sudo install
+-m755 /tmp/app.new /opt/notes/notes && sudo systemctl restart notes'`. If the
+service has never started, `restart` starts it.
+
+### Without systemd: `kill -USR2`
+
+Run the binary under anything that does not restart it when its process exits
+(tmux, runit with `down`, a launcher script), then to deploy:
+
+```sh
+scp dist/app host:/opt/notes/app.new && ssh host 'mv /opt/notes/app.new /opt/notes/app && kill -USR2 $(cat /run/notes.pid)'
+```
+
+`mv` replaces the file atomically (never copy over a running binary: Linux
+refuses with "text file busy"). The running binary notices from
+`/proc/self/exe` that its own file was replaced and starts the new one; it logs
+`restart: started /opt/notes/app as pid N` and `drained, exiting`. The successor is
+the old process's child that outlives it, so a supervisor that tracks the
+original pid sees the service end: use this where the supervisor does not
+restart on exit, or use systemd.
+
+If the new binary cannot start at all (a missing execute bit, a wrong
+architecture), the old one keeps serving and logs why. If it starts and then
+dies during initialisation, nothing is listening and the socket is gone with
+the process that held it: test a new binary (for example run it once on another
+port against a copy of the data) before you send the signal.
+
+## Containers
+
+`--deploy-files` also writes a `Dockerfile` that is a scratch image: the binary
+and an empty data directory, nothing else.
+
+```dockerfile
+FROM scratch
+COPY --chown=65532:65532 data/ /data/
+COPY --chown=65532:65532 --chmod=0755 notes /app/notes
+ENV PORT=8080 SB_DATA_DIR=/data SB_DRAIN_SECONDS=8
+EXPOSE 8080
+VOLUME /data
+USER 65532:65532
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/app/notes"]
+```
+
+```sh
+sproutboat build --standalone --deploy-files
+docker build -t notes dist/app.deploy
+docker run -d -p 8080:8080 -v notes-data:/data notes
+```
+
+There is no shell, no libc and no certificate bundle, because the binary needs
+none. The image is the size of the binary. `distroless/static` works the same
+way if you want a `nonroot` user and `/etc/passwd` provided for you; `COPY` the
+binary into it and set `USER nonroot`. For an arm64 image build with
+`--target linux-arm64` and `docker build --platform linux/arm64`.
+
+A container is replaced, not signalled, so a container restart cannot keep the
+socket: the zero-drop part is the drain (`docker stop` sends `SIGTERM`, waits
+ten seconds, and the binary answers what it has and leaves within
+`SB_DRAIN_SECONDS`) plus whatever sits in front. Put the proxy or load balancer
+in front, start the new container, then stop the old one, and the proxy's
+health check moves traffic across with no connection reset.
+
+## On Fly.io
+
+```sh
+sproutboat build --standalone --deploy-files
+./dist/app.deploy/deploy-fly.sh iad      # creates the app and a 1 GB volume once, then fly deploy
+```
+
+Needs the `fly` CLI logged in. `fly.toml` is next to the script: port 8080 with
+Fly's edge terminating TLS (the binary stays plain HTTP), `kill_signal =
+"SIGTERM"` with a `kill_timeout` longer than `SB_DRAIN_SECONDS`, and a TCP
+health check so a machine only takes traffic once the binary is listening.
+
+State needs a volume, and a Fly volume attaches to one machine at a time, so a
+deploy of a stateful app stops the machine and starts the new one: a few
+seconds with no machine, however clean the drain. Fly's rolling deploy (start
+the new machine, check it, stop the old) is zero-downtime only for an app with
+no local state; for that, delete `[mounts]` and run two machines. If you need
+state and no gap, keep it outside the binary (R2, an external database).
 
 ## TLS, in both directions
 
