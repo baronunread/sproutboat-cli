@@ -10,6 +10,23 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.47.0] - 2026-10-30
+
+Built on `@sproutboat/runtime` 0.38.0, `@sproutboat/toolchain` 0.21.1 and `@sproutboat/wire` 0.21.1.
+
+### Added
+
+- **`crypto.subtle` like workerd from `2026-11-06`**: RSASSA-PKCS1-v1_5, RSA-PSS, RSA-OAEP, ECDSA (P-256, P-384, P-521), ECDH,
+  Ed25519 (and `NODE-ED25519`), X25519, AES-GCM, AES-CBC, AES-CTR and AES-KW, PBKDF2 and HKDF for every hash, `generateKey`,
+  `importKey` and `exportKey` in raw, spki, pkcs8 and jwk, `deriveBits`, `deriveKey`, `wrapKey`, `unwrapKey` and
+  `crypto.DigestStream`, with workerd's DOMException error names. Earlier dates answer as before. The primitives are
+  BearSSL's and Monocypher's, and standalone and broker builds both carry them.
+
+### Changed
+
+- **A build whose handler never names `subtle`, `DigestStream` or `CryptoKey` carries none of the crypto code** (its generated
+  program is unchanged); a broker build whose handler does use `crypto.subtle` links the cached BearSSL library for it.
+
 ## [0.46.0] - 2026-10-30
 
 Built on `@sproutboat/runtime` 0.37.1, `@sproutboat/toolchain` 0.21.1 and
