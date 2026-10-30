@@ -10,6 +10,35 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.46.0] - 2026-10-30
+
+Built on `@sproutboat/runtime` 0.37.1, `@sproutboat/toolchain` 0.21.1 and
+`@sproutboat/wire` 0.21.0. Each change below that an existing app could observe starts at a new
+compatibility date; earlier dates answer as before.
+
+### Added
+
+- **D1 like workerd from `2026-11-03`**: a PRAGMA outside D1's allow-list fails with `not authorized`,
+  and `exec()` errors and empty statements follow workerd.
+- **Durable Objects like workerd from `2026-11-04`**: `alarm(alarmInfo)` with `{ retryCount, isRetry }`,
+  multi-statement `sql.exec()`, `ctx.storage.kv`, `ctx.abort()`, `ctx.props`, transactions on one object
+  that run one after another, a transaction that refuses use after `rollback()` or commit, structured
+  clone that keeps shared and circular references, and the argument checks of `get`, `put`, `list` and
+  `setAlarm`.
+- **Queues like workerd from `2026-11-05`**: the v8 content type keeps shared and circular references, holes
+  and invalid dates, message fields are read-only, `send()` and `sendBatch()` check their arguments, and a
+  delivery with non-ASCII text reaches the consumer as UTF-8 instead of mojibake.
+- **`DOMException` is a constructible global**, and abort and timeout reasons are instances of it.
+- **`TextDecoder` decodes UTF-16LE, UTF-16BE and windows-1252**; `Blob.prototype.stream()` exists; a
+  constructed `Response` has `url` "" and `redirected` false.
+
+### Fixed
+
+- **`crypto.getRandomValues` fills every byte** of a wider view (a `Uint32Array` came back below 256).
+- **A collector crash (SIGBUS)**: a minor collection scanned the entries block an array left behind when it
+  grew, and marked blocks that had been freed and reused. A request that rejects more promises than
+  Promise's pending list has room for could end the process some hundreds of requests later.
+
 ## [0.45.0] - 2026-10-29
 
 ### Added
