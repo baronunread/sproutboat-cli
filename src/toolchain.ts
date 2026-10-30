@@ -18,6 +18,7 @@ import embeddedUwsArchive from "../vendor/uwebsockets-360c276d-musl.tar.xz" with
 import { BEARSSL_VERSION } from "./bearssl";
 import { cachedPorfforRoot, PORFFOR_CHANNEL, PORFFOR_COMMIT } from "./porffor-toolchain";
 import { SQLITE_VERSION } from "./sqlite";
+import { LINUX_TARGETS, type LinuxTarget } from "./targets";
 
 export const ZIG_VERSION = "0.16.0";
 
@@ -694,4 +695,87 @@ function uwsCommit(): string {
 /** Compact provenance string for the artifact manifest. */
 export function toolchainStamp(): string {
   return `zig-musl/${ZIG_VERSION}+porffor/${PORFFOR_COMMIT}+uws/${uwsCommit()}`;
+}
+
+/**
+ * Zero-drop restart (docs/standalone.md): a standalone binary's uSockets asks the binary for an
+ * inherited listening socket (systemd socket activation, or the predecessor of a SIGUSR2 restart)
+ * before it binds one. uSockets has no such hook, so its `bsd_create_listen_socket` gets one line, the
+ * same one sproutd's host build adds: a weak reference to `sb_inherited_listen_fd`, which the
+ * toolchain's native server defines. Anchored and idempotent, like every edit here.
+ */
+const USOCKETS_LISTEN_ANCHOR =
+  "LIBUS_SOCKET_DESCRIPTOR bsd_create_listen_socket(const char *host, int port, int options) {\n";
+const USOCKETS_LISTEN_HOOK =
+  "    extern int sb_inherited_listen_fd(const char *, int) __attribute__((weak));\n" +
+  "    if (sb_inherited_listen_fd) { int inherited = sb_inherited_listen_fd(host, port); if (inherited >= 0) return inherited; }\n";
+/** Bump when the hook above changes: it is part of the cache stamp, so a stale tree is rebuilt. */
+const USOCKETS_HOOK_VERSION = "listen-hook-1";
+
+export async function patchUSocketsListenHook(uSocketsDir: string): Promise<void> {
+  const file = resolve(uSocketsDir, "src/bsd.c");
+  const text = await readFile(file, "utf8");
+  if (text.includes("sb_inherited_listen_fd")) return;
+  if (text.split(USOCKETS_LISTEN_ANCHOR).length !== 2)
+    throw new UwsUnavailableError(`uSockets bsd.c changed: the listen-socket anchor is gone (${file})`);
+  await writeFile(file, text.replace(USOCKETS_LISTEN_ANCHOR, USOCKETS_LISTEN_ANCHOR + USOCKETS_LISTEN_HOOK));
+}
+
+/**
+ * The uWebSockets tree for a **standalone** Linux binary, built for `target`'s architecture.
+ *
+ * Same seeding as `ensureUWebSockets` (the vendored archive is a full checkout, and only
+ * `uSockets.a` depends on the target), but uSockets is compiled here, from the patched source, with
+ * the pinned Zig: for x86_64 as well as arm64, so the one recipe is the one that is tested. The tree
+ * lives beside the broker's (`-musl`), in `-musl-sa-<arch>`, so a deploy build keeps its unpatched
+ * uSockets. Porffor is pointed at it with `SB_UWS_VARIANT` (see the toolchain's patchMuslTarget).
+ *
+ * Returns the variant name to pass as `SB_UWS_VARIANT`.
+ */
+export async function ensureUWebSocketsStandalone(target: LinuxTarget, zigBin: string): Promise<string> {
+  const { arch, triple } = LINUX_TARGETS[target];
+  const variant = `sa-${arch}`;
+  const commit = uwsCommitFull();
+  const dir = resolve(homedir(), ".cache/porffor/deps", `uWebSockets-${commit}-musl-${variant}`);
+  const command = [zigBin, "cc", "-target", triple, "-std=c11", "-DLIBUS_NO_SSL", "-O3", USOCKETS_HOOK_VERSION];
+  if (await uwsComplete(dir, command)) return variant;
+
+  await withUwsLock(dir, async () => {
+    if (await uwsComplete(dir, command)) return;
+    const vendored = process.env.SPROUTBOAT_UWS_TARBALL || uwsVendorArchive(commit.slice(0, 8));
+    if (!existsSync(vendored)) throw new UwsUnavailableError(`no vendored uWebSockets archive at ${vendored}`);
+    if (!process.env.SPROUTBOAT_UWS_TARBALL) {
+      const actual = await sha256File(vendored);
+      if (actual !== UWS_TARBALL_SHA256) {
+        throw new UwsUnavailableError(
+          `vendored uWebSockets sha256 mismatch\n  expected ${UWS_TARBALL_SHA256}\n  got      ${actual}`,
+        );
+      }
+    }
+    await extractUws(vendored, dir);
+    const uSockets = resolve(dir, "uSockets");
+    // The archive carries a prebuilt x86_64 uSockets.a and its object; neither is this target's.
+    await rm(resolve(uSockets, "uSockets.a"), { force: true });
+    await rm(resolve(uSockets, "bsd.o"), { force: true });
+    await patchUSocketsListenHook(uSockets);
+
+    const sources = ["src/*.c", "src/eventing/*.c", "src/crypto/*.c", "src/io_uring/*.c"];
+    const build = Bun.spawn(
+      [
+        "sh",
+        "-c",
+        `"${zigBin}" cc -target ${triple} -std=c11 -Isrc -DLIBUS_NO_SSL -O3 -c ${sources.join(" ")} && ` +
+          `"${zigBin}" ar rcs uSockets.a *.o && rm -f *.o`,
+      ],
+      { cwd: uSockets, stdout: "pipe", stderr: "pipe" },
+    );
+    const [code, err] = await Promise.all([build.exited, new Response(build.stderr).text()]);
+    if (code !== 0 || !existsSync(resolve(uSockets, "uSockets.a"))) {
+      throw new UwsUnavailableError(
+        `could not build uSockets for ${triple}: ${err.trim().split("\n").slice(-3).join(" ")}`,
+      );
+    }
+    await writeUwsManifest(dir, command);
+  });
+  return variant;
 }
