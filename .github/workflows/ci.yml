@@ -74,11 +74,11 @@ jobs:
           - name: macOS x64
             # GitHub's macOS x64 pool is routinely unavailable. Bun can
             # cross-compile this target from the macOS arm64 image.
-            runner: macos-14
+            runner: macos-15
             dir: darwin-x64
             cross: true
           - name: macOS arm64
-            runner: macos-14
+            runner: macos-15
             dir: darwin-arm64
           - name: Linux x64
             runner: ubuntu-24.04
