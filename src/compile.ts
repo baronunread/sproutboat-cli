@@ -15,7 +15,14 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { ensurePorfforPatched } from "./patch-porffor";
 import { buildNativeRestore } from "./native-restore";
-import { ensureUWebSockets, ensureUWebSocketsHost, resolveHostCompiler, UwsUnavailableError } from "./toolchain";
+import {
+  ensureUWebSockets,
+  ensureUWebSocketsHost,
+  ensureUWebSocketsStandalone,
+  resolveHostCompiler,
+  UwsUnavailableError,
+} from "./toolchain";
+import { isLinuxTarget, LINUX_TARGETS, linuxTriple, type BuildTarget } from "./targets";
 import { ensurePorffor } from "./porffor-toolchain";
 // The prelude + transports live in @sproutboat/runtime (next to wrap.ts, which
 // locates them by file URL). `preludePath`/`transportPath` read them from there
@@ -83,7 +90,7 @@ export type CompileInput = {
    * file. Anything that could be deployed stays at -O3.
    */
   optimize?: "dev" | "release";
-  /** Cross-compiler for `linux-x86_64`. Not needed, and not used, for `host`. */
+  /** Cross-compiler for a Linux target. Not needed, and not used, for `host`. */
   zigBin?: string;
   /** #126 — `env.<binding> = { id, tag, timestamp }`, baked directly into the module. */
   versionMetadata?: { binding: string; id: string; tag: string; timestamp: string };
@@ -93,7 +100,7 @@ export type CompileInput = {
    * dev` can actually serve a sprout on a developer's laptop — an arm64 Mac
    * cannot execute the deploy artifact.
    */
-  target?: "linux-x86_64" | "host";
+  target?: BuildTarget;
   /**
    * Write `generatedPath` exactly as a full compile would, then stop: no
    * Porffor, no uWebSockets, no compiler, nothing at `outPath`. For callers
@@ -169,10 +176,19 @@ function compileEnv(
   extraLink?: string[],
   extraCflags?: string[],
   compiler?: { cc: string[]; cxx: string[] },
+  linux?: { triple: string; uwsVariant: string },
 ) {
   const link = extraLink && extraLink.length > 0 ? extraLink.join(" ") : undefined;
   const cflags = extraCflags && extraCflags.length > 0 ? extraCflags.join(" ") : undefined;
-  const env = { ...process.env, PATH: path, SB_EXTRA_LINK: link, SB_EXTRA_CFLAGS: cflags };
+  const env = {
+    ...process.env,
+    PATH: path,
+    SB_EXTRA_LINK: link,
+    SB_EXTRA_CFLAGS: cflags,
+    // The toolchain patch (patchMuslTarget) reads these; unset, Porffor builds x86_64 against its usual tree.
+    SB_MUSL_TARGET: linux?.triple,
+    SB_UWS_VARIANT: linux?.uwsVariant,
+  };
   if (compiler) return { ...env, CC: compiler.cc.join(" "), CXX: compiler.cxx.join(" ") };
   return env;
 }
@@ -258,9 +274,12 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   // the first build needs no `git` / `make`. The two targets keep separate
   // cache trees and separate uSockets.a, so seed whichever this build wants.
   // Fall back to Porffor's own git+make path if the archive is unusable.
+  let uwsVariant: string | undefined;
   try {
     if (input.target === "host") await ensureUWebSocketsHost();
-    else await ensureUWebSockets();
+    else if (input.transport === "embedded" && input.zigBin) {
+      uwsVariant = await ensureUWebSocketsStandalone(input.target ?? "linux-x86_64", input.zigBin);
+    } else await ensureUWebSockets();
   } catch (error) {
     if (!(error instanceof UwsUnavailableError)) throw error;
     if (process.env.SPROUTBOAT_BUILD_UWS_FROM_SOURCE !== "1") throw error;
@@ -308,8 +327,8 @@ export async function compileSprout(input: CompileInput): Promise<void> {
         directory: dirname(generatedPath),
         prelude: await loadPrelude("embedded"),
         porfforCommand: command,
-        cc: hostCompiler?.cc ?? [input.zigBin!, "cc", "-target", "x86_64-linux-musl"],
-        cxx: hostCompiler?.cxx ?? [input.zigBin!, "c++", "-target", "x86_64-linux-musl"],
+        cc: hostCompiler?.cc ?? [input.zigBin!, "cc", "-target", linuxTriple(input.target)],
+        cxx: hostCompiler?.cxx ?? [input.zigBin!, "c++", "-target", linuxTriple(input.target)],
         cflags: input.extraCflags ?? [],
         macho: input.target === "host" && process.platform === "darwin",
       })
@@ -326,6 +345,9 @@ export async function compileSprout(input: CompileInput): Promise<void> {
         [...(input.extraLink ?? []), ...restoreObjects],
         [...(input.extraCflags ?? []), ...(input.withRestore ? ["-Dmain=sb_app_main"] : [])],
         hostCompiler,
+        uwsVariant && input.target && isLinuxTarget(input.target)
+          ? { triple: LINUX_TARGETS[input.target].triple, uwsVariant }
+          : undefined,
       ),
     },
   );
