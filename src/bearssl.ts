@@ -19,6 +19,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { LINUX_TARGETS, type BuildTarget } from "./targets";
 import { resolveHostCompiler } from "./toolchain";
 
 export const BEARSSL_VERSION = "0.6";
@@ -75,7 +76,7 @@ async function withBearsslLock<T>(dir: string, name: string, action: () => Promi
 }
 
 export type BearsslInput = {
-  target: "linux-x86_64" | "host";
+  target: BuildTarget;
   /** Zig binary, required for the linux target. */
   zigBin?: string;
 };
@@ -248,7 +249,7 @@ export async function ensureBearssl(input: BearsslInput): Promise<BearsslBuild> 
   const [cc, ...prefix] =
     input.target === "host"
       ? (await resolveHostCompiler()).cc
-      : [input.zigBin ?? "zig", "cc", "-target", "x86_64-linux-musl"];
+      : [input.zigBin ?? "zig", "cc", "-target", LINUX_TARGETS[input.target].triple];
   const includes = [includeDir, resolve(tree, "src")];
   const sourceFiles = await sources(tree);
   const anchors = await trustAnchorSource(tree);

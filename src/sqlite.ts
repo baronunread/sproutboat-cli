@@ -16,6 +16,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
+import { LINUX_TARGETS, type BuildTarget } from "./targets";
 import { resolveHostCompiler } from "./toolchain";
 
 export const SQLITE_VERSION = "3.50.4";
@@ -134,8 +135,8 @@ async function acquireAmalgamation(dir: string): Promise<string> {
 }
 
 export type SqliteObjectInput = {
-  /** `host` compiles with cc; `linux-x86_64` cross-compiles with the pinned Zig. */
-  target: "linux-x86_64" | "host";
+  /** `host` compiles with cc; a Linux target cross-compiles with the pinned Zig. */
+  target: BuildTarget;
   /** Zig binary, required for the linux target. */
   zigBin?: string;
 };
@@ -151,7 +152,7 @@ export async function ensureSqliteObject(input: SqliteObjectInput): Promise<stri
   const [cmd, ...prefix] =
     input.target === "host"
       ? (await resolveHostCompiler()).cc
-      : [input.zigBin ?? "zig", "cc", "-target", "x86_64-linux-musl"];
+      : [input.zigBin ?? "zig", "cc", "-target", LINUX_TARGETS[input.target].triple];
   const command = [cmd, ...prefix];
   const validCache = async (): Promise<boolean> => {
     try {

@@ -20,6 +20,8 @@ import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
 import { pathToFileURL } from "node:url";
 import { inspectToolchain } from "./toolchain";
+import { isLinuxTarget, parseTarget, TARGET_NAMES, type BuildTarget } from "./targets";
+import { writeDeployFiles } from "./standalone-deploy";
 import { parseTailArgs, runTail, TAIL_USAGE, tailQuery } from "./tail";
 
 // A compiled Bun executable is not a general-purpose `bun` command. Porffor
@@ -306,7 +308,7 @@ async function refreshTypes(projectDir: string, config: SproutboatConfig): Promi
   console.log(dim(`  ${TYPES_FILE} refreshed from sproutboat.jsonc`));
 }
 
-async function build(directory?: string, target: "linux-x86_64" | "host" = "linux-x86_64") {
+async function build(directory?: string, target: BuildTarget = "linux-x86_64") {
   const project = await readProject(directory);
   console.log(
     target === "host"
@@ -338,8 +340,9 @@ async function build(directory?: string, target: "linux-x86_64" | "host" = "linu
  */
 async function buildStandaloneBinary(
   directory: string | undefined,
-  target: "linux-x86_64" | "host",
+  target: BuildTarget,
   withRestore = false,
+  deployFiles = false,
 ) {
   const project = await readProject(directory);
   console.log(dim(`Building a standalone ${project.config.name} (${target})…`));
@@ -354,6 +357,12 @@ async function buildStandaloneBinary(
     });
     console.log(ok(`built ${result.outPath} (${(result.bytes / 1_000_000).toFixed(1)} MB)`));
     console.log(dim(`  run it: ${result.outPath}   ·   state lands in ./${project.config.name}.data`));
+    if (target === "linux-arm64") console.log(dim("  linux-arm64: runs on an aarch64 Linux box, not on this machine"));
+    if (deployFiles && isLinuxTarget(target)) {
+      const written = await writeDeployFiles({ name: project.config.name, target, binary: result.outPath });
+      console.log(ok(`deploy files in ${written.dir}`));
+      console.log(dim(`  ${written.files.join(" · ")}   ·   how to use them: docs/standalone.md`));
+    }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
@@ -366,7 +375,7 @@ async function buildStandaloneBinary(
  * fails the build; no compiler, SQLite or BearSSL is acquired and no binary is
  * written.
  */
-async function emitOnly(directory: string | undefined, target: "linux-x86_64" | "host", standalone: boolean) {
+async function emitOnly(directory: string | undefined, target: BuildTarget, standalone: boolean) {
   const project = await readProject(directory);
   console.log(
     dim(`Emitting ${standalone ? "the standalone " : ""}${project.config.name} source (${target}, no native compile)…`),
@@ -1370,11 +1379,28 @@ switch (command) {
         "--with-restore requires --standalone without --emit-only",
         "build --standalone --with-restore [--target host] [project-dir]",
       );
-    const hostBuild = args.includes("--target") && args[args.indexOf("--target") + 1] === "host";
-    const directory = args.find((arg) => !arg.startsWith("--") && arg !== "host");
-    const target = hostBuild ? "host" : "linux-x86_64";
+    const targetAt = args.indexOf("--target");
+    const targetArg = targetAt >= 0 ? args[targetAt + 1] : undefined;
+    const target = targetAt < 0 ? "linux-x86_64" : parseTarget(targetArg);
+    if (target === undefined)
+      usageError(
+        `unknown --target ${targetArg === undefined ? "(missing)" : `"${targetArg}"`}`,
+        `build [--target ${TARGET_NAMES}] [project-dir]`,
+      );
+    const directory = args.find((arg, at) => !arg.startsWith("--") && (targetAt < 0 || at !== targetAt + 1));
+    const deployFiles = args.includes("--deploy-files");
+    if ((deployFiles || target === "linux-arm64") && !args.includes("--standalone"))
+      usageError(
+        `${deployFiles ? "--deploy-files" : "--target linux-arm64"} requires --standalone: the platform runs x86_64`,
+        "build --standalone [--target linux-x64 | linux-arm64] [--deploy-files] [project-dir]",
+      );
+    if (deployFiles && !isLinuxTarget(target))
+      usageError(
+        "--deploy-files needs a Linux target",
+        "build --standalone --target linux-x64 --deploy-files [project-dir]",
+      );
     if (args.includes("--emit-only")) await emitOnly(directory, target, args.includes("--standalone"));
-    else if (args.includes("--standalone")) await buildStandaloneBinary(directory, target, withRestore);
+    else if (args.includes("--standalone")) await buildStandaloneBinary(directory, target, withRestore, deployFiles);
     else await build(directory, target);
     break;
   }

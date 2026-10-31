@@ -9,6 +9,7 @@ import { sqliteStamp } from "./sqlite";
 import { bearsslStamp, ensureBearssl } from "./bearssl";
 import { compileSprout, loadPrelude, type Transport } from "./compile";
 import { compileCached } from "./compile-cache";
+import type { BuildTarget } from "./targets";
 import {
   ARTIFACT_SCHEMA_VERSION,
   CAPABILITY_PROFILE,
@@ -38,7 +39,7 @@ export type BuildInput = {
    * box, so `sproutboat dev` can run the sprout locally. The manifest records
    * the real target, which is what stops the result being deployed.
    */
-  target?: "linux-x86_64" | "host";
+  target?: BuildTarget;
   /** #15 — `embedded` compiles SQLite into the sprout instead of a broker
    *  transport. Defaults to the broker transport. */
   transport?: Transport;
@@ -129,6 +130,8 @@ async function prepareBuild(input: BuildInput) {
   const sourceHash = digest(source);
   const target = input.target ?? "linux-x86_64";
   const embedded = input.transport === "embedded";
+  if (target === "linux-arm64" && !embedded)
+    throw new Error("linux-arm64 builds are for --standalone: the platform that `deploy` targets runs x86_64");
 
   // #74 — split each storage-binding array into its binding-name list (the
   // legacy shape the prelude/broker read) plus a `resources` map { binding ->
@@ -420,7 +423,8 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     const manifest: ArtifactManifest & { compileMs: number } = {
       schemaVersion: ARTIFACT_SCHEMA_VERSION,
       project: input.config.name,
-      target: host ? hostTarget() : DEPLOY_TARGET,
+      // An arm64 binary is never deployable (the platform runs x86_64), so its manifest says what it is.
+      target: host ? hostTarget() : target === "linux-arm64" ? target : DEPLOY_TARGET,
       runtime: RUNTIME,
       capabilityProfile: CAPABILITY_PROFILE,
       porfforVersion: porfforVersion(),
