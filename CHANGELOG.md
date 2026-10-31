@@ -10,6 +10,24 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.49.0] - 2026-10-31
+
+Built on `@sproutboat/runtime` 0.39.0, `@sproutboat/toolchain` 0.22.0 and `@sproutboat/wire` 0.21.2. Nothing an app can observe changes, so there is no new compatibility date.
+
+### Added
+
+- **A standalone binary restarts without dropping a request.** The listening socket is never closed by a restart: under systemd socket activation the binary serves on the socket it is given (`LISTEN_FDS`), and `kill -USR2` starts the binary now on disk as a child that inherits the socket and then drains. `SIGTERM` and `SIGINT` drain too (stop accepting, `Connection: close`, exit when idle). Tuned by `SB_DRAIN_SECONDS`, `SB_DRAIN_QUIET_MS` and `SB_EXEC_PATH`. On a 2-core box, 200 swaps under load by either route served over 100,000 requests each with none failed; the old recipe reset 134 of 283,966.
+- **`build --standalone --target linux-arm64`**, and `--target linux-x64` as a name for the default, build a static musl binary for an aarch64 box from any machine. uSockets, SQLite and BearSSL are built for the target and cached.
+- **`build --standalone --deploy-files`** writes a `FROM scratch` Dockerfile (6.5 MB image), a systemd socket and service, a `fly.toml` and one-command `deploy-vps.sh` and `deploy-fly.sh` scripts beside the binary.
+
+### Changed
+
+- The standalone docs say that several copies behind `SO_REUSEPORT` need `SB_SQLITE_EXCLUSIVE=0`, and cover restarting, targets, containers and Fly.io.
+
+### CI
+
+- The macOS runners moved from `macos-14` to `macos-15` ahead of the macOS 14 retirement.
+
 ## [0.48.1] - 2026-10-31
 
 Same packages as 0.48.0 (`@sproutboat/runtime` 0.39.0, `@sproutboat/toolchain` 0.21.3, `@sproutboat/wire` 0.21.2). The v0.48.0 tag
