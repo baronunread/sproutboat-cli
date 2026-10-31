@@ -69,12 +69,12 @@
     "@sproutboat/wire": "^0.21.2"
   },
   "devDependencies": {
-    "@oxlint/plugins": "1.85.0",
-    "@types/bun": "1.4.2",
+    "@oxlint/plugins": "1.90.0",
+    "@types/bun": "1.4.4",
     "cookie": "2.0.1",
-    "lefthook": "2.1.14",
-    "oxfmt": "0.70.0",
-    "oxlint": "1.85.0",
+    "lefthook": "2.2.2",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.90.0",
     "typescript": "7.0.2"
   },
   "optionalDependencies": {
