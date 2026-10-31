@@ -10,6 +10,26 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.48.0] - 2026-10-30
+
+Built on `@sproutboat/runtime` 0.39.0, `@sproutboat/toolchain` 0.21.3 and `@sproutboat/wire` 0.21.2. Each change below that an
+existing app could observe starts at a new compatibility date; earlier dates answer as before.
+
+### Added
+
+- **Database clients that need only `fetch` or WebSocket build and run unmodified from `2026-11-15`** (`@libsql/client`,
+  `@neondatabase/serverless`, `@supabase/supabase-js`, `@upstash/redis`, `@planetscale/database`; 113 of 117 comparisons with workerd
+  match, the rest being the wording of a network error). The build check for Node, Bun and Deno globals skips a use behind a
+  `typeof` test, a global the bundle declares itself, and mentions in strings and comments; `Error.captureStackTrace` exists.
+
+### Fixed
+
+- **`fetch()` on a standalone binary returns a promise from `2026-10-22`**, so `fetch(url).then(...)` works and a refused request
+  rejects.
+- **A fetched 204, 205 or 304 response** no longer throws "Response with null body status cannot have body".
+- **A `Uint8Array` subclass that redefines a builtin method** (a `Buffer` polyfill's `toString("hex")`) reaches its own method.
+- **A collector crash (SIGBUS)** when an object grew (toolchain 0.21.3).
+
 ## [0.47.0] - 2026-10-30
 
 Built on `@sproutboat/runtime` 0.38.0, `@sproutboat/toolchain` 0.21.1 and `@sproutboat/wire` 0.21.1.
