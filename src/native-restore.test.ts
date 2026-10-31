@@ -306,4 +306,4 @@ export default { async fetch(request) {
   const poisoned = await command([ordinary.outPath], runtimeEnv);
   assert.notEqual(poisoned.code, 0);
   assert(poisoned.stderr.includes("TENANT INITIALIZED"));
-}, 600_000);
+}, 1_200_000); // two cold standalone builds (ordinary and with restore): 476 s on CI at v0.47.0, 573 to 600+ s on 0.48.0 (a larger prelude: D1, Durable Objects, Queues and crypto parity, then the database-client fixes), so 600 s no longer fits

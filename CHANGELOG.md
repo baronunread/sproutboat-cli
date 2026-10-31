@@ -10,6 +10,17 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.48.1] - 2026-10-31
+
+Same packages as 0.48.0 (`@sproutboat/runtime` 0.39.0, `@sproutboat/toolchain` 0.21.3, `@sproutboat/wire` 0.21.2). The v0.48.0 tag
+published the four platform packages but not `sproutboat` itself, because the release job's test run timed out; 0.48.1 publishes all
+five at one version.
+
+### Fixed
+
+- **The release test run no longer times out**: the native restore test builds two standalone binaries cold, which took 476 s on CI at
+  0.47.0 and over 600 s at 0.48.0 as the prelude grew; its limit is now 1,200 s.
+
 ## [0.48.0] - 2026-10-30
 
 Built on `@sproutboat/runtime` 0.39.0, `@sproutboat/toolchain` 0.21.3 and `@sproutboat/wire` 0.21.2. Each change below that an
