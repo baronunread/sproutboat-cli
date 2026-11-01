@@ -10,6 +10,14 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+Built on `@sproutboat/runtime` 0.40.0 and `@sproutboat/wire` 0.21.3.
+
+### Added
+
+- **`fetch()` on a standalone binary runs off the event loop from `2026-11-16`**: 20 concurrent fetches to a 100 ms endpoint take about
+  105 ms instead of 2,040 ms, and other requests keep being served meanwhile. Requests now interleave across `await fetch()`, as in workerd,
+  which is why it starts at a new date; earlier dates answer as before.
+
 ## [0.49.0] - 2026-10-31
 
 Built on `@sproutboat/runtime` 0.39.0, `@sproutboat/toolchain` 0.22.0 and `@sproutboat/wire` 0.21.2. Nothing an app can observe changes, so there is no new compatibility date.
