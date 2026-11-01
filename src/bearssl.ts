@@ -22,9 +22,16 @@ import { resolve } from "node:path";
 import { LINUX_TARGETS, type BuildTarget } from "./targets";
 import { resolveHostCompiler } from "./toolchain";
 
-export const BEARSSL_VERSION = "0.6";
-const BEARSSL_URL = `https://bearssl.org/bearssl-${BEARSSL_VERSION}.tar.gz`;
-const BEARSSL_SHA256 = "6705bba1714961b41a728dfc5debbe348d2966c117649392f8c8139efc83ff14";
+/**
+ * BearSSL master, pinned to a commit: 0.6 (2018) predates `ec_p256_m64`, the 64-bit P-256 code that
+ * crypto.subtle selects explicitly (ES256 sign 2.9x, verify 5.7x faster). There is no release after 0.6,
+ * so the source is the gitweb snapshot of this commit, pinned by the digest of its bytes.
+ */
+export const BEARSSL_COMMIT = "7bea48e5e850ab4cafbe68d3765cdaba13a86d6f";
+export const BEARSSL_VERSION = BEARSSL_COMMIT.slice(0, 7);
+const BEARSSL_TREE = `BearSSL-${BEARSSL_VERSION}`;
+const BEARSSL_URL = `https://bearssl.org/gitweb/?p=BearSSL;a=snapshot;h=${BEARSSL_COMMIT};sf=tgz`;
+const BEARSSL_SHA256 = "ed397832b1613582737d9c1ce01c1af74ad6a9e9c52a341e24433987cda0f372";
 
 /**
  * The Mozilla root set, as curl publishes it. Pinned by hash like everything
@@ -118,7 +125,7 @@ async function download(url: string, expected: string, to: string): Promise<Buff
 /** Unpack the source tree once, and build the host tools we need from it. */
 async function sourceTree(): Promise<string> {
   const dir = cacheDir();
-  const tree = resolve(dir, `bearssl-${BEARSSL_VERSION}`);
+  const tree = resolve(dir, BEARSSL_TREE);
   return withBearsslLock(dir, "source", async () => {
     const tarball = resolve(dir, "bearssl.tar.gz");
     const sourceManifest = resolve(tree, ".sproutboat-source");
@@ -142,7 +149,7 @@ async function sourceTree(): Promise<string> {
     await mkdir(stage, { recursive: true });
     const untar = await run("tar", ["xzf", tarball, "-C", stage]);
     if (untar.code !== 0) throw new Error(`could not unpack BearSSL: ${untar.stderr}`);
-    const stagedTree = resolve(stage, `bearssl-${BEARSSL_VERSION}`);
+    const stagedTree = resolve(stage, BEARSSL_TREE);
     if (!existsSync(resolve(stagedTree, "inc/bearssl.h"))) {
       await rm(stage, { recursive: true, force: true });
       throw new Error("BearSSL archive did not contain bearssl.h");

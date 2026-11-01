@@ -10,7 +10,7 @@ to its upstream source.
 | Zig | `0.16.0` | Acquired cross-compiler | MIT | https://ziglang.org |
 | uWebSockets and uSockets | `360c276d609d59af56ae6932adb95154ace9f15f` | Embedded source and static archive | Apache-2.0 | https://github.com/uNetworking/uWebSockets |
 | SQLite | `3.50.4` | Acquired for standalone builds | Public domain | https://sqlite.org |
-| BearSSL | `0.6` | Acquired for standalone builds | MIT | https://bearssl.org |
+| BearSSL | `7bea48e` (master) | Acquired for standalone builds | MIT | https://bearssl.org |
 
 ## Integrity pins
 
@@ -19,7 +19,7 @@ to its upstream source.
 | Porffor source archive | `1a62187a93356b36cb6ac703ce9770c8917e4fa65545fd7c33ee8a180ae5a4c9` |
 | Embedded uWebSockets archive | `e83736f3f8cf9d56a1ebe6ea61625a7af12386763374d47c14cff472ada7484a` |
 | SQLite amalgamation archive | `1d3049dd0f830a025a53105fc79fd2ab9431aea99e137809d064d8ee8356b032` |
-| BearSSL source archive | `6705bba1714961b41a728dfc5debbe348d2966c117649392f8c8139efc83ff14` |
+| BearSSL source archive | `ed397832b1613582737d9c1ce01c1af74ad6a9e9c52a341e24433987cda0f372` |
 | Mozilla CA bundle | `f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9` |
 
 The complete Apache-2.0 notice for uWebSockets and uSockets is retained in the
