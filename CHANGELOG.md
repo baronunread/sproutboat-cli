@@ -18,6 +18,10 @@ Built on `@sproutboat/runtime` 0.40.0 and `@sproutboat/wire` 0.21.3.
   105 ms instead of 2,040 ms, and other requests keep being served meanwhile. Requests now interleave across `await fetch()`, as in workerd,
   which is why it starts at a new date; earlier dates answer as before.
 
+### Changed
+
+- **BearSSL is pinned to master commit `7bea48e`** (source: the bearssl.org gitweb snapshot, sha256 `ed397832…`) instead of 0.6, so that `crypto.subtle` can use the 64-bit P-256 code (`ec_p256_m64`). Every other primitive is unchanged. The next runtime release selects it: ES256 then signs 2.2x and verifies 3.1x faster on standalone binaries and broker builds.
+
 ## [0.49.0] - 2026-10-31
 
 Built on `@sproutboat/runtime` 0.39.0, `@sproutboat/toolchain` 0.22.0 and `@sproutboat/wire` 0.21.2. Nothing an app can observe changes, so there is no new compatibility date.
