@@ -113,6 +113,8 @@ the natural point for them to fix a bullet or fold two together.
 
 ```bash
 # package.json version, if it isn't already at the target
+# (the four platform-packages/*/package.json and optionalDependencies move with it)
+bun install            # regenerates bun.lock, which names the platform packages; src/lockfile.test.ts fails without it
 # CHANGELOG.md, with the approved section
 bun run surface        # regenerates SURFACE.md against the new version banner
 bun run typecheck
@@ -125,7 +127,7 @@ push, and CI only re-runs typecheck + test, not lint, so catching a lint
 break here is the only place it gets caught before it's public.
 
 ```bash
-git add package.json CHANGELOG.md SURFACE.md
+git add package.json bun.lock platform-packages CHANGELOG.md SURFACE.md
 git commit -m "release: vX.Y.Z (<one-line summary, same style as history>)"
 ```
 
