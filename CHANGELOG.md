@@ -10,7 +10,7 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
-Built on `@sproutboat/runtime` 0.40.0 and `@sproutboat/wire` 0.21.3.
+Built on `@sproutboat/runtime` 0.41.0 and `@sproutboat/wire` 0.21.4. Each change below that an existing app could observe starts at a new compatibility date; earlier dates answer as before.
 
 ### Added
 
@@ -20,7 +20,11 @@ Built on `@sproutboat/runtime` 0.40.0 and `@sproutboat/wire` 0.21.3.
 
 ### Changed
 
-- **BearSSL is pinned to master commit `7bea48e`** (source: the bearssl.org gitweb snapshot, sha256 `ed397832…`) instead of 0.6, so that `crypto.subtle` can use the 64-bit P-256 code (`ec_p256_m64`). Every other primitive is unchanged. The next runtime release selects it: ES256 then signs 2.2x and verifies 3.1x faster on standalone binaries and broker builds.
+- **Secrets from the environment decode as UTF-8 from `2026-11-07`** on a standalone binary. Before, the handler got the environment's bytes one char per byte, so `é` arrived as `Ã©`.
+
+### Performance
+
+- **ES256 (ECDSA P-256) in `crypto.subtle` signs 2.2x and verifies 3.1x faster** (macOS arm64, standalone and broker: 2,563 to 5,621 signs and 1,318 to 4,050 verifies per second). BearSSL is pinned to master commit `7bea48e` instead of 0.6 (source: the bearssl.org gitweb snapshot, sha256 `ed397832…`) and the runtime selects its 64-bit P-256 code (`ec_p256_m64`) where the target has a 128-bit multiply, which includes both Linux targets. Results are unchanged, so there is no new compatibility date; every other primitive is as before.
 
 ## [0.49.0] - 2026-10-31
 
