@@ -55,6 +55,16 @@ const nodeShimsPlugin: import("bun").BunPlugin = {
   },
 };
 
+/**
+ * Porffor lists the global builtin functions on the global object of every unit, and a function
+ * named like one of them (postgres: `export const escapeIdentifier = function escape(str) {}`)
+ * drops the entry from that unit alone, so a sproutd app that does it no longer matches the
+ * runtime's common code and is rejected at admission. A named function expression's name is only
+ * visible inside itself, so renaming it is safe unless the body calls itself by that name.
+ */
+const SHADOWED_BUILTIN_FUNCTIONS =
+  /([=(:,?&|]\s*|\breturn\s+)function\s+(escape|unescape|eval|isNaN|isFinite|parseInt|parseFloat|encodeURI|encodeURIComponent|decodeURI|decodeURIComponent)\s*\(/g;
+
 /** What a driver reads off `process`: an empty environment and a microtask for nextTick. */
 const PROCESS_STUB = `
 const env = {};
@@ -76,7 +86,11 @@ const nodeGlobalsPlugin: import("bun").BunPlugin = {
     build.onResolve({ filter: /^sb-node-process$/ }, () => ({ path: "sb-node-process", namespace: "sb-node-global" }));
     build.onLoad({ filter: /.*/, namespace: "sb-node-global" }, () => ({ contents: PROCESS_STUB, loader: "js" }));
     build.onLoad({ filter: /node_modules\/.*\.(?:c?js|mjs)$/ }, async (args) => {
-      const text = await Bun.file(args.path).text();
+      const original = await Bun.file(args.path).text();
+      const text = original.replace(
+        SHADOWED_BUILTIN_FUNCTIONS,
+        (_m, lead: string, name: string) => `${lead}function ${name}_sb(`,
+      );
       const usesBuffer =
         /(?:^|[^.\w$])Buffer\s*[.(]/m.test(text) &&
         !/\b(?:import|require)\b[^;\n]*\bBuffer\b/.test(text) &&
@@ -87,7 +101,8 @@ const nodeGlobalsPlugin: import("bun").BunPlugin = {
         !/(?:const|let|var|function)\s+\{?\s*process\b/.test(text);
       const usesGlobal =
         /(?:^|[^.\w$])global\s*\./m.test(text) && !/(?:const|let|var|function)\s+\{?\s*global\b/.test(text);
-      if (!usesBuffer && !usesProcess && !usesGlobal) return undefined;
+      if (!usesBuffer && !usesProcess && !usesGlobal)
+        return text === original ? undefined : { contents: text, loader: "js" };
       const esm = /^\s*(?:import|export)\s/m.test(text);
       let prefix = "";
       if (usesBuffer) prefix += esm ? `import { Buffer } from "buffer";\n` : `var { Buffer } = require("buffer");\n`;

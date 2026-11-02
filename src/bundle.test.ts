@@ -281,3 +281,20 @@ test("from the sockets date a driver bundles with its workerd condition, shimmed
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a named function expression that shadows a global builtin function is renamed from the sockets date", async () => {
+  const dir = project({
+    "node_modules/drv/package.json": JSON.stringify({ name: "drv", main: "index.js" }),
+    "node_modules/drv/index.js": `exports.escapeIdentifier = function escape(str) { return '"' + str + '"'; };`,
+    "src/index.js": `import { escapeIdentifier } from "drv"; export default { fetch() { return new Response(escapeIdentifier("a")); } };`,
+  });
+  try {
+    const old = await bundleHandler(join(dir, "src/index.js"), dir, { compatibilityDate: "2026-11-16" });
+    expect(old.code).toMatch(/function escape\(/);
+    const { code } = await bundleHandler(join(dir, "src/index.js"), dir, { compatibilityDate: "2026-11-17" });
+    expect(code).not.toMatch(/function escape\(/);
+    expect(code).toMatch(/function escape_sb\(/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
