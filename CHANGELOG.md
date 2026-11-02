@@ -10,7 +10,9 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
-Built on `@sproutboat/runtime` 0.41.0 and `@sproutboat/wire` 0.21.4. Each change below that an existing app could observe starts at a new compatibility date; earlier dates answer as before.
+## [0.50.0] - 2026-11-02
+
+Built on `@sproutboat/runtime` 0.41.0, `@sproutboat/toolchain` 0.22.0 and `@sproutboat/wire` 0.21.4. Each change below that an existing app could observe starts at a new compatibility date; earlier dates answer as before.
 
 ### Added
 
