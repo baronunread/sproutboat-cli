@@ -10,6 +10,15 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.51.0] - 2026-11-03
+
+Built on `@sproutboat/runtime` 0.42.0, `@sproutboat/toolchain` 0.23.0 and `@sproutboat/wire` 0.22.0. The change below starts at a new compatibility date; earlier dates answer as before.
+
+### Added
+
+- **`connect()` from `cloudflare:sockets` from `2026-11-17`**: TCP sockets with `readable`, `writable`, `opened`, `closed`, `close()` and `startTls()`, on a standalone binary, under `sproutboat dev` and on a platform deploy. The same unmodified Postgres (`pg`, `postgres`) and Redis driver code that runs on workerd runs here, with no differences from workerd in the driver suites. Outbound policy is the one `fetch()` uses. Before the date, importing `cloudflare:sockets` fails the build with `cloudflare:sockets needs compatibility_date 2026-11-17 or later`.
+- **From the same date a driver bundles as it does for workerd**: the `workerd` export condition (`pg-cloudflare`, `postgres/cf`), a bundled `Buffer`, `process` and `global`, and shims for `net`, `tls`, `dns`, `fs` and `crypto` so the Node branch of a driver names `cloudflare:sockets` instead of failing the build. A named function expression that shadows a global builtin function is renamed, which sproutd admission needs.
+
 ## [0.50.0] - 2026-11-02
 
 Built on `@sproutboat/runtime` 0.41.0, `@sproutboat/toolchain` 0.22.0 and `@sproutboat/wire` 0.21.4. Each change below that an existing app could observe starts at a new compatibility date; earlier dates answer as before.
