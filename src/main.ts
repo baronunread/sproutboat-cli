@@ -234,7 +234,9 @@ async function readProject(directory = process.cwd()) {
   // smuggle in a Node API the handler is not allowed to touch.
   let bundle: BundleResult;
   try {
-    bundle = await bundleHandler(sourcePath, project.directory);
+    bundle = await bundleHandler(sourcePath, project.directory, {
+      compatibilityDate: project.config.compatibility_date,
+    });
   } catch (cause) {
     fail(cause instanceof BundleError ? cause.message : String(cause));
   }

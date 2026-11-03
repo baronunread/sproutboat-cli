@@ -386,3 +386,85 @@ export const NODE_SHIMS = {
   "node:querystring": NODE_QUERYSTRING_SHIM,
   "node:url": NODE_URL_SHIM,
 } satisfies Record<string, string>;
+
+// From the sockets date (2026-11-17), for drivers that carry a Node code path next to their Workers one.
+/**
+ * node:net, node:tls, node:dns, node:fs and node:util/types for drivers that carry a Node code path
+ * next to their Workers one (pg, mysql2). The Workers path never calls them: every function throws
+ * a message that names cloudflare:sockets, so a driver that does take the Node path says why.
+ */
+const unavailable = (what: string) =>
+  `function unavailable() { throw new Error("${what} is not available in a compiled handler; use cloudflare:sockets (connect())"); }\n`;
+const NODE_NET_SHIM =
+  unavailable("the net module") +
+  `class Socket { constructor() { unavailable(); } }
+const ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$/;
+function isIP(x) { return ipv4.test(String(x)) ? 4 : String(x).indexOf(":") >= 0 && /^[0-9a-fA-F:.]+$/.test(String(x)) ? 6 : 0; }
+function connect() { unavailable(); }
+export { Socket, isIP, connect };
+export default { Socket, isIP, connect, createConnection: connect };
+`;
+const NODE_TLS_SHIM =
+  unavailable("the tls module") +
+  `function connect() { unavailable(); }
+export { connect };
+export default { connect };
+`;
+const NODE_DNS_SHIM =
+  unavailable("the dns module") +
+  `function lookup() { unavailable(); }
+export { lookup };
+export default { lookup, promises: { lookup } };
+`;
+const NODE_FS_SHIM =
+  unavailable("the fs module") +
+  `function readFileSync() { unavailable(); }
+function existsSync() { return false; }
+function statSync() { unavailable(); }
+function createReadStream() { unavailable(); }
+export { readFileSync, existsSync, statSync, createReadStream };
+export default { readFileSync, existsSync, statSync, createReadStream };
+`;
+const NODE_UTIL_TYPES_SHIM = `
+const isDate = (v) => v instanceof Date;
+const isTypedArray = (v) => ArrayBuffer.isView(v) && !(v instanceof DataView);
+const isUint8Array = (v) => v instanceof Uint8Array;
+const isArrayBuffer = (v) => v instanceof ArrayBuffer;
+const isPromise = (v) => v instanceof Promise;
+const isRegExp = (v) => v instanceof RegExp;
+export { isDate, isTypedArray, isUint8Array, isArrayBuffer, isPromise, isRegExp };
+export default { isDate, isTypedArray, isUint8Array, isArrayBuffer, isPromise, isRegExp };
+`;
+
+/**
+ * node:crypto as a Workers handler has it: the Web Crypto global, not the Node API. pg asks for
+ * `crypto.webcrypto || globalThis.crypto` and for createHash("md5") inside a try, so a createHash
+ * that throws sends it to crypto.subtle. Bun's default polyfill (crypto-browserify) is 20k lines,
+ * and its elliptic-curve code does not compile under Porffor.
+ */
+const NODE_CRYPTO_SHIM = `
+function unavailable() { throw new Error("this crypto function is not available; use crypto.subtle"); }
+const webcrypto = globalThis.crypto;
+function randomBytes(n) { return webcrypto.getRandomValues(new Uint8Array(n)); }
+function randomUUID() { return webcrypto.randomUUID(); }
+function createHash() { unavailable(); }
+function createHmac() { unavailable(); }
+export { webcrypto, randomBytes, randomUUID, createHash, createHmac };
+export default { webcrypto, randomBytes, randomUUID, createHash, createHmac, getRandomValues: (a) => webcrypto.getRandomValues(a), subtle: webcrypto.subtle };
+`;
+
+/** Replaces Bun's browser polyfills, in a bundle at the sockets date or later (see bundle.ts). */
+export const SOCKET_NODE_SHIMS = {
+  "node:crypto": NODE_CRYPTO_SHIM,
+  crypto: NODE_CRYPTO_SHIM,
+  "node:net": NODE_NET_SHIM,
+  net: NODE_NET_SHIM,
+  "node:tls": NODE_TLS_SHIM,
+  tls: NODE_TLS_SHIM,
+  "node:dns": NODE_DNS_SHIM,
+  dns: NODE_DNS_SHIM,
+  "node:fs": NODE_FS_SHIM,
+  fs: NODE_FS_SHIM,
+  "node:util/types": NODE_UTIL_TYPES_SHIM,
+  "util/types": NODE_UTIL_TYPES_SHIM,
+} satisfies Record<string, string>;
