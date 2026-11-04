@@ -10,6 +10,10 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Fixed
+
+- The BearSSL source ships in the package (`vendor/bearssl`, 867 KB) and is read first, hash-verified, so builds no longer depend on bearssl.org being up. bearssl.org stays as the fallback, with bounded retry on 5xx.
+
 ## [0.51.0] - 2026-11-03
 
 Built on `@sproutboat/runtime` 0.42.0, `@sproutboat/toolchain` 0.23.0 and `@sproutboat/wire` 0.22.0. The change below starts at a new compatibility date; earlier dates answer as before.

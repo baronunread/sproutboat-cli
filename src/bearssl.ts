@@ -19,6 +19,9 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+// @ts-expect-error Bun's file loader returns the embedded asset path in a compiled executable.
+import embeddedBearsslArchive from "../vendor/bearssl/bearssl-7bea48e.tar.gz" with { type: "file" };
+import { fetchPinned, type FetchPinnedOptions } from "./fetch-pinned";
 import { LINUX_TARGETS, type BuildTarget } from "./targets";
 import { resolveHostCompiler } from "./toolchain";
 
@@ -112,12 +115,22 @@ const run = (
     child.on("close", (code) => done({ code: code ?? 1, stderr }));
   });
 
+/**
+ * The pinned BearSSL source: the vendored copy (ships in the npm package, embedded in standalone
+ * binaries) first, bearssl.org only as a fallback. bearssl.org returned 502 for hours on 2026-11-04.
+ */
+export const bearsslVendorArchive = (): string => embeddedBearsslArchive;
+
+export const fetchBearsslTarball = (overrides: Partial<FetchPinnedOptions> = {}): Promise<Buffer> =>
+  fetchPinned({
+    localPath: bearsslVendorArchive(),
+    urls: [BEARSSL_URL],
+    sha256: BEARSSL_SHA256,
+    ...overrides,
+  });
+
 async function download(url: string, expected: string, to: string): Promise<Buffer> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`could not download ${url}: HTTP ${response.status}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  if (digest !== expected) throw new Error(`checksum mismatch for ${url}: expected ${expected}, got ${digest}`);
+  const bytes = await fetchPinned({ urls: [url], sha256: expected });
   await writeFile(to, bytes);
   return bytes;
 }
@@ -143,7 +156,7 @@ async function sourceTree(): Promise<string> {
     await rm(tree, { recursive: true, force: true });
     if (!existsSync(tarball) || (await digest(tarball)) !== BEARSSL_SHA256) {
       await rm(tarball, { force: true });
-      await download(BEARSSL_URL, BEARSSL_SHA256, tarball);
+      await writeFile(tarball, await fetchBearsslTarball());
     }
     const stage = resolve(dir, `.bearssl-stage-${process.pid}-${crypto.randomUUID()}`);
     await mkdir(stage, { recursive: true });
