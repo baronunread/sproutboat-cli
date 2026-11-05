@@ -10,9 +10,22 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.51.1] - 2026-11-05
+
+Built on `@sproutboat/runtime` 0.42.1, `@sproutboat/toolchain` 0.23.1 and `@sproutboat/wire` 0.22.1. Nothing an app can observe changes except latency and the refused address ranges below, so there is no new compatibility date.
+
 ### Fixed
 
-- The BearSSL source ships in the package (`vendor/bearssl`, 867 KB) and is read first, hash-verified, so builds no longer depend on bearssl.org being up. bearssl.org stays as the fallback, with bounded retry on 5xx.
+- The BearSSL source ships in the package (`vendor/bearssl`, 867 KB) and is read first, hash-verified, so builds no longer depend on bearssl.org being up. bearssl.org stays as the fallback, with bounded retry on 5xx. Every source, vendored or downloaded, is checked against the pinned sha256, so a bad file cannot change what gets built.
+- **A malformed `connect()` tunnel opening frame no longer ends the egress process.** A `tcp.open` head whose JSON did not parse used to throw out of the egress service's socket handler before the token was checked, which took egress down for every app. It now gets an `expected tcp.open` error frame and only that connection closes; the broker answers it as a bad request, and a refused head stops buffering whatever the client keeps sending.
+
+### Changed
+
+- **`fetch()` and `connect()` refuse more reserved address space** that carries no public service: AS112 and the old IPv4 anycast blocks (`192.31.196.0/24`, `192.52.193.0/24`, `192.88.99.0/24`, `192.175.48.0/24`), SIIT (`::ffff:0:0:0/96`), IETF protocol assignments including Teredo (`2001::/23`), `3fff::/20` and SRv6 (`5f00::/16`). This applies to the broker, the egress service and a standalone binary alike, and `SB_EGRESS_ALLOW` still overrides it.
+
+### Performance
+
+- **Outbound TCP sockets set `TCP_NODELAY`.** Nagle's algorithm and the peer's delayed ACK stalled every fresh HTTPS `fetch()` by about 44 ms on Linux, because each small TLS handshake flight waited for an ACK; a fresh fetch now takes about 1.4 ms. This covers `fetch()`, outbound WebSockets and `connect()` on a standalone binary, including sockets handed over by `SB_EGRESS_FD`, and the egress tunnel's connections to origins.
 
 ## [0.51.0] - 2026-11-03
 
