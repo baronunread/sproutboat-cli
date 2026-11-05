@@ -12,9 +12,11 @@ maintained going forward by the `release` skill.
 
 ## [0.51.1] - 2026-11-05
 
-Built on `@sproutboat/runtime` 0.42.1, `@sproutboat/toolchain` 0.23.1 and `@sproutboat/wire` 0.22.1. Nothing an app can observe changes except latency and the refused address ranges below, so there is no new compatibility date.
+Built on `@sproutboat/runtime` 0.42.2, `@sproutboat/toolchain` 0.23.1 and `@sproutboat/wire` 0.22.2. Nothing an app can observe changes except latency, the refused address ranges below and the `startTls()` write order, so there is no new compatibility date.
 
 ### Fixed
+
+- **Bytes written right after `socket.startTls()` no longer go out unencrypted.** On a `connect()` socket, the I/O thread took the start-TLS request and the app's queued writes in the same pass, and flushed all of them in plaintext before switching to TLS. Any write queued before the thread picked up the upgrade could leave in the clear. Only the bytes written before `startTls()` now go out in plaintext. Everything after waits until the TLS engine owns the socket, and new writes on the old plaintext socket reject, as in workerd. A failed plaintext flush is now a connection error. The egress tunnel also no longer stays paused on the discarded plain socket after an upgrade under backpressure.
 
 - The BearSSL source ships in the package (`vendor/bearssl`, 867 KB) and is read first, hash-verified, so builds no longer depend on bearssl.org being up. bearssl.org stays as the fallback, with bounded retry on 5xx. Every source, vendored or downloaded, is checked against the pinned sha256, so a bad file cannot change what gets built.
 - **A malformed `connect()` tunnel opening frame no longer ends the egress process.** A `tcp.open` head whose JSON did not parse used to throw out of the egress service's socket handler before the token was checked, which took egress down for every app. It now gets an `expected tcp.open` error frame and only that connection closes; the broker answers it as a bad request, and a refused head stops buffering whatever the client keeps sending.
