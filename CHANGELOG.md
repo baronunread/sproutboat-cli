@@ -23,6 +23,7 @@ maintained going forward by the `release` skill.
 
 ### Changed
 
+- The docs link in `--help` now points to https://sproutboat.com/docs (docs.sproutboat.com redirects there).
 - **`build --standalone` skips LTO unless you pass `--release`** (or set `SPROUTBOAT_RELEASE=1`). Units still compile at `-O3`; only the link changes. Cold builds are faster and the link takes about 90 MB instead of 1.1 to 1.6 GB, at some request throughput: see docs/standalone.md, "Dev and release builds", for the measured numbers. `--release` is the old `-flto -O3` build, so publish binaries with it. Release and non-release binaries have separate build-cache entries. `deploy` and non-standalone builds are unchanged.
 - **The default endpoint is `https://dash.sproutboat.com`** (it was `https://dashboard.sproutboat.com`).
 - **Credentials live in `~/Library/Preferences/sproutboat` on macOS,** Wrangler's choice. The old `~/.config/sproutboat/credentials.json` is still read, and the next login writes the new place. Elsewhere nothing moves.
