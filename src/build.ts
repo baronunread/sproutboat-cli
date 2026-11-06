@@ -20,6 +20,7 @@ import {
 } from "./manifest";
 import { ensureZig, esbuildVersion, porfforVersion, toolchainStamp } from "./toolchain";
 import { PORFFOR_ARCHIVE_SHA256, PORFFOR_COMMIT_FULL } from "./porffor-toolchain";
+import { A21_STANDALONE_FINGERPRINT } from "@sproutboat/toolchain/a21";
 import { version as toolchainPackageVersion } from "@sproutboat/toolchain/package.json" with { type: "json" };
 import { version as cliVersion } from "../package.json" with { type: "json" };
 import { reachesSubtle, wrapNativeFetchHandler } from "./wrap";
@@ -338,6 +339,9 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       porffor: [PORFFOR_COMMIT_FULL, PORFFOR_ARCHIVE_SHA256],
       // the alpha 22 channel is a different compiler, server and prelude shape (compile.ts porfforChannel)
       channel: porfforChannel(),
+      // the alpha 22 channel's own inputs: the patched tree, the shim, the bridge, the build recipe, LTO
+      channelInputs:
+        porfforChannel() === "alpha-22" ? [A21_STANDALONE_FINGERPRINT, process.env.SPROUTBOAT_FLTO ?? ""] : null,
       native: embedded ? [sqliteStamp(), bearsslStamp()] : subtle ? [bearsslStamp()] : [],
       integration: await integrationIdentity(),
       nativeRestore: input.withRestore ? NATIVE_RESTORE_IDENTITY : null,

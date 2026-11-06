@@ -477,9 +477,9 @@ async function compileSproutA21(
     extraLink: [...(input.extraLink ?? []), ...build.restoreObjects],
     extraCflags: [...(input.extraCflags ?? []), ...(input.withRestore ? ["-Dmain=sb_app_main"] : [])],
     optimize: input.optimize === "dev" && host ? 0 : 3,
-    // alpha 19 linked its single unit with LTO on a host build and without on musl (zig); same here,
-    // overridable for measurements
-    flto: process.env.SPROUTBOAT_FLTO ? process.env.SPROUTBOAT_FLTO === "1" : host && !build.hostCompiler?.usingZig,
+    // LTO on for every optimized build, zig's musl cross builds included (romeo, M4: +11% req/s on hello,
+    // +7% on stress, and 4% smaller); SPROUTBOAT_FLTO=0 turns it off for measurements
+    flto: process.env.SPROUTBOAT_FLTO ? process.env.SPROUTBOAT_FLTO === "1" : !(input.optimize === "dev" && host),
     musl: !host,
     strip: true,
   });
