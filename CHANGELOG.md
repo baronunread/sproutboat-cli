@@ -12,7 +12,7 @@ maintained going forward by the `release` skill.
 
 ## [0.52.0] - 2026-11-06
 
-Built on `@sproutboat/toolchain` 0.24.0, `@sproutboat/runtime` 0.42.2 and `@sproutboat/wire` 0.22.2. The compiler changes, so every app is recompiled on its next build. Nothing an app can observe changes apart from the two fixes below, so there is no new compatibility date.
+Built on `@sproutboat/toolchain` 0.24.1, `@sproutboat/runtime` 0.42.2 and `@sproutboat/wire` 0.22.2. The compiler changes, so every app is recompiled on its next build. Nothing an app can observe changes apart from the two fixes below, so there is no new compatibility date.
 
 ### Changed
 
