@@ -10,6 +10,10 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Changed
+
+- The docs link in `--help` now points to https://sproutboat.com/docs (docs.sproutboat.com redirects there).
+
 ## [0.51.1] - 2026-11-05
 
 Built on `@sproutboat/runtime` 0.42.2, `@sproutboat/toolchain` 0.23.1 and `@sproutboat/wire` 0.22.2. Nothing an app can observe changes except latency, the refused address ranges below and the `startTls()` write order, so there is no new compatibility date.
