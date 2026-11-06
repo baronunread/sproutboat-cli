@@ -7,7 +7,7 @@ import { queueSettings, resourceRefs, type SproutboatConfig } from "./config";
 import { ensureSqliteObject } from "./sqlite";
 import { sqliteStamp } from "./sqlite";
 import { bearsslStamp, ensureBearssl } from "./bearssl";
-import { compileSprout, loadPrelude, type Transport } from "./compile";
+import { compileSprout, loadPrelude, porfforChannel, type Transport } from "./compile";
 import { compileCached } from "./compile-cache";
 import type { BuildTarget } from "./targets";
 import {
@@ -336,6 +336,8 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       toolchain: toolchainStamp(),
       toolchainPackageVersion,
       porffor: [PORFFOR_COMMIT_FULL, PORFFOR_ARCHIVE_SHA256],
+      // the alpha 22 channel is a different compiler, server and prelude shape (compile.ts porfforChannel)
+      channel: porfforChannel(),
       native: embedded ? [sqliteStamp(), bearsslStamp()] : subtle ? [bearsslStamp()] : [],
       integration: await integrationIdentity(),
       nativeRestore: input.withRestore ? NATIVE_RESTORE_IDENTITY : null,

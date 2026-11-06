@@ -443,7 +443,7 @@ export function inspectToolchain(): ToolchainDoctor {
   };
 }
 
-function uwsCommitFull(): string {
+export function uwsCommitFull(): string {
   try {
     const src = readFileSync(resolve(porfforRoot(), "compiler/uwebsockets.js"), "utf8");
     return /UWS_COMMIT\s*=\s*['"]([0-9a-f]{40})/.exec(src)?.[1] ?? UWS_COMMIT_FULL;
