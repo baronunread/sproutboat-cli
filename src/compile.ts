@@ -31,6 +31,8 @@ import {
   ensurePorfforA21,
   SHARED_PRELUDE_FILE,
   STANDALONE_A21_COMPILE_FLAGS,
+  standaloneChannel,
+  type StandaloneChannel,
 } from "@sproutboat/toolchain/a21";
 // The prelude + transports live in @sproutboat/runtime (next to wrap.ts, which
 // locates them by file URL). `preludePath`/`transportPath` read them from there
@@ -65,17 +67,26 @@ export {
 const COMPILE_TIMEOUT_MS = Number(process.env.SPROUTBOAT_COMPILE_TIMEOUT_MS || 600_000);
 
 /**
- * The Porffor channel a native compile uses. `alpha-19` (the default pin, Porffor's native-fetch
- * server) or `alpha-22` (`SPROUTBOAT_PORFFOR_CHANNEL=alpha-22`: the alpha 21 line's compiler with
- * the toolchain's alpha 19 server shim over its bridge; sproutd-alpha22-standalone-port.md). Nothing
- * but the environment selects it until the gate passes and the default moves.
+ * The Porffor channel a native compile uses: `alpha-22` by default (the alpha 21 line's compiler with
+ * the toolchain's alpha 19 server shim over its bridge; sproutd-alpha22-standalone-port.md), or
+ * `alpha-19` (`SPROUTBOAT_PORFFOR_CHANNEL=alpha-19`: Porffor's native-fetch server, the fallback pin
+ * kept for one release). The toolchain's `standaloneChannel()` decides, so the CLI and the runtime's
+ * native tests agree on the default.
+ *
+ * `--with-restore` stays on alpha 19: its restore objects are built against alpha 19's native-fetch
+ * C API, which the alpha 22 bridge does not provide, so they do not link there. Unless the channel is
+ * set explicitly, such a build uses the alpha 19 compiler; `SPROUTBOAT_PORFFOR_CHANNEL=alpha-22` with
+ * `--with-restore` is an error rather than a link failure.
  */
-export type PorfforChannel = "alpha-19" | "alpha-22";
-export function porfforChannel(): PorfforChannel {
-  const raw = process.env.SPROUTBOAT_PORFFOR_CHANNEL;
-  if (!raw || raw === "alpha-19") return "alpha-19";
-  if (raw === "alpha-22") return "alpha-22";
-  throw new Error(`SPROUTBOAT_PORFFOR_CHANNEL=${raw}: expected alpha-19 or alpha-22`);
+export type PorfforChannel = StandaloneChannel;
+export function porfforChannel(withRestore = false): PorfforChannel {
+  const channel = standaloneChannel();
+  if (!withRestore || channel === "alpha-19") return channel;
+  if (process.env.SPROUTBOAT_PORFFOR_CHANNEL)
+    throw new Error(
+      "--with-restore is not available on Porffor alpha 22 yet: unset SPROUTBOAT_PORFFOR_CHANNEL or set it to alpha-19",
+    );
+  return "alpha-19";
 }
 
 export type CompileInput = {
@@ -356,7 +367,7 @@ export async function compileSprout(input: CompileInput): Promise<void> {
       })
     : [];
 
-  if (porfforChannel() === "alpha-22") {
+  if (porfforChannel(input.withRestore) === "alpha-22") {
     await compileSproutA21(input, {
       alpha19Root: porffor,
       generatedPath,

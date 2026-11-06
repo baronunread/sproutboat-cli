@@ -338,10 +338,12 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       toolchainPackageVersion,
       porffor: [PORFFOR_COMMIT_FULL, PORFFOR_ARCHIVE_SHA256],
       // the alpha 22 channel is a different compiler, server and prelude shape (compile.ts porfforChannel)
-      channel: porfforChannel(),
+      channel: porfforChannel(input.withRestore),
       // the alpha 22 channel's own inputs: the patched tree, the shim, the bridge, the build recipe, LTO
       channelInputs:
-        porfforChannel() === "alpha-22" ? [A21_STANDALONE_FINGERPRINT, process.env.SPROUTBOAT_FLTO ?? ""] : null,
+        porfforChannel(input.withRestore) === "alpha-22"
+          ? [A21_STANDALONE_FINGERPRINT, process.env.SPROUTBOAT_FLTO ?? ""]
+          : null,
       native: embedded ? [sqliteStamp(), bearsslStamp()] : subtle ? [bearsslStamp()] : [],
       integration: await integrationIdentity(),
       nativeRestore: input.withRestore ? NATIVE_RESTORE_IDENTITY : null,
@@ -433,7 +435,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       target: host ? hostTarget() : target === "linux-arm64" ? target : DEPLOY_TARGET,
       runtime: RUNTIME,
       capabilityProfile: CAPABILITY_PROFILE,
-      porfforVersion: porfforVersion(),
+      porfforVersion: porfforVersion(porfforChannel(input.withRestore)),
       esbuildVersion: esbuildVersion(),
       buildImage: toolchainStamp(),
       compatibilityDate: input.config.compatibility_date,

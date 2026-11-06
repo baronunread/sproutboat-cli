@@ -239,7 +239,8 @@ export const ENV_VARS: readonly EnvVar[] = [
   { name: "SPROUTBOAT_COMPILE_TIMEOUT_MS", purpose: "Porffor compile timeout in ms (default 600000)." },
   {
     name: "SPROUTBOAT_PORFFOR_CHANNEL",
-    purpose: "Porffor channel for standalone builds: `alpha-19` (default) or `alpha-22`.",
+    purpose:
+      "Porffor channel for standalone builds: `alpha-22` (default) or `alpha-19` (the previous compiler, kept as a fallback for one release).",
   },
   {
     name: "SPROUTBOAT_FLTO",

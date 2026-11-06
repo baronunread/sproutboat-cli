@@ -10,6 +10,21 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.52.0] - 2026-11-06
+
+Built on `@sproutboat/toolchain` 0.24.0, `@sproutboat/runtime` 0.42.2 and `@sproutboat/wire` 0.22.2. The compiler changes, so every app is recompiled on its next build. Nothing an app can observe changes apart from the two fixes below, so there is no new compatibility date.
+
+### Changed
+
+- **Standalone binaries and deploys now build with Porffor alpha 22** (was alpha 19). Binaries are about 5% smaller (hello 6.58 to 6.27 MB, stress 6.62 to 6.30 MB, linux-x64). Apps using jose, yaml, supabase-js and Neon (HTTP, and `Pool` over WebSocket) are checked route by route and give the same results as on alpha 19 and on Bun. Measured against alpha 19 on the same box: idle memory is 3 to 7% lower, requests per second are 5 to 15% lower, p50 latency is 3 to 8% higher, and p95 is up to about 30% (5 to 8 µs) higher on a request-heavy app. The module is composed the way sproutd's workers are, so no Node runtime module is linked, and it is served by the same uWebSockets server as before (WebSockets, streaming, graceful restart). LTO is on for optimized builds.
+- **Fallback:** `SPROUTBOAT_PORFFOR_CHANNEL=alpha-19` builds with the previous alpha 19 compiler for this release only; it will be removed in the next one. The compile cache is keyed by channel, so switching back and forth does not reuse the wrong binary. The artifact manifest and `sproutboat versions view` now report the Porffor release a build actually used (`alpha-22 (a081ebd)`).
+- **`build --standalone --with-restore` stays on alpha 19 for now.** Its offline `ltx-restore` command is built against alpha 19's native C API, which alpha 22 does not provide yet, so such a build uses the alpha 19 compiler. Setting `SPROUTBOAT_PORFFOR_CHANNEL=alpha-22` together with `--with-restore` is an error, not a link failure.
+
+### Fixed
+
+- **A `Uint8Array` or `ArrayBuffer` response body is sent with its real length.** On the alpha 22 server the bridge read the length from the buffer's flags word, so such a response went out with `Content-Length: 2147483647`. Found while qualifying alpha 22. No release ever shipped it, since alpha 19 was the default until now.
+- **Neon's `Pool` over WebSocket no longer hangs.** Alpha 22 linked its Node runtime's `process`, `setImmediate`, `clearImmediate` and `global` for any app that named them. pg-pool then queued on `process.nextTick`, and a standalone binary never drains that queue. These four names are now absent, as on alpha 19, so libraries no longer take their Node code paths.
+
 ## [0.51.1] - 2026-11-05
 
 Built on `@sproutboat/runtime` 0.42.2, `@sproutboat/toolchain` 0.23.1 and `@sproutboat/wire` 0.22.2. Nothing an app can observe changes except latency, the refused address ranges below and the `startTls()` write order, so there is no new compatibility date.
