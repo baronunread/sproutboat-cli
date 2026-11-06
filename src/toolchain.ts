@@ -16,6 +16,12 @@ import { dirname, resolve } from "node:path";
 // @ts-expect-error Bun's file loader returns the embedded asset path in a compiled executable.
 import embeddedUwsArchive from "../vendor/uwebsockets-360c276d-musl.tar.xz" with { type: "file" };
 import { BEARSSL_VERSION } from "./bearssl";
+import {
+  PORFFOR_A22_CHANNEL,
+  PORFFOR_A22_COMMIT,
+  standaloneChannel,
+  type StandaloneChannel,
+} from "@sproutboat/toolchain/a21";
 import { cachedPorfforRoot, PORFFOR_CHANNEL, PORFFOR_COMMIT } from "./porffor-toolchain";
 import { SQLITE_VERSION } from "./sqlite";
 import { LINUX_TARGETS, type LinuxTarget } from "./targets";
@@ -443,7 +449,7 @@ export function inspectToolchain(): ToolchainDoctor {
   };
 }
 
-function uwsCommitFull(): string {
+export function uwsCommitFull(): string {
   try {
     const src = readFileSync(resolve(porfforRoot(), "compiler/uwebsockets.js"), "utf8");
     return /UWS_COMMIT\s*=\s*['"]([0-9a-f]{40})/.exec(src)?.[1] ?? UWS_COMMIT_FULL;
@@ -672,8 +678,10 @@ export function porfforRoot(start = import.meta.dir): string {
   }
 }
 
-export function porfforVersion(): string {
+/** The Porffor release a build compiles with, on the standalone channel it uses (default: the environment's). */
+export function porfforVersion(channel: StandaloneChannel = standaloneChannel()): string {
   if (process.env.PORFFOR_VERSION) return process.env.PORFFOR_VERSION;
+  if (channel === "alpha-22") return `${PORFFOR_A22_CHANNEL} (${PORFFOR_A22_COMMIT})`;
   return `${PORFFOR_CHANNEL} (${PORFFOR_COMMIT})`;
 }
 

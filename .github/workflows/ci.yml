@@ -63,6 +63,11 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run kitchen-sink
       - run: bun run kitchen-sink:standalone
+      # Standalone builds default to Porffor alpha 22; the alpha 19 fallback pin stays tested for the
+      # one release it is kept.
+      - run: bun run kitchen-sink:standalone
+        env:
+          SPROUTBOAT_PORFFOR_CHANNEL: alpha-19
       - run: bun run examples
 
   packaged-cli:

@@ -20,10 +20,20 @@ import {
   ensureUWebSocketsHost,
   ensureUWebSocketsStandalone,
   resolveHostCompiler,
+  uwsCommitFull,
   UwsUnavailableError,
 } from "./toolchain";
 import { isLinuxTarget, LINUX_TARGETS, linuxTriple, type BuildTarget } from "./targets";
 import { ensurePorffor } from "./porffor-toolchain";
+import {
+  buildStandaloneA21,
+  composeStandaloneA21,
+  ensurePorfforA21,
+  SHARED_PRELUDE_FILE,
+  STANDALONE_A21_COMPILE_FLAGS,
+  standaloneChannel,
+  type StandaloneChannel,
+} from "@sproutboat/toolchain/a21";
 // The prelude + transports live in @sproutboat/runtime (next to wrap.ts, which
 // locates them by file URL). `preludePath`/`transportPath` read them from there
 // for a dev build; these text imports bake the same files into the `--compile`
@@ -55,6 +65,29 @@ export {
 } from "./wrap";
 
 const COMPILE_TIMEOUT_MS = Number(process.env.SPROUTBOAT_COMPILE_TIMEOUT_MS || 600_000);
+
+/**
+ * The Porffor channel a native compile uses: `alpha-22` by default (the alpha 21 line's compiler with
+ * the toolchain's alpha 19 server shim over its bridge; sproutd-alpha22-standalone-port.md), or
+ * `alpha-19` (`SPROUTBOAT_PORFFOR_CHANNEL=alpha-19`: Porffor's native-fetch server, the fallback pin
+ * kept for one release). The toolchain's `standaloneChannel()` decides, so the CLI and the runtime's
+ * native tests agree on the default.
+ *
+ * `--with-restore` stays on alpha 19: its restore objects are built against alpha 19's native-fetch
+ * C API, which the alpha 22 bridge does not provide, so they do not link there. Unless the channel is
+ * set explicitly, such a build uses the alpha 19 compiler; `SPROUTBOAT_PORFFOR_CHANNEL=alpha-22` with
+ * `--with-restore` is an error rather than a link failure.
+ */
+export type PorfforChannel = StandaloneChannel;
+export function porfforChannel(withRestore = false): PorfforChannel {
+  const channel = standaloneChannel();
+  if (!withRestore || channel === "alpha-19") return channel;
+  if (process.env.SPROUTBOAT_PORFFOR_CHANNEL)
+    throw new Error(
+      "--with-restore is not available on Porffor alpha 22 yet: unset SPROUTBOAT_PORFFOR_CHANNEL or set it to alpha-19",
+    );
+  return "alpha-19";
+}
 
 export type CompileInput = {
   sourcePath: string;
@@ -334,6 +367,22 @@ export async function compileSprout(input: CompileInput): Promise<void> {
       })
     : [];
 
+  if (porfforChannel(input.withRestore) === "alpha-22") {
+    await compileSproutA21(input, {
+      alpha19Root: porffor,
+      generatedPath,
+      launch: PACKAGED
+        ? [process.execPath, "__porffor"]
+        : [process.execPath, resolve(import.meta.dir, "main.ts"), "__porffor"],
+      path,
+      hostCompiler,
+      restoreObjects,
+      uwsVariant,
+    });
+    await chmod(input.outPath, 0o555);
+    return;
+  }
+
   const child = Bun.spawn(
     [...command, ...porfforArgs(generatedPath, input.outPath, input.target, input.optimize, hostCompiler?.usingZig)],
     {
@@ -368,4 +417,82 @@ export async function compileSprout(input: CompileInput): Promise<void> {
     throw new Error(`Porffor compile failed: ${(stderr || stdout).trim() || `exit ${code}`}`);
   }
   await chmod(input.outPath, 0o555);
+}
+
+/**
+ * The alpha 22 channel's native compile (sproutd-alpha22-standalone-port.md): the generated module is
+ * compiled in sproutd's worker shape (the toolchain composes `shared-prelude.js` from it: alpha 19
+ * helper names, the alpha 19 web classes, the dispatch shim), the alpha 22 compiler renders the split
+ * C units, and the toolchain's build recipe compiles them with the native-fetch bridge and the alpha
+ * 19 uWebSockets shim rewritten over flat data, then links with this build's native objects (SQLite,
+ * BearSSL, the restore objects) and the uSockets this target already has. Same inputs, same outputs,
+ * same environment variables as the alpha 19 path; the only switch is `SPROUTBOAT_PORFFOR_CHANNEL`.
+ */
+async function compileSproutA21(
+  input: CompileInput,
+  build: {
+    alpha19Root: string;
+    generatedPath: string;
+    launch: string[];
+    path: string;
+    hostCompiler?: { cc: string[]; cxx: string[]; usingZig: boolean };
+    restoreObjects: string[];
+    uwsVariant?: string;
+  },
+): Promise<void> {
+  const alpha22 = await ensurePorfforA21("alpha-22");
+  const dir = dirname(build.generatedPath);
+  const composed = composeStandaloneA21(await readFile(build.generatedPath, "utf8"), build.alpha19Root);
+  // beside sprout.generated.js (which stays the wrapped module, for emit-only, dev and the cache key)
+  await writeFile(resolve(dir, SHARED_PRELUDE_FILE), composed.sharedPrelude);
+  const entry = resolve(dir, "sprout.a22.js");
+  await writeFile(entry, composed.entry);
+  const unitsDir = resolve(dir, "units-a22");
+  await rm(unitsDir, { recursive: true, force: true }).catch(() => {});
+  // the compiler's own build cache (keyed by entry path) is not used: `c` only renders
+  const render = Bun.spawn(
+    [
+      ...build.launch,
+      resolve(alpha22, "runtime/index.js"),
+      "c",
+      entry,
+      "-o",
+      `${unitsDir}/`,
+      ...STANDALONE_A21_COMPILE_FLAGS,
+    ],
+    { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: build.path } },
+  );
+  const [code, stdout, stderr] = await Promise.all([
+    render.exited,
+    new Response(render.stdout).text(),
+    new Response(render.stderr).text(),
+  ]);
+  if (code !== 0) throw new Error(`Porffor (alpha 22) render failed: ${(stderr || stdout).trim() || `exit ${code}`}`);
+
+  const host = input.target === "host";
+  const triple = host ? undefined : linuxTriple(input.target);
+  const cc = host ? build.hostCompiler!.cc : [input.zigBin!, "cc", "-target", triple!];
+  const cxx = host ? build.hostCompiler!.cxx : [input.zigBin!, "c++", "-target", triple!];
+  const uwsDir = resolve(
+    homedir(),
+    ".cache/porffor/deps",
+    host ? `uWebSockets-${uwsCommitFull()}` : `uWebSockets-${uwsCommitFull()}-musl-${build.uwsVariant ?? "sa-x86_64"}`,
+  );
+  await buildStandaloneA21({
+    unitsDir,
+    alpha19Root: build.alpha19Root,
+    outPath: input.outPath,
+    cc,
+    cxx,
+    uwsDir,
+    extraLink: [...(input.extraLink ?? []), ...build.restoreObjects],
+    extraCflags: [...(input.extraCflags ?? []), ...(input.withRestore ? ["-Dmain=sb_app_main"] : [])],
+    optimize: input.optimize === "dev" && host ? 0 : 3,
+    // LTO on for every optimized build, zig's musl cross builds included (romeo, M4: +11% req/s on hello,
+    // +7% on stress, and 4% smaller); SPROUTBOAT_FLTO=0 turns it off for measurements
+    flto: process.env.SPROUTBOAT_FLTO ? process.env.SPROUTBOAT_FLTO === "1" : !(input.optimize === "dev" && host),
+    musl: !host,
+    strip: true,
+  });
+  if (!(await Bun.file(input.outPath).exists())) throw new Error("alpha 22 build produced no binary");
 }
