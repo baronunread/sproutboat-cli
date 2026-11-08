@@ -116,7 +116,7 @@
 
     "@sproutboat/runtime": ["@sproutboat/runtime@0.42.2", "", {}, "sha512-pvMtaDMkfvzZ3rgLkH9Dl5yhrmC3NArtrn4GSqzTtJFhGvuU1AsqDKpfC2a7ZzqI6KiJnGSI5y9C+R9u3ybm9w=="],
 
-    "@sproutboat/toolchain": ["@sproutboat/toolchain@0.24.1", "", {}, "sha512-rqzz4jlZsiNhCvc3Lx557mPosPpVfLC6uh+Agkv2Ly+6EHJvd+QL+HrXau/oUBD7Wo7m3ILhQyqdz6T1eYdcag=="],
+    "@sproutboat/toolchain": ["@sproutboat/toolchain@0.24.2", "", {}, "sha512-hzbL3/ym/0pykjB2gzH5/MN1SCuZEEwjOHg2ygcot2BCUSGMX8AAT5WpL0X9NiWW3KV6Yvx5r5L5Y9He4H1PZw=="],
 
     "@sproutboat/wire": ["@sproutboat/wire@0.22.2", "", { "dependencies": { "@sproutboat/assets": "^0.3.0", "@sproutboat/runtime": "^0.42.2" } }, "sha512-Pfe/Q6SY4VKWHw3SOoLh3IzR0KSDDUsmMdZCvUIIvLeEbWD/KTUkKiztNuNLk4G9NNNNggLMKDj5ia6kMm0+zw=="],
 
