@@ -22,7 +22,8 @@ import { pathToFileURL } from "node:url";
 import { inspectToolchain } from "./toolchain";
 import { isLinuxTarget, parseTarget, TARGET_NAMES, type BuildTarget } from "./targets";
 import { writeDeployFiles } from "./standalone-deploy";
-import { parseTailArgs, runTail, TAIL_USAGE, tailQuery } from "./tail";
+import { parseTailArgs, runTail, TAIL_USAGE, tailQuery, type TailArgs } from "./tail";
+import { followLog, LogFilter, readLogStream } from "./tail-log";
 
 // A compiled Bun executable is not a general-purpose `bun` command. Porffor
 // is acquired after installation, so run its external ESM launcher through an
@@ -792,10 +793,32 @@ async function rollback(args: string[]) {
   console.log(deployment.url);
 }
 
+/** #268: follow a standalone binary's SB_LOG=json records from a file or stdin. Local only: no login. */
+async function tailLog(parsed: TailArgs, file: string) {
+  // Ctrl-C (or a terminated pipe reader) ends the stream and exits 0.
+  const controller = new AbortController();
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => controller.abort());
+  process.stdout.on("error", () => controller.abort());
+  const sink = {
+    format: parsed.format,
+    filter: new LogFilter({ status: parsed.status, method: parsed.method, search: parsed.search }),
+    signal: controller.signal,
+    stdout: (text: string) => void process.stdout.write(text),
+    stderr: (text: string) => void process.stderr.write(text),
+  };
+  try {
+    if (file === "-") await readLogStream(Bun.stdin.stream(), sink);
+    else await followLog({ ...sink, path: resolve(file), lines: parsed.lines, follow: parsed.follow });
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+}
+
 async function tail(args: string[]) {
   const result = parseTailArgs(args);
   if ("error" in result) usageError(result.error, TAIL_USAGE);
   const parsed = result.args;
+  if (parsed.file !== undefined) return tailLog(parsed, parsed.file);
   const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(parsed.dir), apiCredentials()]);
   const base = `${apiUrl}/api/projects/${project.config.name}`;
   if (parsed.recent || parsed.sprout) {
@@ -1359,7 +1382,9 @@ if (command === "--version" || command === "-v") {
 }
 if (args.includes("-h") || args.includes("--help")) commandHelp(command);
 
-await notifyIfOutdated(CLI_VERSION);
+// A local log needs no network: skip the version check for it (#268).
+if (!(command === "tail" && args.some((arg) => arg === "--file" || arg.startsWith("--file="))))
+  await notifyIfOutdated(CLI_VERSION);
 
 switch (command) {
   case "init":

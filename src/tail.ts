@@ -22,6 +22,12 @@ export type TailArgs = {
   samplingRate: string | undefined;
   search: string | undefined;
   outcome: string[];
+  /** #268: follow a standalone binary's SB_LOG=json records in this file ("-" for stdin) instead of the control plane. */
+  file: string | undefined;
+  /** With --file: how many of the last matching records to print before following. */
+  lines: number;
+  /** With --file: false prints the snapshot and exits. */
+  follow: boolean;
 };
 
 export type TailLog = { level: string; message: JsonValue[]; timestamp: number };
@@ -47,9 +53,19 @@ export type TailFrame =
   | { type: "closed"; reason: string };
 
 export const TAIL_USAGE =
-  "tail [project-dir] [--format pretty|json] [--status ok|error|<code>|5xx] [--method GET,POST] [--sampling-rate 0.1] [--search <text>] [--outcome <name>] | tail --recent | tail --sprout";
+  "tail [project-dir] [--format pretty|json] [--status ok|error|<code>|5xx] [--method GET,POST] [--sampling-rate 0.1] [--search <text>] [--outcome <name>] | tail --recent | tail --sprout | tail --file <log|-> [--lines <n>] [--no-follow] [--format pretty|json] [--status <s>] [--method <m>] [--search <text>]";
 
-const VALUE_FLAGS = ["--format", "--status", "--method", "--sampling-rate", "--search", "--outcome"] as const;
+const VALUE_FLAGS = [
+  "--format",
+  "--status",
+  "--method",
+  "--sampling-rate",
+  "--search",
+  "--outcome",
+  "--file",
+  "--lines",
+] as const;
+const MAX_LINES = 100_000;
 
 /** Parse `tail` arguments; `error` is a usage error message. */
 export function parseTailArgs(args: string[]): { args: TailArgs } | { error: string } {
@@ -63,7 +79,11 @@ export function parseTailArgs(args: string[]): { args: TailArgs } | { error: str
     samplingRate: undefined,
     search: undefined,
     outcome: [],
+    file: undefined,
+    lines: 10,
+    follow: true,
   };
+  let linesGiven = false;
   const split = (value: string) =>
     value
       .split(",")
@@ -73,6 +93,7 @@ export function parseTailArgs(args: string[]): { args: TailArgs } | { error: str
     const arg = args[index];
     if (arg === "--recent") parsed.recent = true;
     else if (arg === "--sprout") parsed.sprout = true;
+    else if (arg === "--no-follow") parsed.follow = false;
     else if (arg.startsWith("--")) {
       const eq = arg.indexOf("=");
       const flag = eq < 0 ? arg : arg.slice(0, eq);
@@ -87,12 +108,28 @@ export function parseTailArgs(args: string[]): { args: TailArgs } | { error: str
       else if (flag === "--method") parsed.method.push(...split(value).map((method) => method.toUpperCase()));
       else if (flag === "--outcome") parsed.outcome.push(...split(value));
       else if (flag === "--sampling-rate") parsed.samplingRate = value;
-      else parsed.search = value;
+      else if (flag === "--file") parsed.file = value;
+      else if (flag === "--lines") {
+        const lines = Number(value);
+        if (value.trim() === "" || !Number.isInteger(lines) || lines < 0 || lines > MAX_LINES)
+          return { error: `tail: --lines must be a whole number from 0 to ${MAX_LINES} (got "${value}")` };
+        parsed.lines = lines;
+        linesGiven = true;
+      } else parsed.search = value;
     } else if (parsed.dir === undefined) parsed.dir = arg;
     else return { error: `tail: unexpected argument "${arg}"` };
   }
   const filtered =
     parsed.status.length || parsed.method.length || parsed.outcome.length || parsed.samplingRate || parsed.search;
+  if (parsed.file === undefined) {
+    if (linesGiven) return { error: "tail: --lines needs --file" };
+    if (!parsed.follow) return { error: "tail: --no-follow needs --file" };
+  } else {
+    if (parsed.recent || parsed.sprout) return { error: "tail: --file is an alternative to --recent and --sprout" };
+    if (parsed.dir !== undefined) return { error: "tail: --file reads a log, not a project" };
+    if (parsed.samplingRate !== undefined || parsed.outcome.length)
+      return { error: "tail: --sampling-rate and --outcome are not available with --file" };
+  }
   if (parsed.recent && parsed.sprout) return { error: "tail: --recent and --sprout are alternatives" };
   if ((parsed.recent || parsed.sprout) && filtered)
     return { error: "tail: filters apply to the live stream, not --recent or --sprout" };

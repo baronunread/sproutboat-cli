@@ -10,6 +10,10 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Added
+
+- **`sproutboat tail --file <log|->` follows a standalone binary's request and error records (#268).** Run the binary with `SB_LOG=json` (needs a runtime release that writes them) and `tail --file` prints the last 10 matching records, then new ones as they are written, in pretty lines or one JSON record per line (`--format json`). `--status`, `--method` and `--search` filter; `--lines` sets the snapshot size and `--no-follow` prints it and exits; `--file -` reads a pipe such as `journalctl -f -o cat`. An error follows its request's filters, and errors from background work always show. A missing file is waited for, a rotated or truncated file is reread from its start, a line over 64 KiB is skipped and counted, control characters are replaced before printing, and only known fields are written, so output stays bounded and parseable. It needs no login or network and ends with exit 0 on Ctrl-C. The existing control plane `tail` (live stream, `--format json`, filters, `--recent`, `--sprout`) is unchanged. See "Logs" in `docs/standalone.md`.
+
 ### Changed
 
 - **`init` scaffolds the Workers-style handler.** New projects get compatibility date `2026-09-28` and `fetch(request, env, ctx)`, so `env` and `ctx` are available without a date bump. Existing `sproutboat.jsonc` files are never rewritten, and projects on older dates keep their behavior.
