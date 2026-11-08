@@ -28,7 +28,9 @@ not:
   database on the same host.
 - `SB_LOG=json`: structured request and error records on stderr (see
   [Logs](#logs)). Off by default.
-- **Secrets**: from the environment, or `<data>/secrets.json`.
+- **Secrets**: from the environment, one variable per declared secret. Set them
+  with `sproutboat run --env-file` (below), systemd's `EnvironmentFile=`, or
+  your container's environment.
 
 All six arrive through the environment, and none of them through flags: a
 native-fetch binary never sees `argv`, because Porffor's runtime init calls
@@ -75,6 +77,106 @@ places (dev, this binary, deployed). That includes rate limiters and
 through from your own environment. The only differences are the ones under
 "What differs from a deployed sprout" below, and each is a property of the
 standalone binary, not of dev.
+
+## Launching with `sproutboat run`
+
+```sh
+sproutboat run [project-dir] [--binary <file>] [--env-file <file>]... [--port <n>]
+               [--data-dir <dir>] [--require <NAME,...>] [--check]
+```
+
+`run` starts the binary with the settings it takes at launch, none of them
+baked in, so the identical file moves between machines:
+
+```sh
+sproutboat run --env-file dev.env --port 8080 --data-dir ./dev-data
+sproutboat run --env-file /etc/notes/prod.env --port 80 --data-dir /var/lib/notes
+```
+
+The binary is `--binary`, or `dist/<name>` in the project (`build --standalone`'s
+default). The declared secrets are the `secrets` in `sproutboat.jsonc` plus any
+`--require` names; without a project, `--binary` and `--require` are enough.
+
+**Precedence**, highest first, for every variable:
+
+1. `--port` (sets `PORT`) and `--data-dir` (sets `SB_DATA_DIR`, resolved to an absolute path);
+2. the `--env-file` files; repeat the flag and a later file overrides an earlier one;
+3. the environment `run` was started from, which is how systemd or a container hands a
+   production binary its settings.
+
+So a stale `export API_KEY=...` in your shell loses to the file you named, and
+`--port` wins over a `PORT` line in a file. `run` reads only the files you name:
+it never picks up `.dev.vars` or `.env` on its own.
+
+**A declared secret that is unset or empty fails the launch**, before the binary
+starts and so before it accepts a request, naming the secrets and not their
+values; this is the production counterpart of `wrangler deploy` failing on a
+missing required secret. (`sproutboat dev` only warns, below.) `--check` runs all
+the validation and prints the summary without starting the binary. Nothing is
+written to disk, and the summary names each secret with the layer it came from
+(`API_KEY (env file)`), never a value. Launch settings live in the env files and
+the command line, separate from the build output and the artifact metadata.
+
+`run` stays in the foreground, passes SIGINT, SIGTERM and SIGHUP to the binary,
+and exits with its status (128 plus the signal number if a signal ended it).
+Other variables in the files (`SB_TRUSTED_PROXIES`, `SB_EGRESS_ALLOW`, ...) are
+passed to the binary too.
+
+### Env file syntax
+
+`dev` and `run` read the dotenv syntax:
+
+```sh
+# a comment line
+API_KEY=abc123
+export DB_URL = postgres://user:pass@host/db
+GREETING='literal $text, \n and # kept'
+MESSAGE="newline \n expands in double quotes"
+NOTE=plain value   # a comment after an unquoted value
+PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASC...
+-----END PRIVATE KEY-----"
+```
+
+- `NAME=value`, optionally `export NAME=value` or `NAME: value`. Names are letters,
+  digits, `_`, `.` and `-`.
+- Single quotes and backticks are literal. Double quotes turn `\n` and `\r` into
+  newlines. A quoted value may span lines. There is no `$VAR` interpolation.
+- An unquoted value ends at a `#` (a comment) and is trimmed, so quote a value
+  that contains one.
+- The last of a repeated name wins.
+- A line that is not an assignment, or a quote that never closes, is skipped with
+  a warning such as `dev.env:7: skipped, not a NAME=value assignment`. Warnings
+  never repeat the text of a line, so a value cannot leak through one.
+
+### `sproutboat dev` follows Wrangler
+
+`sproutboat dev` takes local secrets from files, by the same rules as `wrangler dev`:
+
+- **`.dev.vars` or the `.env` files, never both.** If `.dev.vars` exists beside
+  `sproutboat.jsonc`, the `.env` files are not loaded (a warning names them). With
+  `--env <name>`, `.dev.vars.<name>` replaces `.dev.vars` when it exists.
+- **The `.env` files layer, most specific first:** `.env.<name>.local`, `.env.local`,
+  `.env.<name>`, `.env`. (Without `--env`, just `.env.local` and `.env`.)
+  `CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV=false` turns this off.
+- **`--env-file <file>`** replaces that default set. Repeat it and a later file
+  overrides an earlier one. A named file that does not exist is an error. `--env`
+  only selects local files here; named configuration environments are #267.
+- **The process environment is not passed to the app.** Only with
+  `CLOUDFLARE_INCLUDE_PROCESS_ENV=true`, and only when no `.dev.vars` is in use,
+  does a declared secret take its value from the environment, and the files win
+  over it.
+- **A declared secret with no value is a warning and `dev` still starts.** A handler
+  that reads it throws, as in production.
+- `secrets` is a plain list of names here, so every name in the files is passed
+  through, as `.dev.vars` always did.
+
+### On a server without the CLI
+
+systemd does the same job: `EnvironmentFile=/etc/notes/prod.env` (its syntax is
+simpler than dotenv: no multi-line values, so keep a production file to plain
+`NAME=value` lines). `examples/vars-secrets` walks the same binary through
+development and production.
 
 ## Client IP
 
