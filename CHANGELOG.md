@@ -10,6 +10,11 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Fixed
+
+- **A warm standalone build no longer recompiles every C unit.** The alpha 22 build cleared the units directory, object cache included, before each render, so every build paid the full C compile (about 13 s for hello on an M1). It now clears only the previous render and keeps `obj/`; a unit whose text and flags are unchanged is not compiled again.
+- **`build --standalone --target host` uses the compile cache.** An unchanged host build returns in about 0.2 s (was about 39 s for hello). The key includes the host compiler's name and `--version` banner. Dev builds still bypass it.
+
 ## [0.52.0] - 2026-11-06
 
 Built on `@sproutboat/toolchain` 0.24.1, `@sproutboat/runtime` 0.42.2 and `@sproutboat/wire` 0.22.2. The compiler changes, so every app is recompiled on its next build. Nothing an app can observe changes apart from the two fixes below, so there is no new compatibility date.

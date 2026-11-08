@@ -384,6 +384,19 @@ export async function resolveHostCompiler(): Promise<HostCompiler> {
   };
 }
 
+/**
+ * What identifies the compiler a host build uses: its argv, its `--version` banner and the platform. Part of
+ * the compile-cache key, so a host binary is never reused across compilers.
+ */
+export async function hostCompilerIdentity(): Promise<string> {
+  const { cc, cxx } = await resolveHostCompiler();
+  const banner = (argv: string[]) => {
+    const run = Bun.spawnSync([...argv, "--version"], { stdout: "pipe", stderr: "pipe" });
+    return run.stdout.toString().split("\n")[0] ?? "";
+  };
+  return [process.platform, process.arch, cc.join(" "), banner(cc), cxx.join(" "), banner(cxx)].join("|");
+}
+
 export type ToolchainDoctor = {
   host: `${string}/${string}`;
   cacheRoot: string;
