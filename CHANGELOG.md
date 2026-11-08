@@ -10,8 +10,13 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.52.1] - 2026-11-08
+
+Built on `@sproutboat/toolchain` 0.24.2, `@sproutboat/runtime` 0.42.2 and `@sproutboat/wire` 0.22.2. The compiler output changes (four Porffor alpha 22 miscompile fixes in the toolchain), so every app is recompiled on its next build. Nothing else an app can observe changes, so there is no new compatibility date.
+
 ### Fixed
 
+- **Four Porffor alpha 22 miscompiles are fixed** (toolchain 0.24.2), found with postgres.js and drizzle-orm. A method call on a receiver of unknown type evaluated its arguments in C's unspecified order, so `buf.toString("utf8", i, i += n)` returned `""`. A class declaration that is assigned to, such as TypeScript's `(SQL || (SQL = {}))` namespace merge, never stored the class in its binding and died with "Cannot get property of null". The right operand of `||`, `&&` and `??` retyped a local at compile time as if it always ran, so the same pattern inside a function still failed. `new Date(s)` returned NaN for `+HH` and `+HHmm` offsets such as Postgres' `2026-11-08 14:48:19.097+00`; they now parse, together with `+HH:mm`.
 - **A warm standalone build no longer recompiles every C unit.** The alpha 22 build cleared the units directory, object cache included, before each render, so every build paid the full C compile (about 13 s for hello on an M1). It now clears only the previous render and keeps `obj/`; a unit whose text and flags are unchanged is not compiled again.
 - **`build --standalone --target host` uses the compile cache.** An unchanged host build returns in about 0.2 s (was about 39 s for hello). The key includes the host compiler's name and `--version` banner. Dev builds still bypass it.
 
