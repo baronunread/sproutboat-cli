@@ -14,6 +14,10 @@ maintained going forward by the `release` skill.
 
 - **`init` scaffolds the Workers-style handler.** New projects get compatibility date `2026-09-28` and `fetch(request, env, ctx)`, so `env` and `ctx` are available without a date bump. Existing `sproutboat.jsonc` files are never rewritten, and projects on older dates keep their behavior.
 
+### Fixed
+
+- **The native conformance harnesses no longer hang on a stalled response (#276).** The broker and standalone kitchen-sink harnesses and the small-example smoke runner give every HTTP and raw-socket request a deadline (`SB_HARNESS_REQUEST_TIMEOUT_MS`, default 30 s) that covers the whole body, and bound readiness (`SB_HARNESS_READY_TIMEOUT_MS`) and compilation (`SB_HARNESS_BUILD_TIMEOUT_MS`) separately, so a slow build cannot look like a hung handler. A timeout, or a child that exits during a request, reports the step, backend, runtime and toolchain versions and the child's recent stderr with secret values removed. Only the run's own children are stopped and its temp dir removed, on failure and on SIGINT or SIGTERM. Fault-injection tests cover a server that never completes a body and a child that exits mid-request. This is repository tooling; the shipped CLI does not change.
+
 ## [0.52.1] - 2026-11-08
 
 Built on `@sproutboat/toolchain` 0.24.2, `@sproutboat/runtime` 0.42.2 and `@sproutboat/wire` 0.22.2. The compiler output changes (four Porffor alpha 22 miscompile fixes in the toolchain), so every app is recompiled on its next build. Nothing else an app can observe changes, so there is no new compatibility date.

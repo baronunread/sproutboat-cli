@@ -25,6 +25,17 @@ website's support table links to these, so a broken one makes the table lie.
 It runs four at a time; `SMOKE_CONCURRENCY=1 bun run examples` runs them one
 by one.
 
+All three drive a native child through `examples/lib/harness.ts`, which gives
+every HTTP and raw-socket operation a deadline and records the current step
+before it starts. A stalled response, a readiness failure, a slow build or a
+child that exits mid-request fails with the step, backend, runtime and
+toolchain versions and the child's recent stderr (declared secret values
+removed), then stops only that run's own children and removes its temp dir.
+Interrupting with Ctrl-C or SIGTERM does the same. Tune the deadlines in
+milliseconds with `SB_HARNESS_REQUEST_TIMEOUT_MS` (default 30000),
+`SB_HARNESS_READY_TIMEOUT_MS` (20000) and `SB_HARNESS_BUILD_TIMEOUT_MS`
+(900000); `SB_HARNESS_VERBOSE=1` prints each step as it starts.
+
 ## Testing unreleased `@sproutboat` packages
 
 To run the CLI against local `@sproutboat/runtime`, `toolchain` or `wire`
