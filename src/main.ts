@@ -168,11 +168,11 @@ const starterConfig = (name: string) => `{
   "$schema": "https://sproutboat.com/schema.json",
   "name": "${name}",
   "main": "src/index.js",
-  "compatibility_date": "2026-08-26"
+  "compatibility_date": "2026-09-28"
 }
 `;
 const starterHandler = `export default {
-  fetch() {
+  fetch(request, env, ctx) {
     return new Response("hello from Sproutboat");
   }
 };

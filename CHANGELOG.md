@@ -10,6 +10,10 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Changed
+
+- **`init` scaffolds the Workers-style handler.** New projects get compatibility date `2026-09-28` and `fetch(request, env, ctx)`, so `env` and `ctx` are available without a date bump. Existing `sproutboat.jsonc` files are never rewritten, and projects on older dates keep their behavior.
+
 ## [0.52.1] - 2026-11-08
 
 Built on `@sproutboat/toolchain` 0.24.2, `@sproutboat/runtime` 0.42.2 and `@sproutboat/wire` 0.22.2. The compiler output changes (four Porffor alpha 22 miscompile fixes in the toolchain), so every app is recompiled on its next build. Nothing else an app can observe changes, so there is no new compatibility date.
