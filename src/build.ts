@@ -18,7 +18,7 @@ import {
   RUNTIME,
   type ArtifactManifest,
 } from "./manifest";
-import { ensureZig, esbuildVersion, porfforVersion, toolchainStamp } from "./toolchain";
+import { ensureZig, esbuildVersion, hostCompilerIdentity, porfforVersion, toolchainStamp } from "./toolchain";
 import { PORFFOR_ARCHIVE_SHA256, PORFFOR_COMMIT_FULL } from "./porffor-toolchain";
 import { A21_STANDALONE_FINGERPRINT } from "@sproutboat/toolchain/a21";
 import { version as toolchainPackageVersion } from "@sproutboat/toolchain/package.json" with { type: "json" };
@@ -346,6 +346,8 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
           : null,
       native: embedded ? [sqliteStamp(), bearsslStamp()] : subtle ? [bearsslStamp()] : [],
       integration: await integrationIdentity(),
+      // a host binary comes from this machine's C compiler, so a different compiler is a different binary
+      hostCompiler: host ? await hostCompilerIdentity() : null,
       nativeRestore: input.withRestore ? NATIVE_RESTORE_IDENTITY : null,
     }),
   ).slice("sha256:".length);
@@ -399,7 +401,6 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
     const compileStartedAt = performance.now();
     if (
       !input.reuseSproutPath &&
-      !host &&
       input.optimize !== "dev" &&
       !input.outputDirectory &&
       !versionMetadata &&

@@ -164,6 +164,23 @@ export async function loadPrelude(transport: Transport = "broker"): Promise<stri
   return core.replace(TRANSPORT_MARKER, chosen);
 }
 
+/**
+ * Drop the previous render from a units directory, keeping `obj/`.
+ *
+ * The renderer rewrites every unit, and a unit whose name changed must not linger (the build compiles every
+ * `.c` it finds). `obj/` holds the objects `buildStandaloneA21` stamps by the unit text, `porf.h` and the
+ * flags, so it has to survive a rebuild: wiping it recompiled every unit on every build, which made a warm
+ * host build as slow as a cold one (about 13 s of C compile plus the link).
+ */
+export async function clearRenderedUnits(unitsDir: string): Promise<void> {
+  const entries = await readdir(unitsDir).catch((): string[] => []);
+  await Promise.all(
+    entries
+      .filter((name) => name !== "obj")
+      .map((name) => rm(resolve(unitsDir, name), { recursive: true, force: true })),
+  );
+}
+
 let porfforBuildsPruned = false;
 /**
  * Porffor writes one build dir per entry path under ~/.cache/porffor/build and
@@ -448,7 +465,7 @@ async function compileSproutA21(
   const entry = resolve(dir, "sprout.a22.js");
   await writeFile(entry, composed.entry);
   const unitsDir = resolve(dir, "units-a22");
-  await rm(unitsDir, { recursive: true, force: true }).catch(() => {});
+  await clearRenderedUnits(unitsDir);
   // the compiler's own build cache (keyed by entry path) is not used: `c` only renders
   const render = Bun.spawn(
     [
