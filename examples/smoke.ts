@@ -19,9 +19,9 @@
  * because that needs no broker, no control plane and no ports beyond the one
  * it listens on — and it exercises the binding ops end to end all the same.
  */
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { descendantPids, Harness, HarnessFailure } from "./lib/harness";
 import { buildStandalone } from "../src/standalone-build";
 import { bundleHandler } from "../src/bundle";
 import { parseConfig } from "../src/config";
@@ -35,8 +35,16 @@ import { ensureBearssl } from "../src/bearssl";
 
 type Check = (base: string, ok: (name: string, cond: boolean, detail?: JsonValue) => void) => Promise<void>;
 
-const fetch = (url: string, init?: RequestInit) =>
-  globalThis.fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) });
+// #276: each example's requests go through its own Harness (found by origin),
+// so every one has a deadline (SB_HARNESS_REQUEST_TIMEOUT_MS, default 30 s),
+// names its step before it starts, and ends early if the child exits.
+const harnessByOrigin = new Map<string, Harness>();
+const fetch = (url: string, init?: RequestInit) => {
+  const harness = harnessByOrigin.get(new URL(url).origin);
+  if (!harness) return globalThis.fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) });
+  harness.step(`${init?.method ?? "GET"} ${new URL(url).pathname}`);
+  return harness.fetch(url, init);
+};
 
 const text = async (url: string, init?: RequestInit) => (await fetch(url, init)).text();
 
@@ -343,16 +351,20 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
 // Live children and temp dirs, so an interrupted run does not leave servers
 // listening or temp dirs behind.
-type LiveEntry = { child?: ReturnType<typeof Bun.spawn>; workdir: string };
+type LiveEntry = { harness: Harness };
 const live = new Set<LiveEntry>();
 for (const [signal, code] of [
   ["SIGINT", 130],
   ["SIGTERM", 143],
 ] as const) {
   process.on(signal, () => {
-    for (const entry of live) {
-      if (entry.child && entry.child.exitCode === null) entry.child.kill(9);
-      rmSync(entry.workdir, { recursive: true, force: true });
+    // Every live example's child and temp dir, then anything they or a build
+    // started (found by parent pid, never by name).
+    for (const entry of live) entry.harness.cleanupSync({ descendants: false });
+    for (const pid of descendantPids()) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
     }
     process.exit(code);
   });
@@ -385,12 +397,17 @@ async function runExample(name: Name): Promise<Result> {
   const lines: string[] = [];
   let failed = 0;
   let size = "";
-  let stderr = "";
-  const entry: LiveEntry = {
-    workdir: mkdtempSync(join(tmpdir(), `sb-smoke-${name.replace("@", "-")}-`)),
-  };
+  const harness = new Harness({
+    backend: `smoke:${name}`,
+    prefix: `sb-smoke-${name.replace("@", "-")}-`,
+    secrets: Object.values(EXTRA_ENV[name] ?? {}),
+    handleSignals: false,
+  });
+  const entry: LiveEntry = { harness };
   live.add(entry);
-  let stderrText: Promise<string> | undefined;
+  const workdir = harness.workdir;
+  let failureReport = "";
+  let origin = "";
   try {
     // "<example>@<date>" is that example built at another compatibility date, from a
     // copy in its own temp dir so its build output never meets the plain example's.
@@ -398,78 +415,70 @@ async function runExample(name: Name): Promise<Result> {
     const source = example.startsWith("worker-")
       ? join(HERE, "workers-verbatim", example.slice(7))
       : join(HERE, example);
-    const dir = compatDate ? join(entry.workdir, "project") : source;
+    const dir = compatDate ? join(workdir, "project") : source;
     if (compatDate) cpSync(source, dir, { recursive: true, filter: (path) => !path.includes("/.sproutboat") });
     const parsed = parseConfig(readFileSync(join(dir, "sproutboat.jsonc"), "utf8"));
     if (!parsed.ok) throw new Error(`bad config: ${parsed.errors.join("; ")}`);
     const config = compatDate ? { ...parsed.value, compatibility_date: compatDate } : parsed.value;
 
     const sourcePath = join(dir, config.main);
-    const bundle = await bundleHandler(sourcePath, dir);
-    const built = await buildStandalone({
-      projectDir: dir,
-      config,
-      sourcePath,
-      source: bundle.code,
-      target: "host",
-      outPath: join(entry.workdir, name),
+    // Compilation has its own deadline (SB_HARNESS_BUILD_TIMEOUT_MS), so a slow
+    // build cannot look like a hung handler.
+    const built = await harness.build(`building ${name}`, async () => {
+      const bundle = await bundleHandler(sourcePath, dir);
+      return buildStandalone({
+        projectDir: dir,
+        config,
+        sourcePath,
+        source: bundle.code,
+        target: "host",
+        outPath: join(workdir, name),
+      });
     });
     size = `${(built.bytes / 1_000_000).toFixed(1)} MB, built in ${seconds(performance.now() - started)}`;
 
     const port = freePort();
-    const child = Bun.spawn([built.outPath], {
-      stdio: ["ignore", "ignore", "pipe"],
-      env: { ...process.env, ...EXTRA_ENV[name], PORT: String(port), SB_DATA_DIR: join(entry.workdir, "data") },
+    harness.spawn("standalone binary", [built.outPath], {
+      env: { ...process.env, ...EXTRA_ENV[name], PORT: String(port), SB_DATA_DIR: join(workdir, "data") },
     });
-    entry.child = child;
-    // Drained as it arrives: an undrained pipe blocks a chatty server.
-    stderrText = new Response(child.stderr).text();
     const base = `http://127.0.0.1:${port}`;
+    origin = new URL(base).origin;
+    harnessByOrigin.set(origin, harness);
 
-    const deadline = Date.now() + 20_000;
-    let up = false;
-    while (Date.now() < deadline && !up && child.exitCode === null) {
-      try {
-        await fetch(base + "/", { signal: AbortSignal.timeout(2000) });
-        up = true;
-      } catch {
-        await Bun.sleep(100);
+    // Readiness has its own deadline (SB_HARNESS_READY_TIMEOUT_MS).
+    await harness.waitReady(base + "/");
+    harness.step(`checks for ${name}`);
+    await EXAMPLES[name](base, (check, cond, detail) => {
+      if (cond) lines.push("  ok    " + check);
+      else {
+        lines.push(`  FAIL  ${check}${detail === undefined ? "" : ": " + JSON.stringify(detail)}`);
+        failed++;
       }
-    }
-
-    if (!up) {
-      lines.push(
-        child.exitCode === null ? `  FAIL  never listened on ${port}` : `  FAIL  exited with ${child.exitCode}`,
-      );
-      failed++;
-    } else {
-      await EXAMPLES[name](base, (check, cond, detail) => {
-        if (cond) lines.push("  ok    " + check);
-        else {
-          lines.push(`  FAIL  ${check}${detail === undefined ? "" : ": " + JSON.stringify(detail)}`);
-          failed++;
-        }
-      });
-    }
+    });
   } catch (error) {
-    // A build error or a check that threw: the whole message, which for a
-    // failed compile carries Porffor's own output.
-    lines.push(`  FAIL  ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+    if (error instanceof HarnessFailure) {
+      // A stall, a child that exited, or a deadline: step, backend, versions
+      // and the child's recent stderr, secrets removed.
+      failureReport = harness.report(error);
+      lines.push(`  FAIL  ${error.message}`);
+    } else {
+      // A build error or a check that threw: the whole message, which for a
+      // failed compile carries Porffor's own output.
+      lines.push(`  FAIL  ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+    }
     failed++;
   } finally {
-    if (entry.child) {
-      if (entry.child.exitCode === null) entry.child.kill(9);
-      await entry.child.exited;
-    }
-    if (stderrText) stderr = await stderrText;
-    rmSync(entry.workdir, { recursive: true, force: true });
+    await harness.cleanup({ descendants: false });
+    if (origin) harnessByOrigin.delete(origin);
     live.delete(entry);
   }
 
   const ms = performance.now() - started;
   let report = `\n${name}  (${size ? size + ", " : ""}${seconds(ms)} total)\n${lines.join("\n")}`;
-  if (failed > 0 && stderr.trim()) {
-    report += `\n  --- ${name} stderr ---\n${stderr.trimEnd()}\n  --- end of ${name} stderr ---`;
+  if (failureReport) report += `\n${failureReport.replace(/^/gm, "  ")}`;
+  else if (failed > 0) {
+    const stderr = harness.recentStderr();
+    if (stderr) report += `\n${stderr.replace(/^/gm, "  ")}`;
   }
   return { name, failed, ms, report };
 }

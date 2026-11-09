@@ -15,16 +15,18 @@
 import { isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "../../src/json";
 import { request as httpRequest } from "node:http";
 import { egressRefusal } from "@sproutboat/runtime";
+import type { Harness } from "../lib/harness";
 
 const obj = (value: JsonValue | undefined): JsonObject => jsonObject(value ?? null) ?? {};
 const arr = (value: JsonValue | undefined): JsonValue[] => (Array.isArray(value) ? value : []);
 
-async function rawGet(
+async function rawGetFrom(
   url: string,
   headers: Record<string, string>,
+  signal?: AbortSignal,
 ): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
   return new Promise((resolve, reject) => {
-    const request = httpRequest(url, { headers }, (response) => {
+    const request = httpRequest(url, { headers, signal }, (response) => {
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer) => chunks.push(chunk));
       response.on("end", () =>
@@ -64,6 +66,12 @@ export type ConformanceOptions = {
   skipDirectTransfer?: boolean;
   /** The stub upstream's origin; its /redirect answers 302 to a private address. */
   upstream?: string;
+  /**
+   * The harness that owns the child under test (#276). Every request then has a
+   * deadline, the current step is recorded before each group of checks, and a
+   * stalled response or a child that exits fails with a report instead of waiting.
+   */
+  harness?: Harness;
 };
 
 export async function runConformance(
@@ -72,6 +80,17 @@ export async function runConformance(
   check: CheckFn,
   options: ConformanceOptions = {},
 ): Promise<void> {
+  const harness = options.harness;
+  const step = (name: string) => harness?.step(name);
+  // Without a harness (a caller that does not own the child) requests are unbounded, as before.
+  const fetch = (url: string, init?: RequestInit): Promise<Response> =>
+    harness ? harness.fetch(url, init) : globalThis.fetch(url, init);
+  const rawGet = (url: string, headers: Record<string, string>) =>
+    harness
+      ? harness.bounded("request-timeout", `GET ${new URL(url).pathname}`, harness.requestTimeoutMs, (signal) =>
+          rawGetFrom(url, headers, signal),
+        )
+      : rawGetFrom(url, headers);
   const jget = async (p: string, init?: RequestInit): Promise<{ status: number; body: JsonValue }> => {
     const r = await fetch(base + p, init);
     const t = await r.text();
@@ -84,9 +103,11 @@ export async function runConformance(
 
   console.log("\nbindings:");
 
+  step("vars: GET / uses env.SITE_NAME");
   // vars
   check("vars: GET / uses env.SITE_NAME", String((await jget("/")).body).includes("Sproutboat Notes"));
 
+  step("static assets");
   // static assets: env.ASSETS.fetch serves index.html; SPA fallback for unknown GET
   const home = await fetch(base + "/");
   check(
@@ -109,6 +130,7 @@ export async function runConformance(
     binaryAsset.length === 256 && binaryAsset.every((byte, index) => byte === index),
   );
 
+  step("KV: login and whoami");
   // KV (login -> whoami)
   const login = await jget("/login", { method: "POST" });
   const token = String(obj(login.body).token);
@@ -116,6 +138,7 @@ export async function runConformance(
   const who = await jget("/whoami", { headers: { authorization: "Bearer " + token } });
   check("KV: whoami resolves the session", who.status === 200 && obj(who.body).user === "demo", who.body);
 
+  step("D1: create, list, unicode");
   // D1 (create + list + get)
   const created = await jget("/notes", { method: "POST", body: JSON.stringify({ title: "hello", body: "world" }) });
   check("D1: POST /notes inserts", created.status === 201 && isSafeInteger(obj(created.body).id), created.body);
@@ -128,6 +151,7 @@ export async function runConformance(
   const titles = arr((await jget("/notes")).body).map((row) => obj(row).title);
   check("D1: non-ASCII text round-trips", titles.includes(unicodeTitle), titles);
 
+  step("Durable Object: view counter");
   // Durable Object (view counter increments atomically)
   const v1 = await jget(`/notes/${noteId}`);
   const v2 = await jget(`/notes/${noteId}`);
@@ -136,6 +160,7 @@ export async function runConformance(
     v2: obj(v2.body).views,
   });
 
+  step("R2: attach, fetch back, list");
   // R2 (attach + fetch back + list)
   const att = await jget(`/notes/${noteId}/attach`, { method: "POST", body: "the file contents" });
   check("R2: attach stores a key", isString(obj(att.body).key), att.body);
@@ -156,15 +181,18 @@ export async function runConformance(
     // binary must stream the ticket PUT through the native bridge instead.
     const direct = await jget("/r2/direct-upload", { method: "POST" });
     const directInfo = obj(direct.body);
+    step("R2 direct upload: 2 MiB PUT through the ticket");
     const largeBody = "x".repeat(2 * 1024 * 1024);
     const directPut = await fetch(base + String(directInfo.url), { method: "PUT", body: largeBody });
     check("R2 direct upload: native ticket accepts a 2 MiB body", directPut.status === 201, directPut.status);
+    step("R2 direct upload: read the published object back");
     const directRead = await fetch(base + "/attach/" + encodeURIComponent(String(directInfo.key)));
     check(
       "R2 direct upload: published object reads back intact",
       directRead.status === 200 && (await directRead.text()) === largeBody,
       directRead.status,
     );
+    step("R2 direct download: byte range 1024-2047");
     const rangedTicket = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
     const ranged = await rawGet(base + String(obj(rangedTicket.body).url), { Range: "bytes=1024-2047" });
     check(
@@ -174,6 +202,7 @@ export async function runConformance(
         ranged.body === largeBody.slice(1024, 2048),
       ranged.status,
     );
+    step("R2 direct download: complete 2 MiB object");
     const download = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
     const directDownload = await fetch(base + String(obj(download.body).url));
     check(
@@ -181,6 +210,7 @@ export async function runConformance(
       directDownload.status === 200 && (await directDownload.text()) === largeBody,
       directDownload.status,
     );
+    step("R2 direct download: If-None-Match");
     const conditionalTicket = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
     const conditional = await rawGet(base + String(obj(conditionalTicket.body).url), { "If-None-Match": "*" });
     check(
@@ -190,6 +220,7 @@ export async function runConformance(
     );
   }
 
+  step("async handler");
   // async handler: the prelude must return the handler's own promise untouched
   const asyncRes = await jget("/async");
   check(
@@ -198,6 +229,7 @@ export async function runConformance(
     asyncRes.body,
   );
 
+  step("outbound fetch");
   // outbound fetch
   const quote = await jget("/quote");
   check(
@@ -206,6 +238,7 @@ export async function runConformance(
     quote.body,
   );
 
+  step("egress refusals");
   // #174 — fetch() never reaches a private address, and both backends refuse
   // with the same words. The harness allows 127.0.0.1 only, for its stub.
   const refusals: Array<[url: string, hostname: string, address: string]> = [
@@ -232,6 +265,7 @@ export async function runConformance(
     );
   }
 
+  step("secret gate");
   // secret gate
   const denied = await jget("/admin/stats", { headers: { "x-admin-token": "wrong" } });
   check("secret: /admin/stats rejects a bad ADMIN_TOKEN", denied.status === 403);
@@ -242,6 +276,7 @@ export async function runConformance(
     allowed.body,
   );
 
+  step("analytics engine");
   // analytics engine — env.METRICS.query() feeds the dashboard
   check(
     "analytics: METRICS.query reports data points",
@@ -252,6 +287,7 @@ export async function runConformance(
   // service binding (#48): env.PEER.fetch() reaches a second deployment through
   // the edge, so a 200 here means the shim -> broker -> Host path works.
   if (!options.skipServices) {
+    step("service binding: PEER.fetch");
     const peer = await jget("/peer");
     check(
       "service binding: env.PEER.fetch reaches another deployment",
@@ -260,6 +296,7 @@ export async function runConformance(
     );
   }
 
+  step("crypto.subtle and scrypt");
   // crypto.subtle (#133): a known SHA-256 vector and an HMAC round-trip.
   const h = obj((await jget("/hash")).body);
   check(
@@ -285,6 +322,7 @@ export async function runConformance(
     h,
   );
 
+  step("rate limiter");
   // rate limiter (#69): a unique key gets `limit` successes then a failure, and
   // every reply carries resetAt (epoch ms) so a 429 can send Retry-After.
   const rlKey = "conf-" + Date.now();
@@ -302,6 +340,7 @@ export async function runConformance(
     rlResets,
   );
 
+  step("Durable Object alarm roll-up");
   // DO alarms (#125): viewing a note debounces an alarm a second out, whose
   // handler rolls the count up into D1. Poll, because the whole point is that
   // it happens after the request that scheduled it has gone.
@@ -314,6 +353,7 @@ export async function runConformance(
   }
   check("DO alarm: the debounced roll-up ran and wrote to D1", rollups > 0, { rollups });
 
+  step("queue consumer");
   // queue: POST /notes enqueued an EMAILS job; the broker consumer delivers it
   let emailLogged = 0;
   for (let i = 0; i < 20; i++) {
@@ -328,6 +368,7 @@ export async function runConformance(
   // binary has no broker and no token, so it refuses external triggers by
   // design (#15) and drives its own on a timer instead.
   if (options.skipTriggers) return;
+  step("cron: scheduled trigger");
   const sched = await fetch(base + "/", {
     method: "POST",
     headers: { "x-sb-trigger": "scheduled", "x-sb-token": TOKEN, "content-type": "application/json" },

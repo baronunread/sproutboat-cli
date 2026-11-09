@@ -10,9 +10,9 @@
  * same broker per deployment and passes SB_BROKER_PORT / SB_BROKER_TOKEN /
  * SB_SPROUT_URL to the sprout exactly as this script does.
  */
-import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Harness, type HarnessError } from "../lib/harness";
 import { buildWebUi } from "./build-web";
 import { runConformance } from "./conformance";
 import { loadPrelude, wrapNativeFetchHandler, type Bindings } from "../../src/compile";
@@ -41,14 +41,21 @@ const HERE = import.meta.dir;
 const CLI = join(HERE, "../..");
 const PORF = join(await ensurePorffor(), "runtime/index.js");
 
-const workdir = mkdtempSync(join(tmpdir(), "sb-kitchen-"));
-const cleanup: Array<() => void> = [() => rmSync(workdir, { recursive: true, force: true })];
-const die = (m: string) => {
-  console.error("FAIL:", m);
+// #276: deadlines on every request, a step recorded before each one, a failure
+// report with the step, backend and versions, and cleanup of this run's own
+// child and temp dir on failure or interruption.
+const ADMIN_TOKEN = "s3cr3t-admin";
+const TOKEN = "harness-token";
+const harness = new Harness({ backend: "broker", prefix: "sb-kitchen-", secrets: [ADMIN_TOKEN, TOKEN] });
+const workdir = harness.workdir;
+const cleanup: Array<() => void> = [];
+const die = (m: HarnessError): never => {
+  console.error(harness.report(m));
   for (const c of cleanup.reverse())
     try {
       c();
     } catch {}
+  harness.cleanupSync();
   process.exit(1);
 };
 
@@ -121,10 +128,13 @@ const bin = join(workdir, "sprout.bin");
 writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"), "utf8"), prelude, vars, bindings));
 
 // The sprout uses crypto.subtle, so the compile needs BearSSL as a broker build gets it from the CLI.
-const tls = await ensureBearssl({ target: "host" });
+const tls = await harness.build("preparing BearSSL", () => ensureBearssl({ target: "host" })).catch(die);
 
 console.log("compiling sprout (host native)…");
-const compile = Bun.spawnSync(["node", PORF, "native", gen, "-o", bin], {
+// Compilation has its own deadline (SB_HARNESS_BUILD_TIMEOUT_MS), so a slow
+// build cannot look like a hung handler. The compiler is killed on timeout.
+harness.step("compiling the sprout (host native)");
+const compile = Bun.spawn(["node", PORF, "native", gen, "-o", bin], {
   env: {
     ...process.env,
     PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}`,
@@ -133,18 +143,26 @@ const compile = Bun.spawnSync(["node", PORF, "native", gen, "-o", bin], {
   },
   stdout: "pipe",
   stderr: "pipe",
+  timeout: harness.buildTimeoutMs,
+  killSignal: "SIGKILL",
 });
-if (compile.exitCode !== 0) die("porffor compile failed:\n" + compile.stderr.toString() + compile.stdout.toString());
+const [compileOut, compileErr, compileCode] = await Promise.all([
+  new Response(compile.stdout).text(),
+  new Response(compile.stderr).text(),
+  compile.exited,
+]);
+if (compile.signalCode)
+  die(`porffor compile did not finish within ${harness.buildTimeoutMs} ms (SB_HARNESS_BUILD_TIMEOUT_MS)`);
+if (compileCode !== 0) die("porffor compile failed:\n" + compileErr + compileOut);
 
 // --- broker (in-process) --------------------------------------------
-const TOKEN = "harness-token";
 const sproutPort = freePort();
 const broker = createBroker({
   db: join(workdir, "state.sqlite"),
   dataDir: join(workdir, "d1"),
   token: TOKEN,
   bindings,
-  secrets: { ADMIN_TOKEN: "s3cr3t-admin" },
+  secrets: { ADMIN_TOKEN },
   sproutUrl: `http://127.0.0.1:${sproutPort}/`,
   assetsDir,
   // #48 — on a node the control plane resolves a service name to a hostname and
@@ -167,32 +185,26 @@ cleanup.push(() => {
 });
 
 // --- sprout process -----------------------------------------------
-const sprout = Bun.spawn([bin], {
+harness.spawn("sprout", [bin], {
   env: { ...process.env, PORT: String(sproutPort), SB_BROKER_PORT: String(brokerServer.port), SB_BROKER_TOKEN: TOKEN },
   stdout: "inherit",
-  stderr: "inherit",
+  tee: true,
 });
-cleanup.push(() => sprout.kill(9));
 
 const base = `http://127.0.0.1:${sproutPort}`;
-async function up() {
-  for (let i = 0; i < 100; i++) {
-    try {
-      await fetch(base + "/");
-      return;
-    } catch {
-      await Bun.sleep(50);
-    }
-  }
-  die("sprout never listened");
-}
-await up();
+// Readiness has its own deadline (SB_HARNESS_READY_TIMEOUT_MS).
+await harness.waitReady(base + "/").catch(die);
 
-await runConformance(base, TOKEN, check, { skipDirectTransfer: true, upstream: `http://${upstreamHost}` });
+await runConformance(base, TOKEN, check, {
+  skipDirectTransfer: true,
+  upstream: `http://${upstreamHost}`,
+  harness,
+}).catch(die);
 
 console.log(`\n${passed} checks passed — every binding exercised end to end.`);
 for (const c2 of cleanup.reverse())
   try {
     c2();
   } catch {}
+await harness.cleanup();
 process.exit(0);

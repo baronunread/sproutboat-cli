@@ -10,9 +10,9 @@
  * unchanged, which is the point: two backends, one definition of what
  * `env.KV.get` means.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { Harness, type HarnessError } from "../lib/harness";
 import { buildWebUi } from "./build-web";
 import { runConformance } from "./conformance";
 import { buildStandalone } from "../../src/standalone-build";
@@ -35,14 +35,20 @@ function freePort(): number {
 }
 
 const HERE = import.meta.dir;
-const workdir = mkdtempSync(join(tmpdir(), "sb-standalone-"));
-const cleanup: Array<() => void> = [() => rmSync(workdir, { recursive: true, force: true })];
-const die = (m: string) => {
-  console.error("FAIL:", m);
+// #276: deadlines on every request, a step recorded before each one, a failure
+// report with the step, backend and versions, and cleanup of this run's own
+// child and temp dir on failure or interruption.
+const ADMIN_TOKEN = "s3cr3t-admin";
+const harness = new Harness({ backend: "standalone", prefix: "sb-standalone-", secrets: [ADMIN_TOKEN] });
+const workdir = harness.workdir;
+const cleanup: Array<() => void> = [];
+const die = (m: HarnessError): never => {
+  console.error(harness.report(m));
   for (const c of cleanup.reverse())
     try {
       c();
     } catch {}
+  harness.cleanupSync();
   process.exit(1);
 };
 let passed = 0;
@@ -76,19 +82,26 @@ const upstreamHost = `127.0.0.1:${upstream.port}`;
 delete config.services;
 config.vars = { ...config.vars, QUOTE_URL: `http://${upstreamHost}/random` };
 
+harness.step("building the web UI");
 buildWebUi();
 const sourcePath = join(HERE, config.main);
 const bundle = await bundleHandler(sourcePath, HERE);
 
 console.log("building the standalone binary…");
-const built = await buildStandalone({
-  projectDir: HERE,
-  config,
-  sourcePath,
-  source: bundle.code,
-  target: "host",
-  outPath: join(workdir, "kitchen-sink"),
-});
+// Compilation has its own deadline (SB_HARNESS_BUILD_TIMEOUT_MS), so a slow
+// build cannot look like a hung handler.
+const built = await harness
+  .build("compiling the standalone binary", () =>
+    buildStandalone({
+      projectDir: HERE,
+      config,
+      sourcePath,
+      source: bundle.code,
+      target: "host",
+      outPath: join(workdir, "kitchen-sink"),
+    }),
+  )
+  .catch(die);
 console.log(`  ${(built.bytes / 1_000_000).toFixed(1)} MB\n`);
 
 // Unused by the binary (it accepts no external triggers); the suite still wants
@@ -98,33 +111,20 @@ const port = freePort();
 const dataDir = join(workdir, "data");
 // Environment only: a native-fetch binary never sees argv (Porffor's runtime
 // init calls porf_init(0, NULL)), so PORT and SB_DATA_DIR are the whole surface.
-const child = Bun.spawn([built.outPath], {
-  stdio: ["ignore", "pipe", "pipe"],
+harness.spawn("standalone binary", [built.outPath], {
   // SB_EGRESS_ALLOW: the stub upstream is on loopback, which fetch() refuses (#174).
   env: {
     ...process.env,
     PORT: String(port),
     SB_DATA_DIR: dataDir,
-    ADMIN_TOKEN: "s3cr3t-admin",
+    ADMIN_TOKEN,
     SB_EGRESS_ALLOW: "127.0.0.1",
   },
 });
-cleanup.push(() => child.kill(9));
 
 const base = `http://127.0.0.1:${port}`;
-const deadline = Date.now() + 20_000;
-let up = false;
-while (Date.now() < deadline && !up) {
-  try {
-    // AbortSignal matters: without it a binary that accepts the connection and
-    // never answers hangs this loop past its own deadline.
-    await fetch(base + "/", { signal: AbortSignal.timeout(2000) });
-    up = true;
-  } catch {
-    await Bun.sleep(100);
-  }
-}
-if (!up) die(`standalone binary never listened on ${port}:\n${await new Response(child.stderr).text()}`);
+// Readiness has its own deadline (SB_HARNESS_READY_TIMEOUT_MS).
+await harness.waitReady(base + "/").catch(die);
 
 console.log("bindings (standalone):");
 // The binary drives its own cron and queue timers and refuses external
@@ -133,33 +133,13 @@ await runConformance(base, TOKEN, check, {
   skipTriggers: true,
   skipServices: true,
   upstream: `http://${upstreamHost}`,
-});
+  harness,
+}).catch(die);
 
 // baronunread/sproutboat#236: nginx proxies with HTTP/1.0 by default, which
 // uWebSockets used to answer with 505. Raw socket: fetch() always speaks 1.1.
-const http10 = await new Promise<{ reply: string; closed: boolean }>((resolve) => {
-  let reply = "";
-  const done = (closed: boolean) => resolve({ reply, closed });
-  Bun.connect({
-    hostname: "127.0.0.1",
-    port,
-    socket: {
-      open(socket) {
-        socket.write("GET / HTTP/1.0\r\nHost: localhost\r\n\r\n");
-      },
-      data(_socket, chunk) {
-        reply += new TextDecoder().decode(chunk);
-      },
-      close() {
-        done(true);
-      },
-      error() {
-        done(false);
-      },
-    },
-  }).catch(() => done(false));
-  setTimeout(() => done(false), 5000);
-});
+harness.step("HTTP/1.0 request over a raw socket");
+const http10 = await harness.rawExchange("127.0.0.1", port, "GET / HTTP/1.0\r\nHost: localhost\r\n\r\n").catch(die);
 check(
   "HTTP/1.0: answered with 200 and the connection closed",
   http10.reply.startsWith("HTTP/1.1 200") && http10.closed,
@@ -171,4 +151,5 @@ for (const c of cleanup.reverse())
   try {
     c();
   } catch {}
+await harness.cleanup();
 process.exit(0);
