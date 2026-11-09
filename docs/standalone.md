@@ -15,7 +15,7 @@ mini app, run it on a Pi, later `sproutboat deploy` it.
 ## Runtime surface
 
 Everything a project declares — KV and D1 names, buckets, queues, DO classes,
-cron expressions, `vars` — compiles in. Five things do
+cron expressions, `vars` — compiles in. Six things do
 not:
 
 - `PORT`: the port to listen on.
@@ -26,9 +26,11 @@ not:
   and refuses private and reserved ones (loopback, RFC 1918, link-local and
   cloud metadata, and the rest) unless they are listed here, for example a
   database on the same host.
+- `SB_LOG=json`: structured request and error records on stderr (see
+  [Logs](#logs)). Off by default.
 - **Secrets**: from the environment, or `<data>/secrets.json`.
 
-All five arrive through the environment, and none of them through flags: a
+All six arrive through the environment, and none of them through flags: a
 native-fetch binary never sees `argv`, because Porffor's runtime init calls
 `porf_init(0, NULL)`. That suits systemd and docker, which set environment
 variables anyway.
@@ -90,6 +92,85 @@ not itself a trusted address; with the list unset or the peer not in it,
 
 IPv4-mapped IPv6 peers (`::ffff:1.2.3.4`) are folded to the dotted form. CIDR
 ranges are IPv4; an IPv6 proxy must be listed as a bare address.
+
+## Logs
+
+By default a binary writes nothing per request; an uncaught handler error goes
+to stderr as `Uncaught (in fetch) ...` text, and your own `console.log` goes to
+stdout. Start it with `SB_LOG=json` and stderr carries one JSON line per
+request and one per uncaught error instead, which `sproutboat tail --file`
+follows and filters.
+
+```sh
+SB_LOG=json ./notes 2>> /var/log/notes.jsonl
+sproutboat tail --file /var/log/notes.jsonl --status 5xx
+```
+
+Under systemd, `Environment=SB_LOG=json` and `StandardError=append:/var/log/notes.jsonl`
+do the same, or pipe the journal: `journalctl -u notes -f -o cat | sproutboat tail --file -`.
+
+A request record is written once the response is built:
+
+```json
+{"type":"request","v":1,"id":"1762600000-17","timestamp":1762600012345,"method":"GET","path":"/notes","status":200,"durationMs":3,"outcome":"ok"}
+```
+
+`outcome` is `exception` when the handler threw (the status is then 500). An
+error record is written for every uncaught error: a `fetch` handler, `scheduled`,
+`queue`, an alarm, a WebSocket handler, a rejected promise (`promise`) or a
+`ctx.waitUntil` task (`waitUntil`):
+
+```json
+{"type":"error","v":1,"id":"1762600000-18","timestamp":1762600012399,"source":"fetch","name":"TypeError","message":"Cannot read properties of undefined","stack":"..."}
+```
+
+An error raised while answering a request has that request's `id`, so
+`jq 'select(.id=="1762600000-18")'` pulls up both lines. Errors from work that
+belongs to no request (a cron, a queue batch, an alarm, an unawaited promise)
+have `"id":null`. `timestamp` is milliseconds since the epoch.
+
+What is left out: request and response bodies, headers (cookies and
+`Authorization` included), the query string (tokens end up there), and the
+client address. The value of a declared secret is replaced with `[redacted]`
+wherever it appears in an error's message or stack; other text your code puts in
+an error message is written as it is, so do not put credentials in one.
+
+Output is bounded. Paths are cut at 256 characters, messages at 1000 and stacks
+at 2000, and at most 200 lines a second are written. Past that the records are
+counted, not written, and the next second starts with
+`{"type":"dropped","v":1,"timestamp":...,"count":40,"reason":"rate"}`. Rotating
+the log is your job (`logrotate` with `copytruncate`, or journald); the binary
+only writes to stderr.
+
+Other lines in the same file (a startup banner, plain text from the runtime) are
+skipped by `tail --file`. Records of a different `v` are skipped too.
+
+### `sproutboat tail --file`
+
+```sh
+sproutboat tail --file <log|-> [--lines <n>] [--no-follow] [--format pretty|json]
+                [--status ok|error|<code>|5xx] [--method GET,POST] [--search <text>]
+```
+
+It prints the last 10 matching records (`--lines`, 0 for none), then keeps
+following and prints new ones as they are written. `--no-follow` prints that
+snapshot and exits. `--file -` reads standard input until it ends. It needs no
+login and no network. Ctrl-C and SIGTERM end it with exit 0.
+
+- `--format json` writes one record per line to stdout and nothing else; notices
+  (waiting, rotation, skipped lines) go to stderr, so the output stays parseable.
+  Only the fields above are written, whatever the log contains.
+- `--status`, `--method` and `--search` mean what they do for a deployed app
+  (`ok` is a success below 400, `error` a 5xx or a thrown handler). They select
+  requests; an error is shown when its request is, and an error with no request is
+  always shown. `--sampling-rate` and `--outcome` are not available for a file.
+- Reconnecting: a missing file is waited for. A file replaced by rotation
+  (renamed away, new file in its place) is reopened and read from its start, and
+  a file truncated in place is read again from its start, noticed when it is
+  shorter than what was already read. A line over 64 KiB is skipped and counted
+  rather than held in memory.
+- For a deployed app, `sproutboat tail` without `--file` streams the same kind of
+  events from the control plane (see `sproutboat tail --help`).
 
 ## Known issue: an async handler can livelock at 100% CPU
 
