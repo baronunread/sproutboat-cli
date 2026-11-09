@@ -18,6 +18,7 @@ import { CLI_NAME, COMMANDS, helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type Sto
 import { notifyIfOutdated } from "./update-check";
 import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
+import { detectPackageManager, installCommand, planPackageJson, runScriptCommand } from "./init-package";
 import { pathToFileURL } from "node:url";
 import { constants as osConstants } from "node:os";
 import { inspectToolchain } from "./toolchain";
@@ -265,6 +266,21 @@ async function init(name = "hello") {
   ] as const) {
     if (await Bun.file(path).exists()) fail(`${basename(directory)} already contains ${label}`);
   }
+  // Plan package.json before writing anything, so an unreadable one stops init
+  // instead of leaving a half-scaffolded project.
+  const packagePath = resolve(directory, "package.json");
+  let existingPackage: string | undefined;
+  try {
+    existingPackage = await readFile(packagePath, "utf8");
+  } catch {
+    existingPackage = undefined;
+  }
+  let packagePlan: ReturnType<typeof planPackageJson>;
+  try {
+    packagePlan = planPackageJson(name, existingPackage, CLI_VERSION);
+  } catch (cause) {
+    fail(`${basename(directory)}: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
   await mkdir(resolve(directory, "src"), { recursive: true });
   await writeFile(configPath, starterConfig(name), { flag: "wx" });
   await writeFile(handlerPath, starterHandler, { flag: "wx" });
@@ -278,6 +294,19 @@ async function init(name = "hello") {
     await writeFile(gitignorePath, starterGitignore, { flag: "wx" });
     console.log(`Created ${basename(directory)}/.gitignore`);
   }
+  if (packagePlan.created || packagePlan.addedDependency || packagePlan.addedScripts.length > 0) {
+    await writeFile(packagePath, packagePlan.text);
+    console.log(`${packagePlan.created ? "Created" : "Updated"} ${basename(directory)}/package.json`);
+  }
+  for (const script of packagePlan.skippedScripts)
+    console.log(
+      amber(
+        `  ! package.json already has a "${script}" script; left it as is (sproutboat's would be "sproutboat ${script}")`,
+      ),
+    );
+  const manager = detectPackageManager(directory);
+  console.log(`\nNext: cd ${basename(directory)} && ${installCommand(manager)} && ${runScriptCommand(manager, "dev")}`);
+  console.log(dim(`After "sproutboat login", ship it with ${runScriptCommand(manager, "deploy")}.`));
 }
 
 async function check(directory?: string) {
