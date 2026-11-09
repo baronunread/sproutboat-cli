@@ -10,6 +10,18 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Added
+
+- **`login` on a Sproutboat Cloud endpoint is the device-code flow (RFC 8628).** It prints a code and a link, opens the browser when it can, and stores an account API key (`CLI on <hostname>`, Developer at most) for the team you approve. `logout` revokes that key on the server and then forgets it; `whoami` shows the team, the key and its access, and exits 1 when not logged in. `--account <team>` preselects a team.
+- **`deploy` to the Cloud.** It uploads the compiled module by sha256 and the assets by hash, writes the app, waits for a host to apply the generation and prints `https://<app>.<team>.sproutboat.app`. The module is `--module app.so`, or compiled with `--sproutd` and `--generation` (there is no hosted compile service yet). Logged out in a terminal it logs in first; with no terminal it fails naming `SPROUTBOAT_API_TOKEN`. Bindings, crons and secrets in `sproutboat.jsonc` are not sent yet and the deploy warns.
+- **`SPROUTBOAT_API_TOKEN` always wins over a stored login** (`SPROUTBOAT_TOKEN` stays as the older name). `SPROUTBOAT_ACCOUNT` and an `account` field in `sproutboat.jsonc` choose the team, like Wrangler's `account_id`. Several teams can be stored per endpoint.
+- **The deploy target is the endpoint you are logged in to.** The CLI asks it what it is (`GET /v1/config`) and deploys the Cloud way or the Community way. There is no `--cloud` flag, since Wrangler also has one target chosen by credentials.
+
+### Changed
+
+- **The default endpoint is `https://dash.sproutboat.com`** (it was `https://dashboard.sproutboat.com`).
+- **Credentials live in `~/Library/Preferences/sproutboat` on macOS,** Wrangler's choice. The old `~/.config/sproutboat/credentials.json` is still read, and the next login writes the new place. Elsewhere nothing moves.
+
 ### Fixed
 
 - **`init`'s help text and `SURFACE.md` now say it adds the `dev`, `deploy` and `check` scripts,** not just `dev` and `deploy`. Wording only.

@@ -2,9 +2,10 @@
 import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { existsSync, rmSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { isBoolean, isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject } from "./json";
 import type { AssetFiles } from "./assets";
-import { parseConfig, pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
+import { pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
 import { validateHttpSyncSource } from "./source";
 import { buildArtifact, emitGenerated } from "./build";
 import { generateTypes, TYPES_FILE } from "./types-gen";
@@ -13,7 +14,22 @@ import { runDev } from "./dev";
 import { buildStandalone, emitStandalone } from "./standalone-build";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
-import { activeApiUrl, forgetToken, savedToken, saveToken } from "./credentials";
+import { activeApiUrl, forgetToken, savedProfile, savedToken, saveToken } from "./credentials";
+import { configAccount, parseProjectConfig } from "./account-field";
+import {
+  cloudLogout,
+  CloudError,
+  DEFAULT_API_URL,
+  detectKind,
+  envToken,
+  fetchWhoami,
+  loginAndStore,
+  resolveSession,
+  storeGivenKey,
+  type CloudIo,
+} from "./cloud";
+import { buildAssetBundle, CLOUD_PROJECT_RE, compileModule, deployToCloud, hostFor } from "./cloud-deploy";
+import { hostname as osHostname, platform as osPlatform, arch as osArch } from "node:os";
 import { CLI_NAME, COMMANDS, helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
 import { notifyIfOutdated } from "./update-check";
 import { controlVersionWarning } from "./api-version";
@@ -41,7 +57,7 @@ if (internalModeAt > 0) {
   process.exit(0);
 }
 
-const defaultApiUrl = "https://dashboard.sproutboat.com";
+const defaultApiUrl = DEFAULT_API_URL;
 
 type ApiUrlSource = "SPROUTBOAT_API_URL" | "--api-url" | "saved active endpoint" | "default";
 
@@ -218,10 +234,10 @@ async function readProjectConfig(directory = process.cwd()) {
   } catch {
     fail(`no sproutboat.jsonc found in ${projectDirectory}`);
   }
-  const parsed = parseConfig(configSource);
+  const parsed = parseProjectConfig(configSource);
   if (!parsed.ok) fail(parsed.errors.join("\n"));
   for (const warning of parsed.warnings) console.warn(amber(`! ${warning}`));
-  return { directory: projectDirectory, config: parsed.value };
+  return { directory: projectDirectory, config: parsed.value, account: configAccount(configSource) };
 }
 
 /** Full build input: configuration plus entry point, resolved imports and checks. */
@@ -430,6 +446,23 @@ async function emitOnly(directory: string | undefined, target: BuildTarget, stan
   }
 }
 
+/** The standalone source unit the Cloud compile starts from (what `build --standalone --emit-only` prints). */
+async function emitStandaloneUnit(directory: string | undefined): Promise<string> {
+  const project = await readProject(directory);
+  try {
+    const { generatedPath } = await emitStandalone({
+      projectDir: project.directory,
+      config: project.config,
+      sourcePath: project.sourcePath,
+      source: project.bundle.code,
+      target: "linux-x86_64",
+    });
+    return generatedPath;
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+}
+
 /** #62 — build for this machine, run it against a real broker, rebuild on save. */
 const DEV_USAGE = "dev [project-dir] [--port <n>] [--no-watch] [--env <name>] [--env-file <file>]...";
 
@@ -520,7 +553,7 @@ const PROVISION_FIELDS = [
 async function provisionBindings(directory = process.cwd()): Promise<void> {
   const configPath = resolve(directory, "sproutboat.jsonc");
   let source = await readFile(configPath, "utf8");
-  const parsed = parseConfig(source);
+  const parsed = parseProjectConfig(source);
   if (!parsed.ok) return; // build() re-reads and reports the config error
 
   const bare: Array<{ field: string; kind: string; binding: string }> = [];
@@ -552,7 +585,24 @@ async function provisionBindings(directory = process.cwd()): Promise<void> {
 
 /** #79 — wrangler parity: drop the stored credential for an endpoint. */
 async function logout(args: string[]) {
-  const { apiUrl } = await parseLoginArgs(args);
+  const { apiUrl, account } = await parseLoginArgs(args);
+  if ((await savedProfile(apiUrl))?.kind === "cloud") {
+    const outcome = await guard(() => cloudLogout(apiUrl, account));
+    if (outcome.kind === "none") {
+      console.log(`no stored login for ${account ? `the team "${account}" on ` : ""}${apiUrl}`);
+      return;
+    }
+    const how =
+      outcome.server === "revoked"
+        ? "revoked its key on the server"
+        : outcome.server === "already-gone"
+          ? "its key was already revoked on the server"
+          : "could not reach the server, so the key may still be live: delete it under Settings, API keys";
+    console.log(ok(`logged out of ${outcome.slug} on ${apiUrl} (${how})`));
+    if (outcome.remaining.length > 0) console.log(dim(`still logged in to: ${outcome.remaining.join(", ")}`));
+    if (envToken()) console.log(dim("SPROUTBOAT_API_TOKEN is set in this shell and still applies"));
+    return;
+  }
   const result = await forgetToken(apiUrl);
   if (!result.removed) {
     console.log(`no stored credential for ${apiUrl}`);
@@ -568,12 +618,39 @@ async function logout(args: string[]) {
  * The account comes from the control plane, so this also proves the token still
  * works rather than only reporting what is on disk.
  */
-async function whoami() {
-  const { apiUrl, source } = await resolveApiUrl();
-  const token = process.env.SPROUTBOAT_TOKEN || (await savedToken(apiUrl));
+async function whoami(args: string[]) {
+  const { apiUrl, source, account: wanted } = await parseLoginArgs(args);
+  const fromEnv = envToken();
+  const saved = await savedProfile(apiUrl);
   console.log(`endpoint  ${apiUrl}  (${source})`);
+  const kind = saved?.kind ?? (fromEnv ? await kindOf(apiUrl) : undefined);
+  if (kind === "cloud") {
+    const team = wanted ?? saved?.team ?? Object.keys(saved?.teams ?? {})[0];
+    const token = fromEnv?.token ?? (team ? saved?.teams[team]?.token : undefined) ?? saved?.token;
+    if (!token) {
+      const hint = wanted
+        ? `not logged in to the team "${wanted}"; run \`sproutboat login --account ${wanted}\``
+        : "not logged in; run `sproutboat login`";
+      console.log(`account   ${rose(hint)}`);
+      process.exitCode = 1;
+      return;
+    }
+    const who = await guard(() => fetchWhoami(apiUrl, token, fromEnv !== undefined));
+    console.log(`kind      Sproutboat Cloud`);
+    console.log(`team      ${who.slug}${who.name !== who.slug ? ` (${who.name})` : ""}`);
+    console.log(
+      `key       ${who.keyName || who.keyId}  ${dim(fromEnv ? `token from ${fromEnv.source}` : "stored login")}`,
+    );
+    if (who.permissions) console.log(`access    ${who.permissions}`);
+    if (who.person) console.log(`email     ${who.person.email}`);
+    const stored = Object.keys(saved?.teams ?? {});
+    if (!fromEnv && stored.length > 1) console.log(dim(`logged in to ${stored.length} teams: ${stored.join(", ")}`));
+    return;
+  }
+  const token = fromEnv?.token || (await savedToken(apiUrl));
   if (!token) {
     console.log(`account   ${dim("no stored token — run `sproutboat login`")}`);
+    process.exitCode = 1;
     return;
   }
 
@@ -582,6 +659,7 @@ async function whoami() {
     console.log(
       `account   ${rose(response.status === 401 ? "token rejected — run `sproutboat login`" : `control plane said ${response.status}`)}`,
     );
+    process.exitCode = 1;
     return;
   }
   const account = jsonObject(parseJsonValue(await response.text()));
@@ -592,8 +670,17 @@ async function whoami() {
 }
 
 async function deploy(args: string[]) {
-  const artifactIndex = args.indexOf("--artifact");
+  const flags = takeFlags(args, DEPLOY_FLAGS);
   const dryRun = args.includes("--dry-run");
+  const { apiUrl: targetUrl } = await resolveApiUrl(flags["--api-url"]);
+  const kind = await deployKind(targetUrl, dryRun);
+  if (kind === "cloud") {
+    if (args.includes("--artifact"))
+      fail("--artifact deploys a prebuilt Community artifact; the Cloud takes --module <file.so>");
+    await guard(() => deployCloud(args, targetUrl, flags));
+    return;
+  }
+  const artifactIndex = args.indexOf("--artifact");
   const directory = args.find((arg, index) => !arg.startsWith("--") && index !== artifactIndex + 1);
   let projectName: string;
   let artifactDir: string;
@@ -635,7 +722,7 @@ async function deploy(args: string[]) {
     console.log("\n--dry-run: not uploading.");
     return;
   }
-  const { apiUrl, token, source } = await apiCredentials();
+  const { apiUrl, token, source } = await apiCredentials(flags["--api-url"]);
   console.log(`endpoint  ${apiUrl}  (${source})`);
   const form = new FormData();
   form.set("manifest", new File([await manifest.arrayBuffer()], "manifest.json", { type: "application/json" }));
@@ -729,14 +816,20 @@ async function waitForHealthy(url: string, timeoutMs: number): Promise<boolean> 
 async function parseLoginArgs(args: string[]) {
   let explicitApiUrl: string | undefined;
   let token: string | undefined;
+  let account: string | undefined;
   for (let index = 0; index < args.length; index += 2) {
     const value = args[index + 1];
     if (args[index] === "--api-url" && value) explicitApiUrl = value;
     else if (args[index] === "--token" && value) token = value;
-    else usageError(`login: unexpected argument "${args[index]}"`, "login [--api-url <url>] [--token <token>]");
+    else if (args[index] === "--account" && value) account = value;
+    else
+      usageError(
+        `unexpected argument "${args[index]}"`,
+        "login [--api-url <url>] [--token <token>] [--account <team>]",
+      );
   }
   const { apiUrl, source } = await resolveApiUrl(explicitApiUrl);
-  return { apiUrl, source, token };
+  return { apiUrl, source, token, account };
 }
 
 /** Announce a login that left the machine's active endpoint pointed elsewhere. */
@@ -746,12 +839,18 @@ function reportActiveEndpoint(apiUrl: string, active: string): void {
 }
 
 async function login(args: string[]) {
-  const { apiUrl, source, token: directToken } = await parseLoginArgs(args);
+  const { apiUrl, source, token: directToken, account } = await parseLoginArgs(args);
   console.log(`endpoint  ${apiUrl}  (${source})`);
+  const kind = await kindOf(apiUrl);
+  if (kind === undefined && !directToken) fail(`cannot reach ${apiUrl}; check the address and your network`);
+  if (kind === "cloud") {
+    await guard(() => cloudLogin(apiUrl, directToken, account));
+    return;
+  }
   // Self-hosted / non-interactive: skip the browser flow and store the token
   // the admin already holds (e.g. SPROUTBOAT_BOOTSTRAP_TOKEN).
   if (directToken) {
-    const { activeApiUrl: active } = await saveToken(apiUrl, directToken);
+    const { activeApiUrl: active } = await saveToken(apiUrl, directToken, kind);
     console.log(`Saved credentials for ${apiUrl}.`);
     reportActiveEndpoint(apiUrl, active);
     return;
@@ -786,7 +885,7 @@ async function login(args: string[]) {
     if (!exchange.ok) fail(`login failed (${exchange.status}): ${result}`);
     const token = parseToken(result);
     if (!token) fail("login response did not include a CLI token");
-    const { activeApiUrl: active } = await saveToken(apiUrl, token);
+    const { activeApiUrl: active } = await saveToken(apiUrl, token, "community");
     console.log(ok("login approved — credentials saved for this endpoint"));
     reportActiveEndpoint(apiUrl, active);
     return;
@@ -794,10 +893,229 @@ async function login(args: string[]) {
   fail("login expired before approval");
 }
 
-async function apiCredentials() {
-  const { apiUrl, source } = await resolveApiUrl();
-  const token = process.env.SPROUTBOAT_TOKEN || (await savedToken(apiUrl));
-  if (!token) fail("not logged in; run sproutboat login or set SPROUTBOAT_TOKEN for this command");
+const DEPLOY_FLAGS = ["--api-url", "--account", "--module", "--sproutd", "--generation"] as const;
+type DeployFlag = (typeof DEPLOY_FLAGS)[number];
+
+/** Run a Cloud step; its CloudError becomes a printed failure. */
+async function guard<T>(step: () => Promise<T>): Promise<T> {
+  try {
+    return await step();
+  } catch (error) {
+    if (error instanceof CloudError) return fail(error.message);
+    throw error;
+  }
+}
+
+/** Remove `--name value` pairs from `args` (in place) and return their values. */
+function takeFlags<Name extends string>(args: string[], names: readonly Name[]) {
+  const values: { [flag in Name]?: string } = {};
+  for (const name of names) {
+    const at = args.indexOf(name);
+    if (at < 0) continue;
+    const value = args[at + 1];
+    if (value === undefined || value.startsWith("--"))
+      usageError(`${name} needs a value`, "deploy [project-dir] [${name} <value>]");
+    values[name] = value;
+    args.splice(at, 2);
+  }
+  return values;
+}
+
+/** Cloud or Community, or undefined when the endpoint cannot be reached. */
+async function kindOf(apiUrl: string) {
+  try {
+    return await detectKind(apiUrl);
+  } catch {
+    return undefined;
+  }
+}
+
+async function deployKind(apiUrl: string, dryRun: boolean) {
+  const stored = envToken() ? undefined : (await savedProfile(apiUrl))?.kind;
+  if (stored) return stored;
+  const kind = await kindOf(apiUrl);
+  if (kind === undefined && !dryRun) fail(`cannot reach ${apiUrl}; check the address and your network`);
+  return kind ?? "community";
+}
+
+function openInBrowser(url: string): boolean {
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+  const headless =
+    process.platform === "linux" &&
+    (!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY) || process.env.SSH_CONNECTION);
+  if (headless || !Bun.which(opener)) return false;
+  try {
+    Bun.spawn(opener === "cmd" ? ["cmd", "/c", "start", "", url] : [opener, url], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function terminalIo(): CloudIo {
+  return {
+    log: (line) => console.log(line),
+    warn: (line) => console.warn(amber(line)),
+    interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    openUrl: openInBrowser,
+    sleep: (ms) => Bun.sleep(ms),
+    choose: async (question, choices) => {
+      const { createInterface } = await import("node:readline/promises");
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        console.log(question);
+        choices.forEach((choice, at) => console.log(`  ${at + 1}) ${choice}`));
+        for (;;) {
+          const answer = (await rl.question("> ")).trim();
+          const picked = choices[Number(answer) - 1] ?? choices.find((choice) => choice === answer);
+          if (picked) return picked;
+        }
+      } finally {
+        rl.close();
+      }
+    },
+  };
+}
+
+async function cloudLogin(apiUrl: string, directToken: string | undefined, account: string | undefined) {
+  if (directToken) {
+    const stored = await storeGivenKey(apiUrl, directToken);
+    console.log(ok(`saved the key for ${stored.slug} on ${apiUrl}`));
+    return;
+  }
+  const cancel = () => {
+    console.log("\nlogin cancelled");
+    process.exit(130);
+  };
+  process.once("SIGINT", cancel);
+  const done = await loginAndStore({
+    apiUrl,
+    io: terminalIo(),
+    hostname: osHostname(),
+    os: `${osPlatform()} ${osArch()}`,
+    account,
+  });
+  process.off("SIGINT", cancel);
+  console.log(
+    ok(
+      `logged in to ${bold(done.slug)}${done.team.role ? ` as ${done.team.role}` : ""} with the key "${done.keyName}"`,
+    ),
+  );
+  console.log(dim("  revoke it any time under Settings, API keys, or with `sproutboat logout`"));
+  reportActiveEndpoint(apiUrl, done.activeApiUrl);
+}
+
+async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typeof takeFlags<DeployFlag>>) {
+  const dryRun = args.includes("--dry-run");
+  const io = terminalIo();
+  const directory = args.find((arg) => !arg.startsWith("--"));
+  const project = await readProjectConfig(directory);
+  const name = project.config.name;
+  if (!CLOUD_PROJECT_RE.test(name))
+    fail(`"${name}" is not a valid Cloud app name (3 to 32 characters: lowercase letters, digits, dashes)`);
+
+  const account = flags["--account"] ?? project.account;
+  let session: Awaited<ReturnType<typeof resolveSession>> | undefined;
+  try {
+    session = await resolveSession({
+      apiUrl,
+      io,
+      account,
+      login: async (hint) => {
+        if (dryRun) throw new CloudError("not logged in (--dry-run does not start a login)");
+        process.once("SIGINT", () => process.exit(130));
+        return loginAndStore({ apiUrl, io, hostname: osHostname(), os: `${osPlatform()} ${osArch()}`, account: hint });
+      },
+    });
+  } catch (error) {
+    if (!dryRun || !(error instanceof CloudError)) throw error;
+    io.warn(`! ${error.message}; the plan below uses a placeholder team`);
+  }
+  const team = session?.slug ?? account ?? "<team>";
+  const hosts = [hostFor(name, team)];
+
+  const cfg = project.config;
+  const unsent = Object.entries({
+    kv_namespaces: cfg.kv_namespaces?.length,
+    d1_databases: cfg.d1_databases?.length,
+    r2_buckets: cfg.r2_buckets?.length,
+    queues: cfg.queues?.length,
+    analytics_engine_datasets: cfg.analytics_engine_datasets?.length,
+    durable_objects: Object.keys(cfg.durable_objects ?? {}).length,
+    services: cfg.services?.length,
+    ratelimiters: cfg.ratelimiters?.length,
+    "triggers.crons": cfg.triggers?.crons?.length,
+  })
+    .filter(([, count]) => (count ?? 0) > 0)
+    .map(([key]) => key);
+  if (unsent.length > 0)
+    io.warn(
+      `! ${unsent.join(", ")} in sproutboat.jsonc are not sent to the Cloud by the CLI yet; the app runs without them`,
+    );
+
+  const assets = project.config.assets ? buildAssetBundle(project.directory, project.config.assets) : undefined;
+  let modulePath = flags["--module"];
+  const compiled = modulePath === undefined;
+  if (modulePath === undefined) {
+    modulePath = resolve(tmpdir(), `sproutboat-${name}-${process.pid}.so`);
+    if (dryRun && !(flags["--sproutd"] ?? process.env.SPROUTBOAT_SPROUTD)) {
+      io.warn("! no --module and no --sproutd: a real deploy would stop here (there is no hosted compile service yet)");
+    } else {
+      console.log(dim("Compiling the module (sproutd)…"));
+      await compileModule({
+        project: name,
+        emit: () => emitStandaloneUnit(directory),
+        sproutd: flags["--sproutd"] ?? process.env.SPROUTBOAT_SPROUTD,
+        generation: flags["--generation"] ?? process.env.SPROUTBOAT_GENERATION,
+        out: modulePath,
+        bun: process.versions.bun ? process.execPath : (Bun.which("bun") ?? "bun"),
+      });
+    }
+  } else if (!existsSync(modulePath)) fail(`no such module: ${modulePath}`);
+
+  console.log(`app       ${bold(name)}`);
+  console.log(`team      ${team}${session ? "" : dim("  (not resolved)")}`);
+  console.log(`endpoint  ${apiUrl}`);
+  console.log(`route     https://${hosts[0]}`);
+  if (assets) console.log(`assets    ${assets.files} files`);
+  if (dryRun) {
+    console.log("\n--dry-run: not uploading.");
+    return;
+  }
+  try {
+    const result = await deployToCloud(
+      {
+        apiUrl,
+        token: session!.token,
+        tokenFromEnv: session!.source !== "stored login",
+        project: name,
+        hosts,
+        modulePath,
+        assets,
+        noWait: args.includes("--no-wait"),
+      },
+      io,
+    );
+    console.log(`\n${leaf("🌱")} ${bold(leaf(`${result.created ? "Created" : "Updated"} ${name}`))}`);
+    if (result.url) console.log(`  ${bold(result.url)}`);
+    console.log(dim(`  generation ${result.generation}  ·  team ${team}`));
+    if (result.applied === false) {
+      fail(
+        `generation ${result.generation} is saved but no host has applied it after 120 s; it applies when a host is available (check with: sproutboat whoami, or the dashboard)`,
+      );
+    }
+  } finally {
+    if (compiled) rmSync(modulePath, { force: true });
+  }
+}
+
+async function apiCredentials(explicitApiUrl?: string) {
+  const { apiUrl, source } = await resolveApiUrl(explicitApiUrl);
+  const token = envToken()?.token || (await savedToken(apiUrl));
+  if (!token) fail("not logged in; run sproutboat login or set SPROUTBOAT_API_TOKEN for this command");
   return { apiUrl, token, source };
 }
 
@@ -1522,7 +1840,7 @@ switch (command) {
     await logout(args);
     break;
   case "whoami":
-    await whoami();
+    await whoami(args);
     break;
   case "deploy":
     await deploy(args);

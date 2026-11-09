@@ -93,7 +93,7 @@ test("every env var read in src/ is documented in ENV_VARS", () => {
     for (const m of text.matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)) {
       const name = m[1];
       // internal/plumbing + ambient vars that aren't part of the user-facing contract
-      if (name === "PATH" || name === "HOME" || name === "CI") continue;
+      if (["PATH", "HOME", "CI", "DISPLAY", "WAYLAND_DISPLAY", "SSH_CONNECTION"].includes(name)) continue;
       seen.add(name);
     }
   }

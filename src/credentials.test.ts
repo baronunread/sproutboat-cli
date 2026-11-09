@@ -31,7 +31,7 @@ test("forgetting the active endpoint clears it instead of picking another one", 
   await saveToken("https://dashboard.sproutboat.com", "prod-token");
   await saveToken("https://control.sproutboat.localhost", "dev-token");
   const result = await forgetToken("https://dashboard.sproutboat.com");
-  expect(result).toEqual({ removed: true, activeApiUrl: undefined });
+  expect(result).toEqual({ removed: true, activeApiUrl: undefined, remaining: [] });
   expect(await activeApiUrl()).toBeUndefined();
 });
 
@@ -39,6 +39,6 @@ test("forgetting a non-active endpoint leaves the active endpoint alone", async 
   await saveToken("https://dashboard.sproutboat.com", "prod-token");
   await saveToken("https://control.sproutboat.localhost", "dev-token");
   const result = await forgetToken("https://control.sproutboat.localhost");
-  expect(result).toEqual({ removed: true, activeApiUrl: "https://dashboard.sproutboat.com" });
+  expect(result).toEqual({ removed: true, activeApiUrl: "https://dashboard.sproutboat.com", remaining: [] });
   expect(await activeApiUrl()).toBe("https://dashboard.sproutboat.com");
 });
