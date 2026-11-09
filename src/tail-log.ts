@@ -114,6 +114,8 @@ type StatusMatcher =
   | { kind: "class"; digit: number }
   | { kind: "code"; code: number };
 
+const MAX_PENDING_ERRORS = 200;
+
 export type LogFilterInput = { status: string[]; method: string[]; search: string | undefined };
 
 /**
@@ -128,6 +130,8 @@ export class LogFilter {
   private readonly method: string[];
   private readonly search: string | undefined;
   private readonly shown = new Map<string, boolean>();
+  /** Errors whose request record has not arrived yet: the runtime writes an error before its request's record. */
+  private readonly pending = new Map<string, LogError>();
 
   constructor(input: LogFilterInput) {
     this.status = input.status.map((value): StatusMatcher => {
@@ -138,6 +142,31 @@ export class LogFilter {
     });
     this.method = input.method.map((value) => value.toUpperCase());
     this.search = input.search?.toLowerCase();
+  }
+
+  /**
+   * The records to print for `record`, in order. An error raised while answering a request is written
+   * before that request's record, so under a status or method filter it waits for the request (up to
+   * 200 at a time, oldest dropped) and is printed just before it, or discarded with it.
+   */
+  accept(record: LogRecord): LogRecord[] {
+    if (record.type === "error" && record.id !== null && !this.shown.has(record.id)) {
+      const filtered = this.status.length > 0 || this.method.length > 0;
+      if (filtered) {
+        if (this.search !== undefined && !this.haystack(record).includes(this.search)) return [];
+        if (this.pending.size >= MAX_PENDING_ERRORS) {
+          const oldest = this.pending.keys().next();
+          if (!oldest.done) this.pending.delete(oldest.value);
+        }
+        this.pending.set(record.id, record);
+        return [];
+      }
+    }
+    const passes = this.matches(record);
+    if (record.type !== "request") return passes ? [record] : [];
+    const waiting = this.pending.get(record.id);
+    this.pending.delete(record.id);
+    return passes ? (waiting ? [waiting, record] : [record]) : [];
   }
 
   matches(record: LogRecord): boolean {
@@ -249,8 +278,8 @@ class LogPrinter {
 
   line(text: string): void {
     const record = parseLogLine(text);
-    if (!record || !this.options.filter.matches(record)) return;
-    this.emit(record);
+    if (!record) return;
+    for (const out of this.options.filter.accept(record)) this.emit(out);
   }
 
   emit(record: LogRecord): void {
@@ -360,7 +389,7 @@ async function snapshot(handle: FileHandle, size: number, printer: LogPrinter, o
   for (const line of text.split("\n")) {
     if (Buffer.byteLength(line) > (options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES)) continue;
     const record = parseLogLine(line);
-    if (record && options.filter.matches(record)) picked.push(record);
+    if (record) picked.push(...options.filter.accept(record));
   }
   for (const record of picked.slice(-options.lines)) printer.emit(record);
 }

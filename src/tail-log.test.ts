@@ -447,3 +447,26 @@ test("sproutboat tail --file - reads a pipe and exits at its end, with --status 
   expect(await child.exited).toBe(0);
   expect(lines([out]).map((line) => JSON.parse(line).id)).toEqual(["i-2", "i-2"]);
 });
+
+test("filters: the runtime writes an error before its request, and the error still follows the request", () => {
+  const f = filter({ status: ["5xx"] });
+  const out = (r: ReturnType<typeof parseLogLine>) => f.accept(r!).map((x) => `${x.type}:${"id" in x ? x.id : ""}`);
+  // a failing request: error first, then the request record
+  expect(out(parseLogLine(failure({ id: "8-1" })))).toEqual([]);
+  expect(out(parseLogLine(request({ id: "8-1", status: 500, outcome: "exception" })))).toEqual([
+    "error:8-1",
+    "request:8-1",
+  ]);
+  // a request the filter hides takes its error with it
+  expect(out(parseLogLine(failure({ id: "8-2" })))).toEqual([]);
+  expect(out(parseLogLine(request({ id: "8-2", status: 200 })))).toEqual([]);
+  expect(out(parseLogLine(request({ id: "8-2", status: 200 })))).toEqual([]);
+  // background errors and unfiltered runs are unchanged
+  expect(out(parseLogLine(failure({ id: null, source: "alarm" })))).toEqual(["error:null"]);
+  const open = filter();
+  expect(open.accept(parseLogLine(failure({ id: "8-3" }))!)).toHaveLength(1);
+  // pending errors are bounded
+  for (let i = 0; i < 500; i++) f.accept(parseLogLine(failure({ id: `p-${i}` }))!);
+  expect(f.accept(parseLogLine(request({ id: "p-499", status: 500, outcome: "exception" }))!)).toHaveLength(2);
+  expect(f.accept(parseLogLine(request({ id: "p-0", status: 500, outcome: "exception" }))!)).toHaveLength(1);
+});
