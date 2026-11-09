@@ -320,7 +320,8 @@ test("follow: reconnects across rotation, truncation and a file that appears lat
     await done;
     expect(lines(sink.out).map((line) => JSON.parse(line).id)).toEqual(["late-1", "rot-1", "trunc-1"]);
     const notices = sink.err.join("");
-    expect(notices).toContain("rotated");
+    // Between the rename and the new file a poll may find no file at all; either notice is a valid reconnect.
+    expect(notices).toMatch(/rotated|went away/);
     expect(notices).toContain("truncated");
   });
 });
