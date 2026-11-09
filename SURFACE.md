@@ -9,7 +9,7 @@
 
 | Command | Arguments | Summary |
 | --- | --- | --- |
-| `init` | `[name]` | Scaffold sproutboat.jsonc, src/index.js and package.json (sproutboat devDependency, dev and deploy scripts) in ./<name>. |
+| `init` | `[name]` | Scaffold sproutboat.jsonc, src/index.js and package.json (sproutboat devDependency, dev, deploy and check scripts) in ./<name>. |
 | `check` | `[project-dir]` | Validate the config and entry point without building. |
 | `types` | `[project-dir]` | Write sproutboat-env.d.ts from the config, so an editor knows what `env` holds. `dev` and `deploy` refresh it when the config is newer. |
 | `dev` | `[project-dir] [--port <n>] [--no-watch] [--env <name>] [--env-file <file>]...` | Run the project on this machine against a real broker, rebuilding on save. Secrets come from .dev.vars or the .env files (never both), as in Wrangler; a declared secret with no value is a warning. |

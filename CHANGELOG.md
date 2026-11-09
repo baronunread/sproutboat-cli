@@ -10,6 +10,10 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Fixed
+
+- **`init`'s help text and `SURFACE.md` now say it adds the `dev`, `deploy` and `check` scripts,** not just `dev` and `deploy`. Wording only.
+
 ## [0.53.1] - 2026-11-09
 
 Built on `@sproutboat/runtime` 0.43.0, `@sproutboat/wire` 0.22.3 and `@sproutboat/toolchain` 0.24.2, unchanged from 0.53.0. No runtime or wire change, so there is no new compatibility date and no recompile.

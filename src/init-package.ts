@@ -5,7 +5,8 @@ import { jsonObject, parseJsonValue, type JsonObject } from "./json";
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 
 // Same conventions as Wrangler's create-cloudflare templates: a private
-// package at 0.0.0, `dev` and `deploy` scripts, and the CLI as a devDependency.
+// package at 0.0.0, `dev`, `deploy` and `check` scripts, and the CLI as a
+// devDependency.
 export const INIT_SCRIPTS = {
   dev: "sproutboat dev",
   deploy: "sproutboat deploy",
