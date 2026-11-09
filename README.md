@@ -25,7 +25,7 @@ for agents: [sproutboat.com/llms.txt](https://sproutboat.com/llms.txt)).
 ## Using
 
 The npm package installs a small Node launcher and the matching native
-platform package, so `npm install -g sproutboat` and `npm exec sproutboat` work
+platform package, so `npm i -D sproutboat`, `npm i -g sproutboat` and `npx sproutboat` work
 without Bun on `darwin` and `linux` for `arm64` and `x64`. The self-hosted
 runtime exports remain in the root package for Bun-based platform integrations.
 Nothing is needed on the machine that *runs* a sprout: that gets a static
@@ -37,23 +37,35 @@ patches there, and publishes the cache entry atomically. Installation itself
 does not clone Porffor or invoke Git, Make, or a compiler. Warm-cache builds can
 run offline.
 
+Install it in each project, as you would Wrangler. The CLI is the compiler, so
+a project that pins its version builds the same way on every machine and in CI:
+
 ```sh
-npm exec sproutboat init hello
+npm i -D sproutboat       # pnpm add -D sproutboat, bun add -d sproutboat, yarn add -D sproutboat
+```
+
+`sproutboat init` does this for you: it writes a `package.json` with
+`sproutboat` in `devDependencies` and `dev`, `deploy` and `check` scripts.
+
+```sh
+npx sproutboat init hello  # or: pnpm dlx sproutboat init hello, bunx sproutboat init hello
 cd hello
-npm exec sproutboat dev    # runs it right here, no control plane needed
+npm install
+npm run dev                # runs it right here, no control plane needed
 ```
 
-Happy with it? Ship it:
+Happy with it? Log in once, then ship it:
 
 ```sh
-bunx sproutboat login --api-url https://control.example.com   # one browser approval
-bunx sproutboat deploy
+npx sproutboat login --api-url https://control.example.com   # one browser approval
+npm run deploy             # or: npx sproutboat deploy
 ```
 
-Or install it once and drop the `npm exec`:
+For quick commands outside a project, install it globally. A global install is
+not pinned to anything, so keep it for `init`, `login` and `whoami`:
 
 ```sh
-npm install -g sproutboat # then: sproutboat deploy, sproutboat tail, ...
+npm i -g sproutboat       # then: sproutboat init, sproutboat whoami, ...
 ```
 
 `login` is one-time. It writes a long-lived token to
@@ -67,7 +79,7 @@ The everyday loop:
 
 | Command | What it does |
 | --- | --- |
-| `init [name]` | Scaffold `sproutboat.jsonc` + `src/index.js` |
+| `init [name]` | Scaffold `sproutboat.jsonc`, `src/index.js` and a `package.json` that pins `sproutboat` |
 | `dev [--port <n>]` | Run it here against a real broker, rebuilding on save |
 | `deploy` | Build, provision bindings, upload, wait until the URL serves |
 | `tail [filters]` | Live request events, console output and exceptions, like `wrangler tail` |

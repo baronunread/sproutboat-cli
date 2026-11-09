@@ -68,7 +68,8 @@ export const COMMANDS: readonly Command[] = [
     group: "Develop",
     emoji: "🌱",
     args: "[name]",
-    summary: "Scaffold sproutboat.jsonc + src/index.js in ./<name>.",
+    summary:
+      "Scaffold sproutboat.jsonc, src/index.js and package.json (sproutboat devDependency, dev and deploy scripts) in ./<name>.",
   },
   {
     name: "check",

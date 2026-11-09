@@ -10,6 +10,10 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Changed
+
+- **`init` adds `sproutboat` to the project's devDependencies and the `dev`, `deploy` and `check` scripts,** the way Cloudflare's templates do for Wrangler, so a project pins the CLI version that compiles it and `npm run deploy` works after `npm install`. The range is a caret on the running CLI's version. A missing `package.json` is created (`private`, version `0.0.0`); an existing one keeps its fields and indentation, a script with the same name is never overwritten (init prints a warning naming it), and a `sproutboat` already declared in any dependency section is left as is. An unreadable `package.json` stops init before any file is written. The next step it prints follows the project's package manager (a lockfile, then the launching tool, then npm), for example `cd hello && pnpm install && pnpm run dev` (`pnpm run`, because `pnpm deploy` is pnpm's own command).
+
 ## [0.53.0] - 2026-11-09
 
 Built on `@sproutboat/runtime` 0.43.0, `@sproutboat/wire` 0.22.3 and `@sproutboat/toolchain` 0.24.2. The runtime change is the opt-in `SB_LOG=json` log below; without it nothing an app can observe changes, so there is no new compatibility date. Every app is recompiled on its next build, since the runtime prelude changed.
