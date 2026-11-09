@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import { isBoolean, isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject } from "./json";
 import type { AssetFiles } from "./assets";
@@ -19,11 +19,14 @@ import { notifyIfOutdated } from "./update-check";
 import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
 import { pathToFileURL } from "node:url";
+import { constants as osConstants } from "node:os";
 import { inspectToolchain } from "./toolchain";
 import { isLinuxTarget, parseTarget, TARGET_NAMES, type BuildTarget } from "./targets";
 import { writeDeployFiles } from "./standalone-deploy";
 import { parseTailArgs, runTail, TAIL_USAGE, tailQuery, type TailArgs } from "./tail";
 import { followLog, LogFilter, readLogStream } from "./tail-log";
+import { EnvFileError, MissingSecretsError } from "./env-file";
+import { parseRunArgs, planRun, RUN_USAGE, RunError } from "./run";
 
 // A compiled Bun executable is not a general-purpose `bun` command. Porffor
 // is acquired after installation, so run its external ESM launcher through an
@@ -399,13 +402,30 @@ async function emitOnly(directory: string | undefined, target: BuildTarget, stan
 }
 
 /** #62 — build for this machine, run it against a real broker, rebuild on save. */
+const DEV_USAGE = "dev [project-dir] [--port <n>] [--no-watch] [--env <name>] [--env-file <file>]...";
+
 async function dev(args: string[]) {
-  const directory = args.find((arg) => !arg.startsWith("--") && !/^\d+$/.test(arg));
-  const portIndex = args.indexOf("--port");
-  const portArg = portIndex >= 0 ? args[portIndex + 1] : undefined;
+  let directory: string | undefined;
+  let portArg: string | undefined;
+  let envName: string | undefined;
+  const envFiles: string[] = [];
+  for (let at = 0; at < args.length; at += 1) {
+    const arg = args[at];
+    if (arg === "--no-watch") continue;
+    if (arg === "--port" || arg === "--env" || arg === "--env-file") {
+      const value = args[at + 1];
+      if (value === undefined || value.startsWith("--")) usageError(`${arg} needs a value`, DEV_USAGE);
+      at += 1;
+      if (arg === "--port") portArg = value;
+      else if (arg === "--env") envName = value;
+      else envFiles.push(resolve(value));
+    } else if (!arg.startsWith("--") && directory === undefined) directory = arg;
+  }
   const port = Number(portArg ?? 8787);
-  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535)
-    usageError(`invalid --port: ${portArg}`, "dev [project-dir] [--port <n>] [--no-watch]");
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) usageError(`invalid --port: ${portArg}`, DEV_USAGE);
+  if (envName !== undefined && !/^[A-Za-z0-9_-]+$/.test(envName))
+    usageError("--env takes a name (letters, digits, - and _)", DEV_USAGE);
+  for (const file of envFiles) if (!existsSync(file)) fail(`env file not found: ${file}`);
   const project = await readProject(directory);
   await refreshTypes(project.directory, project.config);
   console.log(dim(`Building ${project.config.name} for this machine (${hostTarget()})…`));
@@ -415,6 +435,8 @@ async function dev(args: string[]) {
     sourcePath: project.sourcePath,
     source: project.bundle.code,
     port,
+    envFiles,
+    envName,
     watch: !args.includes("--no-watch"),
     // Re-read from disk on every rebuild: the point of watching is that the
     // files changed, so the bundle captured at startup is stale by definition.
@@ -424,6 +446,33 @@ async function dev(args: string[]) {
       return { config: next.config, sourcePath: next.sourcePath, source: next.bundle.code };
     },
   });
+}
+
+/** #275: start a standalone binary with its port, data directory and secrets supplied at launch. */
+async function run(args: string[]) {
+  const result = parseRunArgs(args);
+  if ("error" in result) usageError(result.error, RUN_USAGE);
+  let plan;
+  try {
+    plan = await planRun(result.args, { cwd: process.cwd(), inherited: process.env });
+  } catch (error) {
+    if (error instanceof RunError || error instanceof EnvFileError || error instanceof MissingSecretsError)
+      fail(error.message);
+    throw error;
+  }
+  for (const warning of plan.warnings) console.warn(amber(`! ${warning}`));
+  for (const line of plan.summary) console.log(dim(line));
+  if (result.args.check) {
+    console.log(ok(`ready to launch ${basename(plan.binary)} (not started: --check)`));
+    return;
+  }
+  console.log(ok(`launching ${plan.binary}`));
+  const child = Bun.spawn([plan.binary], { env: plan.env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+  // Forward termination to the binary, which is the only process this started.
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => child.kill(signal));
+  const code = await child.exited;
+  const signalNumber = child.signalCode ? osConstants.signals[child.signalCode] : undefined;
+  process.exit(signalNumber === undefined ? code : 128 + signalNumber);
 }
 
 const PROVISION_FIELDS = [
@@ -1398,6 +1447,9 @@ switch (command) {
     break;
   case "dev":
     await dev(args);
+    break;
+  case "run":
+    await run(args);
     break;
   case "build": {
     const withRestore = args.includes("--with-restore");

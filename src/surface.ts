@@ -89,9 +89,19 @@ export const COMMANDS: readonly Command[] = [
     name: "dev",
     group: "Develop",
     emoji: "⚡",
-    args: "[project-dir] [--port <n>] [--no-watch]",
+    args: "[project-dir] [--port <n>] [--no-watch] [--env <name>] [--env-file <file>]...",
     brief: "[project-dir] [--port <n>]",
-    summary: "Run the project on this machine against a real broker, rebuilding on save.",
+    summary:
+      "Run the project on this machine against a real broker, rebuilding on save. Secrets come from .dev.vars or the .env files (never both), as in Wrangler; a declared secret with no value is a warning.",
+  },
+  {
+    name: "run",
+    group: "Develop",
+    emoji: "🚀",
+    args: "[project-dir] [--binary <file>] [--env-file <file>]... [--port <n>] [--data-dir <dir>] [--require <NAME,...>] [--check]",
+    brief: "[--env-file <file>] [--port <n>]",
+    summary:
+      "Launch a standalone binary with its port, data directory and declared secrets supplied at launch, never baked in. Precedence: --port/--data-dir, then the --env-file files (later overrides earlier), then the environment. A missing declared secret fails the launch, like wrangler deploy; --check validates without starting.",
   },
   {
     name: "build",

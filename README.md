@@ -197,8 +197,12 @@ chunking, resume state, cleanup, and the remaining download limitation.
 `sproutboat dev` runs against a real local broker, so bindings behave like
 production without a deploy — except `secrets`, which live only in the control
 plane. Put values in a `.dev.vars` file next to `sproutboat.jsonc`
-(`API_KEY=whatever`, one per line, gitignored) and `env.API_KEY` resolves under
-`dev` only.
+(`API_KEY=whatever`, one per line, gitignored), or use the `.env` files or
+`sproutboat dev --env-file <file>`, as in Wrangler (`.dev.vars` or `.env`, never
+both), and `env.API_KEY` resolves under `dev` only. A declared secret with no
+value is a warning. The rules, the dotenv syntax, and `sproutboat run` for
+launching a standalone binary (which fails on a missing declared secret) are in
+[docs/standalone.md](docs/standalone.md#launching-with-sproutboat-run).
 
 ## Requirements
 

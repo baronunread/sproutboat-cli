@@ -18,6 +18,7 @@ import { dirname, resolve } from "node:path";
 import { buildArtifact } from "./build";
 import { createBroker, listen, listenTransfers, type Bindings, type Broker } from "./broker";
 import { jsonObject, parseJsonValue } from "./json";
+import { resolveDevVars } from "./env-file";
 import { amber, dim, leaf, ok } from "./style";
 import type { SproutboatConfig } from "./config";
 
@@ -32,6 +33,10 @@ export type DevInput = {
   source: string;
   port: number;
   watch: boolean;
+  /** #275: `--env-file` paths (absolute), in order. Default: `.dev.vars`, else the `.env` files. */
+  envFiles?: string[];
+  /** #275: `--env <name>`, which selects `.dev.vars.<name>` and the `.env.<name>` files. */
+  envName?: string;
   /** Re-read the complete project after a change; throws with a readable message. */
   rebuild: () => Promise<Pick<DevInput, "config" | "sourcePath" | "source">>;
   /** Set internally for an asset-only refresh, where recompiling is unnecessary. */
@@ -54,30 +59,25 @@ export function isAssetOnlyRefresh(
 }
 
 /**
- * Secrets for local dev, `KEY=value` per line, from `.dev.vars` beside the
- * config — the same file Wrangler uses. Deployed secrets live in the control
- * plane and are never on a developer's disk, so this is the only way a bound
- * secret can resolve here.
+ * Secrets for local dev (#275), by Wrangler's rules (env-file.ts): `.dev.vars`
+ * or the `.env` files, never both; the process environment only with
+ * CLOUDFLARE_INCLUDE_PROCESS_ENV=true. A declared secret with no value, or a
+ * skipped line, is a warning and `dev` still starts. Read on every (re)start, so
+ * an edited file is picked up.
  */
-async function readDevVars(projectDir: string): Promise<Record<string, string>> {
-  const path = resolve(projectDir, ".dev.vars");
-  if (!existsSync(path)) return {};
-  const text = await readFile(path, "utf8");
-  return Object.fromEntries(
-    text.split("\n").flatMap((line): Array<[string, string]> => {
-      const trimmed = line.trim();
-      if (trimmed === "" || trimmed.startsWith("#")) return [];
-      const eq = trimmed.indexOf("=");
-      if (eq <= 0) return [];
-      const value = trimmed.slice(eq + 1).trim();
-      // Accept quoted values, since a secret can legitimately contain spaces.
-      const unquoted =
-        (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))
-          ? value.slice(1, -1)
-          : value;
-      return [[trimmed.slice(0, eq).trim(), unquoted]];
-    }),
-  );
+export async function devSecrets(
+  input: Pick<DevInput, "projectDir" | "envFiles" | "envName" | "config">,
+  inherited: Record<string, string | undefined> = process.env,
+): Promise<Record<string, string>> {
+  const resolved = await resolveDevVars({
+    projectDir: input.projectDir,
+    envName: input.envName,
+    envFiles: input.envFiles,
+    declared: input.config.secrets ?? [],
+    inherited,
+  });
+  for (const warning of resolved.warnings) console.warn(amber(`! ${warning}`));
+  return resolved.values;
 }
 
 /** `bindings.json` is written by the build whenever the project declares any. */
@@ -149,7 +149,7 @@ async function start(input: DevInput, port: number): Promise<Running> {
       resourceDir: resolve(stateDir, "resources"),
       token: "sproutboat-dev",
       bindings: await readBindings(artifactDir),
-      secrets: await readDevVars(input.projectDir),
+      secrets: await devSecrets(input),
       sproutUrl: `http://127.0.0.1:${port}/`,
       assetsDir: existsSync(assetsDir) ? assetsDir : undefined,
       dispatchEnabled: () => dispatchEnabled,
