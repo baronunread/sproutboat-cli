@@ -123,6 +123,8 @@ export type CompileInput = {
    * file. Anything that could be deployed stays at -O3.
    */
   optimize?: "dev" | "release";
+  /** Link-time optimization on the alpha 22 standalone link; default on. See `BuildInput.lto`. */
+  lto?: boolean;
   /** Cross-compiler for a Linux target. Not needed, and not used, for `host`. */
   zigBin?: string;
   /** #126 — `env.<binding> = { id, tag, timestamp }`, baked directly into the module. */
@@ -271,6 +273,16 @@ export function porfforArgs(
   // fail every host build that falls back to Zig for its C toolchain.
   if (usingZig) args.push("--no-flto");
   return args;
+}
+
+/**
+ * Whether the alpha 22 link runs LTO: `SPROUTBOAT_FLTO` wins, then an explicit `lto`, then on for everything
+ * except a host `dev` build.
+ */
+export function ltoEnabled(input: { optimize?: "dev" | "release"; target?: string; lto?: boolean }): boolean {
+  if (process.env.SPROUTBOAT_FLTO) return process.env.SPROUTBOAT_FLTO === "1";
+  if (input.lto !== undefined) return input.lto;
+  return !(input.optimize === "dev" && input.target === "host");
 }
 
 /** The wrapped module the compiler sees: `generatedSource` if given, else the source wrapped here. */
@@ -507,7 +519,8 @@ async function compileSproutA21(
     optimize: input.optimize === "dev" && host ? 0 : 3,
     // LTO on for every optimized build, zig's musl cross builds included (romeo, M4: +11% req/s on hello,
     // +7% on stress, and 4% smaller); SPROUTBOAT_FLTO=0 turns it off for measurements
-    flto: process.env.SPROUTBOAT_FLTO ? process.env.SPROUTBOAT_FLTO === "1" : !(input.optimize === "dev" && host),
+    // (`lto: false`, a standalone build without --release, turns it off too)
+    flto: ltoEnabled(input),
     musl: !host,
     strip: true,
   });

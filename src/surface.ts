@@ -108,10 +108,10 @@ export const COMMANDS: readonly Command[] = [
     name: "build",
     group: "Develop",
     emoji: "🔨",
-    args: "[project-dir] [--target host|linux-x64|linux-arm64] [--standalone] [--deploy-files] [--with-restore] [--emit-only]",
+    args: "[project-dir] [--target host|linux-x64|linux-arm64] [--standalone] [--release] [--deploy-files] [--with-restore] [--emit-only]",
     brief: "[project-dir]",
     summary:
-      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally, not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process; add `--target linux-arm64` for an aarch64 box (the default is `linux-x64`) and `--deploy-files` to write a Dockerfile, a systemd socket and service, a fly.toml and a push script beside it. `--with-restore` adds an offline `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command to a standalone executable; it runs before app initialization. `--emit-only` stops after writing `.sproutboat/porffor-units/<shape>/sprout.generated.js`, the module Porffor would compile, and prints its path: every check still runs, nothing is compiled.",
+      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally, not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process; add `--target linux-arm64` for an aarch64 box (the default is `linux-x64`) and `--deploy-files` to write a Dockerfile, a systemd socket and service, a fly.toml and a push script beside it. `--release` makes a standalone build the full `-flto -O3` one to publish; without it the link skips LTO (1.5 to 2x faster cold, ~90 MB link memory instead of 1.1 to 1.6 GB, fewer requests per second); `SPROUTBOAT_RELEASE=1` does the same, and a non-standalone build is always the release build. `--with-restore` adds an offline `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command to a standalone executable; it runs before app initialization. `--emit-only` stops after writing `.sproutboat/porffor-units/<shape>/sprout.generated.js`, the module Porffor would compile, and prints its path: every check still runs, nothing is compiled.",
   },
   {
     name: "toolchain",
@@ -274,6 +274,10 @@ export const ENV_VARS: readonly EnvVar[] = [
     name: "SPROUTBOAT_PORFFOR_CHANNEL",
     purpose:
       "Porffor channel for standalone builds: `alpha-22` (default) or `alpha-19` (the previous compiler, kept as a fallback for one release).",
+  },
+  {
+    name: "SPROUTBOAT_RELEASE",
+    purpose: "Same as `build --standalone --release`: link with LTO. Any value but empty, `0` or `false` turns it on.",
   },
   {
     name: "SPROUTBOAT_FLTO",

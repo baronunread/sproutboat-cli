@@ -7,7 +7,7 @@ import { queueSettings, resourceRefs, type SproutboatConfig } from "./config";
 import { ensureSqliteObject } from "./sqlite";
 import { sqliteStamp } from "./sqlite";
 import { bearsslStamp, ensureBearssl } from "./bearssl";
-import { compileSprout, loadPrelude, porfforChannel, type Transport } from "./compile";
+import { compileSprout, loadPrelude, ltoEnabled, porfforChannel, type Transport } from "./compile";
 import { compileCached } from "./compile-cache";
 import type { BuildTarget } from "./targets";
 import {
@@ -51,6 +51,13 @@ export type BuildInput = {
    * for the fast path deliberately.
    */
   optimize?: "dev" | "release";
+  /**
+   * Link-time optimization for the alpha 22 standalone build. Defaults to on (`-flto -O3`, the release
+   * build). `false` keeps -O3 per unit but links without LTO: about 1.5 to 2x faster cold, a link of
+   * ~90 MB instead of 1.1 to 1.6 GB, and a binary that serves fewer requests per second. A separate
+   * input to the compile cache key, so the two kinds of binary never share an entry.
+   */
+  lto?: boolean;
   /** Reuse a previously compiled native sprout when only sidecar assets changed. */
   reuseSproutPath?: string;
   /** An isolated artifact directory, used by dev candidates to avoid mixing snapshots. */
@@ -297,6 +304,7 @@ export async function emitGenerated(input: BuildInput): Promise<{ generatedPath:
       appName: input.config.name,
       assets: bakedAssets,
       optimize: input.optimize,
+      lto: input.lto,
       versionMetadata,
       emitOnly: true,
       withRestore: input.withRestore,
@@ -334,6 +342,8 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       generatedSource,
       target,
       optimize: input.optimize ?? "release",
+      // a non-LTO link is a different binary from the release one; only the alpha 22 channel honours it
+      lto: porfforChannel(input.withRestore) === "alpha-22" ? ltoEnabled({ ...input, target }) : true,
       toolchain: toolchainStamp(),
       toolchainPackageVersion,
       porffor: [PORFFOR_COMMIT_FULL, PORFFOR_ARCHIVE_SHA256],
@@ -390,6 +400,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
           ],
           extraCflags: tls ? ["-I", tls.includeDir] : [],
           optimize: input.optimize,
+          lto: input.lto,
           versionMetadata,
           withRestore: input.withRestore,
         });

@@ -6,6 +6,7 @@ import {
   BASELINE_COMPATIBILITY_DATE,
   compileSprout,
   loadPrelude,
+  ltoEnabled,
   porfforArgs,
   preludePath,
   wrapNativeFetchHandler,
@@ -335,4 +336,25 @@ test("compileSprout emitOnly still rejects a handler without a default export", 
       emitOnly: true,
     }),
   ).rejects.toThrow(/default-export an object/);
+});
+
+test("ltoEnabled: on by default, off for a host dev build or lto:false, SPROUTBOAT_FLTO wins", () => {
+  const saved = process.env.SPROUTBOAT_FLTO;
+  delete process.env.SPROUTBOAT_FLTO;
+  try {
+    expect(ltoEnabled({})).toBe(true);
+    expect(ltoEnabled({ optimize: "release", target: "host" })).toBe(true);
+    expect(ltoEnabled({ optimize: "dev", target: "host" })).toBe(false);
+    expect(ltoEnabled({ optimize: "dev", target: "linux-x86_64" })).toBe(true);
+    expect(ltoEnabled({ lto: false })).toBe(false);
+    expect(ltoEnabled({ lto: false, target: "linux-x86_64", optimize: "release" })).toBe(false);
+    expect(ltoEnabled({ lto: true, optimize: "dev", target: "host" })).toBe(true);
+    process.env.SPROUTBOAT_FLTO = "1";
+    expect(ltoEnabled({ lto: false })).toBe(true);
+    process.env.SPROUTBOAT_FLTO = "0";
+    expect(ltoEnabled({ lto: true })).toBe(false);
+  } finally {
+    if (saved === undefined) delete process.env.SPROUTBOAT_FLTO;
+    else process.env.SPROUTBOAT_FLTO = saved;
+  }
 });

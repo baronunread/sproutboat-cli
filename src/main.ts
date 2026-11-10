@@ -11,7 +11,7 @@ import { buildArtifact, emitGenerated } from "./build";
 import { generateTypes, TYPES_FILE } from "./types-gen";
 import { bundleHandler, BundleError, type BundleResult } from "./bundle";
 import { runDev } from "./dev";
-import { buildStandalone, emitStandalone } from "./standalone-build";
+import { buildStandalone, emitStandalone, isReleaseBuild } from "./standalone-build";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import { activeApiUrl, forgetToken, savedProfile, savedToken, saveToken } from "./credentials";
@@ -404,9 +404,10 @@ async function buildStandaloneBinary(
   target: BuildTarget,
   withRestore = false,
   deployFiles = false,
+  release = false,
 ) {
   const project = await readProject(directory);
-  console.log(dim(`Building a standalone ${project.config.name} (${target})…`));
+  console.log(dim(`Building a standalone ${project.config.name} (${target}, ${release ? "release, LTO" : "no LTO"})…`));
   try {
     const result = await buildStandalone({
       projectDir: project.directory,
@@ -415,9 +416,14 @@ async function buildStandaloneBinary(
       source: project.bundle.code,
       target,
       withRestore,
+      release,
     });
     console.log(ok(`built ${result.outPath} (${(result.bytes / 1_000_000).toFixed(1)} MB)`));
     console.log(dim(`  run it: ${result.outPath}   ·   state lands in ./${project.config.name}.data`));
+    if (!release)
+      console.log(
+        dim("  built without LTO (faster to build, slower to serve); add --release for the binary you publish"),
+      );
     if (target === "linux-arm64") console.log(dim("  linux-arm64: runs on an aarch64 Linux box, not on this machine"));
     if (deployFiles && isLinuxTarget(target)) {
       const written = await writeDeployFiles({ name: project.config.name, target, binary: result.outPath });
@@ -1883,7 +1889,8 @@ switch (command) {
         "build --standalone --target linux-x64 --deploy-files [project-dir]",
       );
     if (args.includes("--emit-only")) await emitOnly(directory, target, args.includes("--standalone"));
-    else if (args.includes("--standalone")) await buildStandaloneBinary(directory, target, withRestore, deployFiles);
+    else if (args.includes("--standalone"))
+      await buildStandaloneBinary(directory, target, withRestore, deployFiles, isReleaseBuild(args));
     else await build(directory, target);
     break;
   }

@@ -3,8 +3,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPrelude, wrapNativeFetchHandler } from "./compile";
-import { buildStandalone, emitStandalone, unsupportedBindings } from "./standalone-build";
-
+import { buildStandalone, emitStandalone, isReleaseBuild, unsupportedBindings } from "./standalone-build";
 test("service bindings cannot work in a standalone binary", () => {
   // They call another deployment through an edge, and a standalone binary has
   // none — so this is a build error rather than a runtime surprise.
@@ -127,4 +126,13 @@ test("emit-only keeps the standalone build's checks", async () => {
       config: { ...config, assets: { directory: "public" } },
     }),
   ).rejects.toThrow(/assets.directory "public" not found/);
+});
+
+test("--release and SPROUTBOAT_RELEASE choose the release build; the default is not", () => {
+  expect(isReleaseBuild(["--standalone"], {})).toBe(false);
+  expect(isReleaseBuild(["--standalone", "--release"], {})).toBe(true);
+  expect(isReleaseBuild(["--release", "app"], {})).toBe(true);
+  expect(isReleaseBuild([], { SPROUTBOAT_RELEASE: "1" })).toBe(true);
+  expect(isReleaseBuild([], { SPROUTBOAT_RELEASE: "true" })).toBe(true);
+  for (const off of ["", "0", "false", "FALSE"]) expect(isReleaseBuild([], { SPROUTBOAT_RELEASE: off })).toBe(false);
 });
