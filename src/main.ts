@@ -31,6 +31,7 @@ import {
 import {
   buildAndDeploy,
   buildAssetBundle,
+  checkServiceBindings,
   CLOUD_PROJECT_RE,
   compileModule,
   deployToCloud,
@@ -39,6 +40,7 @@ import {
   hostNote,
   Interrupted,
 } from "./cloud-deploy";
+import { deleteCloudSecret, listCloudSecrets, putCloudSecret, readSecretsFile } from "./cloud-secrets";
 import { hostname as osHostname, platform as osPlatform, arch as osArch } from "node:os";
 import { CLI_NAME, COMMANDS, helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
 import { notifyIfOutdated } from "./update-check";
@@ -460,13 +462,16 @@ async function emitOnly(directory: string | undefined, target: BuildTarget, stan
 async function emitStandaloneUnit(directory: string | undefined): Promise<string> {
   const project = await readProject(directory);
   try {
-    const { generatedPath } = await emitStandalone({
-      projectDir: project.directory,
-      config: project.config,
-      sourcePath: project.sourcePath,
-      source: project.bundle.code,
-      target: "linux-x86_64",
-    });
+    const { generatedPath } = await emitStandalone(
+      {
+        projectDir: project.directory,
+        config: project.config,
+        sourcePath: project.sourcePath,
+        source: project.bundle.code,
+        target: "linux-x86_64",
+      },
+      { forCloud: true },
+    );
     return generatedPath;
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
@@ -690,6 +695,8 @@ async function deploy(args: string[]) {
     await guard(() => deployCloud(args, targetUrl, flags));
     return;
   }
+  if (flags["--secrets-file"] !== undefined)
+    fail("--secrets-file is for the Cloud; on this endpoint set secrets with `sproutboat secrets put <NAME>`");
   const artifactIndex = args.indexOf("--artifact");
   const directory = args.find((arg, index) => !arg.startsWith("--") && index !== artifactIndex + 1);
   let projectName: string;
@@ -903,8 +910,26 @@ async function login(args: string[]) {
   fail("login expired before approval");
 }
 
-const DEPLOY_FLAGS = ["--api-url", "--account", "--module", "--sproutd", "--generation"] as const;
+const DEPLOY_FLAGS = ["--api-url", "--account", "--module", "--sproutd", "--generation", "--secrets-file"] as const;
 type DeployFlag = (typeof DEPLOY_FLAGS)[number];
+
+function guardSync(step: () => void): void {
+  try {
+    step();
+  } catch (error) {
+    if (error instanceof CloudError) return fail(error.message);
+    throw error;
+  }
+}
+
+async function readSecretsFileOrFail(path: string) {
+  try {
+    return await readSecretsFile(path);
+  } catch (error) {
+    if (error instanceof CloudError || error instanceof EnvFileError) return fail(error.message);
+    throw error;
+  }
+}
 
 /** Run a Cloud step; its CloudError becomes a printed failure. */
 async function guard<T>(step: () => Promise<T>): Promise<T> {
@@ -1055,7 +1080,6 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     queues: cfg.queues?.length,
     analytics_engine_datasets: cfg.analytics_engine_datasets?.length,
     durable_objects: Object.keys(cfg.durable_objects ?? {}).length,
-    services: cfg.services?.length,
     ratelimiters: cfg.ratelimiters?.length,
     "triggers.crons": cfg.triggers?.crons?.length,
   })
@@ -1065,6 +1089,16 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     io.warn(
       `! ${unsent.join(", ")} in sproutboat.jsonc are not sent to the Cloud by the CLI yet; the app runs without them`,
     );
+
+  const services = cfg.services ?? [];
+  guardSync(() => checkServiceBindings(name, services, cfg.compatibility_date));
+  let secretValues: Record<string, string> | undefined;
+  const secretsFile = flags["--secrets-file"];
+  if (secretsFile !== undefined) {
+    const read = await readSecretsFileOrFail(resolve(secretsFile));
+    for (const warning of read.warnings) io.warn(`! ${warning}`);
+    secretValues = read.values;
+  }
 
   const assets = project.config.assets ? buildAssetBundle(project.directory, project.config.assets) : undefined;
   // Regular deploys build in the Cloud from the bundled source. --module (a prebuilt module) and --sproutd with
@@ -1091,6 +1125,9 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
   console.log(`endpoint  ${apiUrl}`);
   console.log(`route     https://${hosts[0]}`);
   if (assets) console.log(`assets    ${assets.files} files`);
+  if (services.length > 0)
+    console.log(`services  ${services.map((entry) => `${entry.binding} -> ${entry.service}`).join(", ")}`);
+  if (secretValues) console.log(`secrets   ${Object.keys(secretValues).length} from ${secretsFile} (set, others kept)`);
   if (fromSource) console.log(`build     in the Cloud, from your bundled source`);
   if (dryRun) {
     console.log("\n--dry-run: not uploading.");
@@ -1137,6 +1174,9 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
           token: session!.token,
           tokenFromEnv,
           project: name,
+          services,
+          compatibilityDate: cfg.compatibility_date,
+          secrets: secretValues,
           hosts,
           sourcePath,
           cli: { version: CLI_VERSION },
@@ -1160,7 +1200,19 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
   }
   try {
     const result = await deployToCloud(
-      { apiUrl, token: session!.token, tokenFromEnv, project: name, hosts, modulePath: modulePath!, assets, noWait },
+      {
+        apiUrl,
+        token: session!.token,
+        tokenFromEnv,
+        project: name,
+        hosts,
+        modulePath: modulePath!,
+        assets,
+        noWait,
+        services,
+        compatibilityDate: cfg.compatibility_date,
+        secrets: secretValues,
+      },
       io,
     );
     printResult(result);
@@ -1387,6 +1439,7 @@ async function domains(args: string[]) {
 
 async function secrets(args: string[]) {
   const sub = args[0] && ["list", "put", "delete"].includes(args[0]) ? args.shift()! : "list";
+  const flags = takeFlags(args, ["--api-url", "--account"] as const);
 
   // `--value` is opt-in; without it the value comes from stdin, so a secret does
   // not land in shell history. It is also what disambiguates the positionals:
@@ -1402,6 +1455,11 @@ async function secrets(args: string[]) {
   const name = sub === "list" ? undefined : positional.shift();
   if (sub !== "list" && !name) usageError(`secrets ${sub}: missing <NAME>`, `secrets ${sub} <NAME> [project-dir]`);
   if (name && !/^[A-Z][A-Z0-9_]*$/.test(name)) fail("secret name must be UPPER_SNAKE_CASE");
+  const { apiUrl: targetUrl } = await resolveApiUrl(flags["--api-url"]);
+  if ((await deployKind(targetUrl, false)) === "cloud") {
+    await guard(() => cloudSecrets(sub, name, inlineValue, positional[0], targetUrl, flags["--account"]));
+    return;
+  }
   const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(positional[0]), apiCredentials()]);
   const base = `${apiUrl}/api/projects/${project.config.name}/secrets`;
   const auth = { "x-api-key": token };
@@ -1430,6 +1488,42 @@ async function secrets(args: string[]) {
     "put rejected",
   );
   console.log(ok(`set ${name} — applies on the next deploy or sprout restart`));
+}
+
+/** `secrets` against a Sproutboat Cloud app: by name, apart from deploys, which never wipe them (Wrangler's model). */
+async function cloudSecrets(
+  sub: string,
+  name: string | undefined,
+  inlineValue: string | undefined,
+  directory: string | undefined,
+  apiUrl: string,
+  accountFlag: string | undefined,
+) {
+  const project = await readProjectConfig(directory);
+  const app = project.config.name;
+  const io = terminalIo();
+  const session = await resolveSession({
+    apiUrl,
+    io,
+    account: accountFlag ?? project.account,
+    login: (hint) =>
+      loginAndStore({ apiUrl, io, hostname: osHostname(), os: `${osPlatform()} ${osArch()}`, account: hint }),
+  });
+  const credentials = { apiUrl, token: session.token, tokenFromEnv: session.source !== "stored login" };
+  if (sub === "list") {
+    const names = await listCloudSecrets(credentials, app);
+    console.log(names.length ? names.join("\n") : "no secrets");
+    return;
+  }
+  if (sub === "delete") {
+    await deleteCloudSecret(credentials, app, name!);
+    console.log(ok(`removed ${name} from ${app}; applies when a host picks up the new record`));
+    return;
+  }
+  const value = inlineValue ?? (await Bun.stdin.text()).replace(/\r?\n$/, "");
+  if (!value) fail("no value: pipe it on stdin, or pass --value <value>");
+  await putCloudSecret(credentials, app, name!, value);
+  console.log(ok(`set ${name} on ${app}; applies when a host picks up the new record`));
 }
 
 /**

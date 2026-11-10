@@ -50,8 +50,12 @@ function assertStandaloneSupported(input: BuildInput): void {
  * compiles, at the same path. Every check that fails a standalone build fails
  * this too; nothing native is acquired or compiled and no binary is copied out.
  */
-export async function emitStandalone(input: BuildInput): Promise<{ generatedPath: string }> {
-  assertStandaloneSupported(input);
+export async function emitStandalone(
+  input: BuildInput,
+  /** The Cloud compiles this unit and its hosts supply service bindings, so a deploy to the Cloud keeps them. */
+  options: { forCloud?: boolean } = {},
+): Promise<{ generatedPath: string }> {
+  if (!options.forCloud) assertStandaloneSupported(input);
   return emitGenerated({ ...input, transport: "embedded" });
 }
 
