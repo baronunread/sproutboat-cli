@@ -6,6 +6,7 @@ machine and run it.
 
 ```sh
 sproutboat build --standalone            # ~6.5 MB, static: SQLite and the TLS client compiled in
+sproutboat build --standalone --release  # the same with LTO: slower to build, faster to serve
 PORT=3000 ./dist/hello                   # serves on $PORT (default 8080)
 ```
 
@@ -385,6 +386,47 @@ Check it: `file dist/app` says `ELF 64-bit LSB executable, ARM aarch64 ...,
 statically linked`. The x86_64 binary built on macOS runs on a Linux x86_64 box
 unchanged; build and test an arm64 one on arm64 Linux hardware (or in an arm64
 container: `docker run --rm --platform linux/arm64 -v $PWD/dist:/t alpine /t/app`).
+
+## Dev and release builds
+
+`sproutboat build --standalone` links **without LTO** by default. Every unit still
+compiles at `-O3`; only the final link skips link-time optimization. Pass
+`--release` (or set `SPROUTBOAT_RELEASE=1`) for the full `-flto -O3` build, and use
+it for any binary you publish or benchmark:
+
+```sh
+sproutboat build --standalone                 # no LTO: for local runs, CI, tests
+sproutboat build --standalone --release       # -flto -O3: the binary you ship
+```
+
+The two are separate builds. The mode is part of the build-cache key and of every
+compiled unit's stamp, so a release binary is never served from a non-release
+cache entry or the other way round. Switching modes recompiles the units once.
+`deploy` and `build` without `--standalone` are unaffected. `SPROUTBOAT_FLTO=1|0`
+still overrides the link either way, for measurements.
+
+What it costs and saves, on the macOS arm64 build machine (load average 3 to 5,
+`/usr/bin/time -l`, whole build including the compiler's own processes):
+
+| Build (`--target host`) | Cold build | Peak memory | Rebuild after an edit (units cached) | Binary |
+| --- | --- | --- | --- | --- |
+| hello, no LTO | 21.1 s | 845 MB | 3.2 s, 401 MB | 5.7 MB |
+| hello, `--release` | 36.7 s | 1019 MB | 26.7 s, 1025 MB | 5.1 MB |
+| kitchen-sink, no LTO | 23.8 s | 909 MB | 1.4 s, 468 MB | 6.1 MB |
+| kitchen-sink, `--release` | 38.7 s | 1097 MB | 27.2 s, 1092 MB | 5.5 MB |
+
+A cold build is 1.6 to 1.7x faster; an edit rebuild, which is a relink, is 8 to
+20x faster and uses about 40% of the memory. The cold peak is set by compiling
+the 14 MB prelude unit, which both modes do, so the saving there is smaller than
+at the link itself. The binary is about 11% larger without LTO.
+
+Serving speed (wrk, 4 threads, 64 connections, 10 s, three runs in each of two
+rounds, median): hello `/` 55.6k against 59.8k requests per second (7% fewer),
+kitchen-sink `/hash` (SHA-256, HMAC and scrypt) 247 against 269 (8% fewer). Both
+are noisy on a busy machine, and a request-heavy app with SQLite and larger
+handlers can lose more: an earlier profile on the same hardware saw 3% to 20%.
+Treat a non-release binary as something to run and test, never to benchmark or
+publish.
 
 ## Restarting without dropping a request
 

@@ -15,7 +15,20 @@ import type { Bindings } from "./wrap";
 export type StandaloneBuildInput = BuildInput & {
   /** Where to write the executable. Defaults to `<projectDir>/dist/<name>`. */
   outPath?: string;
+  /**
+   * The release build: `-flto -O3`, the binary to publish. Off by default: units still compile at -O3 but
+   * the link skips LTO, which is 1.5 to 2x faster cold and links in ~90 MB instead of 1.1 to 1.6 GB, at some
+   * request throughput (docs/standalone.md, "Dev and release builds").
+   */
+  release?: boolean;
 };
+
+/** `--release` or `SPROUTBOAT_RELEASE=1` (`0`, empty or unset: not a release build). */
+export function isReleaseBuild(args: string[], env: Record<string, string | undefined> = process.env): boolean {
+  if (args.includes("--release")) return true;
+  const value = env.SPROUTBOAT_RELEASE;
+  return value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
+}
 
 export type StandaloneBuildResult = { outPath: string; bytes: number };
 
@@ -57,7 +70,8 @@ export async function emitStandalone(input: BuildInput): Promise<{ generatedPath
 
 export async function buildStandalone(input: StandaloneBuildInput): Promise<StandaloneBuildResult> {
   assertStandaloneSupported(input);
-  const artifact = await buildArtifact({ ...input, transport: "embedded" });
+  const { release, ...rest } = input;
+  const artifact = await buildArtifact({ ...rest, transport: "embedded", lto: release === true });
 
   // The sprout *is* the binary: assets and bindings are compiled into it, and
   // everything else it needs (port, data dir, secrets) arrives at run time.

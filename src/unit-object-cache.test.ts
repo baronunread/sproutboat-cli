@@ -79,3 +79,28 @@ native(
   },
   600_000,
 );
+
+// The release (LTO) and non-release links are different binaries: they must not share a compile-cache entry or an artifact.
+native(
+  "an LTO and a non-LTO build of the same source get different cache keys and artifacts",
+  async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), "sb-ltokey-"));
+    try {
+      const config = { name: "ltokey", main: "src/index.js", compatibility_date: "2026-10-01" };
+      const sourcePath = join(projectDir, "src/index.js");
+      const source = `export default { fetch() { return new Response("k"); } };`;
+      const build = (lto: boolean) =>
+        buildArtifact({ projectDir, config, sourcePath, source, target: "host", transport: "embedded", lto });
+      const plain = await build(false);
+      const full = await build(true);
+      expect(plain.compileCache).toBe("miss");
+      expect(full.compileCache).toBe("miss"); // the no-LTO entry did not answer for it
+      expect(full.artifactDir).not.toBe(plain.artifactDir);
+      expect((await build(false)).compileCache).toBe("hit");
+      expect((await build(true)).compileCache).toBe("hit");
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  },
+  900_000,
+);

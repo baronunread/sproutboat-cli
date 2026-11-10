@@ -52,6 +52,7 @@ const built = await buildStandalone({
   source: bundle.code,
   target: "host",
   outPath: join(work, "stress"),
+  release: true, // the baseline is a throughput number: the LTO build users publish
 });
 const buildMs = Date.now() - buildStarted;
 
