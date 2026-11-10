@@ -17,28 +17,28 @@ export class ViewCounter {
     this.state = state;
     this.env = env;
   }
-  // sync: state.storage.* are blocking calls, so no async needed (http-sync-v0)
-  fetch(request) {
+  // Awaited throughout: from compatibility date 2026-10-24 the bindings return promises.
+  async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/incr") {
-      const n = (this.state.storage.get("n") || 0) + 1;
-      this.state.storage.put("n", n);
+      const n = ((await this.state.storage.get("n")) || 0) + 1;
+      await this.state.storage.put("n", n);
       // Debounced roll-up: every view schedules the same alarm a second out, so
       // a burst of views produces one alarm rather than one per view. That is
       // the pattern alarms exist for, and the reason at-most-one-pending is the
       // rule rather than a queue.
-      this.state.storage.setAlarm(Date.now() + 1000);
+      await this.state.storage.setAlarm(Date.now() + 1000);
       return new Response(String(n));
     }
-    return new Response(String(this.state.storage.get("n") || 0));
+    return new Response(String((await this.state.storage.get("n")) || 0));
   }
 
   // Runs after the views stop. Writes through to D1 so the effect is visible
   // outside the object, and re-reads the counter rather than trusting a value
   // captured when the alarm was set.
-  alarm() {
-    const views = this.state.storage.get("n") || 0;
-    this.env.DB.prepare("INSERT INTO view_rollup (views, at) VALUES (?, ?)")
+  async alarm() {
+    const views = (await this.state.storage.get("n")) || 0;
+    await this.env.DB.prepare("INSERT INTO view_rollup (views, at) VALUES (?, ?)")
       .bind(views, new Date().toISOString())
       .run();
   }
@@ -61,7 +61,8 @@ async function asyncHash() {
     for (let i = 0; i < b.length; i++) s += (b[i] + 0x100).toString(16).slice(1);
     return s;
   };
-  const d = hex(await crypto.subtle.digest("SHA-256", "abc"));
+  const enc = (text) => new TextEncoder().encode(text);
+  const d = hex(await crypto.subtle.digest("SHA-256", enc("abc")));
   const k = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode("key"),
@@ -69,9 +70,9 @@ async function asyncHash() {
     false,
     ["sign", "verify"],
   );
-  const sig = await crypto.subtle.sign("HMAC", k, "message");
-  const ok = await crypto.subtle.verify("HMAC", k, sig, "message");
-  const bad = await crypto.subtle.verify("HMAC", k, sig, "message!");
+  const sig = await crypto.subtle.sign("HMAC", k, enc("message"));
+  const ok = await crypto.subtle.verify("HMAC", k, sig, enc("message"));
+  const bad = await crypto.subtle.verify("HMAC", k, sig, enc("message!"));
   const roundKey = await crypto.subtle.importKey(
     "raw",
     Uint8Array.from({ length: 16 }, (_, i) => i + 1),
@@ -93,8 +94,8 @@ async function asyncHash() {
   return json({ digest: d, hmac: hex(sig), verifyOk: ok, verifyBad: bad, rounds, scryptOk: scOk, scryptBad: scBad });
 }
 
-function ensureSchema(env) {
-  env.DB.exec(
+async function ensureSchema(env) {
+  await env.DB.exec(
     "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, body TEXT, attachment TEXT, created TEXT);" +
       "CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, sent_at TEXT);" +
       "CREATE TABLE IF NOT EXISTS heartbeat (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, cron TEXT);" +
@@ -103,44 +104,46 @@ function ensureSchema(env) {
 }
 
 export default {
-  fetch(request) {
+  async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
-    ensureSchema(env);
+    await ensureSchema(env);
 
     // analytics: one point per request
-    env.METRICS.writeDataPoint({ blobs: [request.method, path], indexes: [path], doubles: [1] });
+    await env.METRICS.writeDataPoint({ blobs: [request.method, path], indexes: [path], doubles: [1] });
 
     // POST /login -> a session token in KV, value carries its own expiry
     if (path === "/login" && request.method === "POST") {
       const token = crypto.randomUUID();
       const expires = Date.now() + 60 * 60 * 1000;
-      env.SESSIONS.put(token, JSON.stringify({ user: "demo", expires }));
+      await env.SESSIONS.put(token, JSON.stringify({ user: "demo", expires }));
       return json({ token, expires });
     }
 
     // GET /whoami -> resolve a session token
     if (path === "/whoami") {
       const token = request.headers.get("authorization") || "";
-      const raw = env.SESSIONS.get(token.replace(/^Bearer\s+/i, ""));
+      const raw = await env.SESSIONS.get(token.replace(/^Bearer\s+/i, ""));
       if (!raw) return json({ error: "no session" }, 401);
       return json(JSON.parse(raw));
     }
 
     // POST /notes {title, body}
     if (path === "/notes" && request.method === "POST") {
-      const input = request.body ? request.json() : {};
-      const res = env.DB.prepare("INSERT INTO notes (title, body, created) VALUES (?, ?, ?)")
+      const input = request.body ? await request.json() : {};
+      const res = await env.DB.prepare("INSERT INTO notes (title, body, created) VALUES (?, ?, ?)")
         .bind(String(input.title || "untitled"), String(input.body || ""), new Date().toISOString())
         .run();
       const id = res.meta.last_row_id;
-      env.EMAILS.send({ noteId: id }); // notify asynchronously
+      await env.EMAILS.send({ noteId: id }); // notify asynchronously
       return json({ id }, 201);
     }
 
     // GET /notes
     if (path === "/notes" && request.method === "GET") {
-      return json(env.DB.prepare("SELECT id, title, created, attachment FROM notes ORDER BY id DESC").all().results);
+      return json(
+        (await env.DB.prepare("SELECT id, title, created, attachment FROM notes ORDER BY id DESC").all()).results,
+      );
     }
 
     // POST /r2/direct-upload creates a one-use URL whose PUT body bypasses
@@ -148,21 +151,22 @@ export default {
     // SB_REQUEST_BODY_MAX to exercise standalone native ingress.
     if (path === "/r2/direct-upload" && request.method === "POST") {
       const key = "direct-" + Date.now() + ".txt";
-      return json({ key, ...env.UPLOADS.createUploadUrl(key, { maxBytes: 5 * 1024 * 1024 }) }, 201);
+      const ticket = await env.UPLOADS.createUploadUrl(key, { maxBytes: 5 * 1024 * 1024 });
+      return json(Object.assign({ key }, ticket), 201);
     }
     if (path === "/r2/direct-download" && request.method === "GET") {
       const key = url.searchParams.get("key") || "";
-      return json(env.UPLOADS.createDownloadUrl(key), 201);
+      return json(await env.UPLOADS.createDownloadUrl(key), 201);
     }
 
     // GET /notes/:id  -> note + a fresh view count from the Durable Object
     const noteMatch = /^\/notes\/(\d+)$/.exec(path);
     if (noteMatch && request.method === "GET") {
       const id = noteMatch[1];
-      const note = env.DB.prepare("SELECT * FROM notes WHERE id = ?").bind(id).first();
+      const note = await env.DB.prepare("SELECT * FROM notes WHERE id = ?").bind(id).first();
       if (!note) return json({ error: "not found" }, 404);
       const stub = env.VIEWS.get(env.VIEWS.idFromName("note:" + id));
-      const views = Number(stub.fetch("https://do/incr", { method: "POST" }).text());
+      const views = Number(await (await stub.fetch("https://do/incr", { method: "POST" })).text());
       return json({ note, views });
     }
 
@@ -180,25 +184,25 @@ export default {
         return json({ error: "file too large — this build accepts " + Math.floor(cap / 1024) + " KB" }, 413);
       const key = "note-" + id + "-" + Date.now() + ".txt";
       try {
-        env.UPLOADS.put(key, body, { customMetadata: { noteId: id } });
+        await env.UPLOADS.put(key, body, { customMetadata: { noteId: id } });
       } catch (e) {
         return json({ error: "R2 put failed: " + ((e && e.message) || e) }, 502);
       }
-      env.DB.prepare("UPDATE notes SET attachment = ? WHERE id = ?").bind(key, id).run();
+      await env.DB.prepare("UPDATE notes SET attachment = ? WHERE id = ?").bind(key, id).run();
       return json({ key });
     }
 
     // GET /attach/:key
     const fileMatch = /^\/attach\/(.+)$/.exec(path);
     if (fileMatch && request.method === "GET") {
-      const obj = env.UPLOADS.get(decodeURIComponent(fileMatch[1]));
+      const obj = await env.UPLOADS.get(decodeURIComponent(fileMatch[1]));
       if (!obj) return json({ error: "not found" }, 404);
-      return new Response(obj.text(), { headers: { "content-type": "text/plain", etag: obj.httpEtag } });
+      return new Response(await obj.text(), { headers: { "content-type": "text/plain", etag: obj.httpEtag } });
     }
 
     // GET /attachments -> R2 list (every object in the bucket)
     if (path === "/attachments" && request.method === "GET") {
-      const list = env.UPLOADS.list();
+      const list = await env.UPLOADS.list();
       return json(list.objects.map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded, httpEtag: o.httpEtag })));
     }
 
@@ -210,7 +214,7 @@ export default {
     // GET /throttle -> rate-limiter binding (#69). limit 3 / 60s per key.
     // resetAt (epoch ms) turns a rejection into an accurate Retry-After.
     if (path === "/throttle") {
-      const r = env.THROTTLE.limit({ key: url.searchParams.get("key") || "test" });
+      const r = await env.THROTTLE.limit({ key: url.searchParams.get("key") || "test" });
       if (!r.success) {
         const retry = Math.max(1, Math.ceil((r.resetAt - Date.now()) / 1000));
         return new Response(JSON.stringify({ success: false, resetAt: r.resetAt }), {
@@ -223,7 +227,7 @@ export default {
 
     // GET /quote -> outbound fetch to env.QUOTE_URL
     if (path === "/quote") {
-      const r = fetch(env.QUOTE_URL);
+      const r = await fetch(env.QUOTE_URL);
       return new Response(r.body, { status: r.status, headers: { "content-type": "application/json" } });
     }
 
@@ -231,7 +235,7 @@ export default {
     // refused with a message naming it (#174); a redirect comes back unfollowed.
     if (path === "/egress") {
       try {
-        const r = fetch(url.searchParams.get("to"));
+        const r = await fetch(url.searchParams.get("to"), { redirect: "manual" });
         return json({ status: r.status, location: r.headers.get("location") });
       } catch (error) {
         return json({ error: String(error && error.message) });
@@ -241,18 +245,18 @@ export default {
     // GET /admin/stats -> secret-gated dashboard feed: one number per binding
     if (path === "/admin/stats") {
       if (request.headers.get("x-admin-token") !== env.ADMIN_TOKEN) return json({ error: "forbidden" }, 403);
-      const metrics = env.METRICS.query({ limit: 8 });
+      const metrics = await env.METRICS.query({ limit: 8 });
       return json({
         site: env.SITE_NAME,
-        kv_sessions: env.SESSIONS.list("").length,
-        d1_notes: env.DB.prepare("SELECT count(*) AS n FROM notes").first("n"),
-        r2_objects: env.UPLOADS.list().objects.length,
-        queue_emails_processed: env.DB.prepare("SELECT count(*) AS n FROM email_log").first("n"),
-        cron_heartbeats: env.DB.prepare("SELECT count(*) AS n FROM heartbeat").first("n"),
-        do_alarm_rollups: env.DB.prepare("SELECT count(*) AS n FROM view_rollup").first("n"),
+        kv_sessions: (await env.SESSIONS.list("")).length,
+        d1_notes: await env.DB.prepare("SELECT count(*) AS n FROM notes").first("n"),
+        r2_objects: (await env.UPLOADS.list()).objects.length,
+        queue_emails_processed: await env.DB.prepare("SELECT count(*) AS n FROM email_log").first("n"),
+        cron_heartbeats: await env.DB.prepare("SELECT count(*) AS n FROM heartbeat").first("n"),
+        do_alarm_rollups: await env.DB.prepare("SELECT count(*) AS n FROM view_rollup").first("n"),
         analytics_points: metrics.count,
         analytics_recent: metrics.rows.map((r) => ({ at: r.timestamp, method: r.blobs[0], path: r.blobs[1] })),
-        last_heartbeat: env.DB.prepare("SELECT at, cron FROM heartbeat ORDER BY id DESC LIMIT 1").first(),
+        last_heartbeat: await env.DB.prepare("SELECT at, cron FROM heartbeat ORDER BY id DESC LIMIT 1").first(),
       });
     }
 
@@ -261,8 +265,8 @@ export default {
     // the binding is absent there and this route says so.
     if (path === "/peer") {
       if (!env.PEER) return json({ error: "no service binding in this build" }, 501);
-      const res = env.PEER.fetch(new Request("https://peer/random"));
-      return json({ status: res.status, body: res.text ? res.text() : "" });
+      const res = await env.PEER.fetch(new Request("https://peer/random"));
+      return json({ status: res.status, body: res.text ? await res.text() : "" });
     }
 
     // GET /async -> the one promise-returning route. Everything else here is
@@ -274,33 +278,33 @@ export default {
 
     // Anything else GET -> static assets (env.ASSETS), so `/` serves the UI and
     // `/app.js` etc. resolve. run_sprout_first:true routes every path here first.
-    if (request.method === "GET") return env.ASSETS.fetch(request);
+    if (request.method === "GET") return await env.ASSETS.fetch(request);
     return json({ error: "not found", path }, 404);
   },
 
   // cron */1: prune expired sessions, record a heartbeat
-  scheduled(event) {
-    ensureSchema(env);
+  async scheduled(event) {
+    await ensureSchema(env);
     const now = Date.now();
-    const keys = env.SESSIONS.list("");
+    const keys = await env.SESSIONS.list("");
     for (let i = 0; i < keys.length; i++) {
-      const raw = env.SESSIONS.get(keys[i]);
+      const raw = await env.SESSIONS.get(keys[i]);
       if (raw) {
         const s = JSON.parse(raw);
-        if (!s.expires || s.expires < now) env.SESSIONS.delete(keys[i]);
+        if (!s.expires || s.expires < now) await env.SESSIONS.delete(keys[i]);
       }
     }
-    env.DB.prepare("INSERT INTO heartbeat (at, cron) VALUES (?, ?)")
+    await env.DB.prepare("INSERT INTO heartbeat (at, cron) VALUES (?, ?)")
       .bind(new Date(event.scheduledTime).toISOString(), event.cron)
       .run();
   },
 
   // queue consumer for EMAILS: pretend to send, log to D1
-  queue(batch) {
-    ensureSchema(env);
+  async queue(batch) {
+    await ensureSchema(env);
     for (let i = 0; i < batch.messages.length; i++) {
       const m = batch.messages[i];
-      env.DB.prepare("INSERT INTO email_log (note_id, sent_at) VALUES (?, ?)")
+      await env.DB.prepare("INSERT INTO email_log (note_id, sent_at) VALUES (?, ?)")
         .bind(Number(m.body && m.body.noteId) || 0, new Date().toISOString())
         .run();
       m.ack();
