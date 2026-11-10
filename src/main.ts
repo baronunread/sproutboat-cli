@@ -37,7 +37,6 @@ import {
   deployToCloud,
   formatKiB,
   hostFor,
-  hostNote,
   Interrupted,
 } from "./cloud-deploy";
 import { deleteCloudSecret, listCloudSecrets, putCloudSecret, readSecretsFile } from "./cloud-secrets";
@@ -1151,8 +1150,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     }
     console.log(`\n${leaf("🌱")} ${bold(leaf(`${result.created ? "Created" : "Updated"} ${name}`))}`);
     if (result.url) {
-      const note = hostNote(result.url);
-      console.log(note ? `  ${dim(result.url)}  ${dim(`(${note})`)}` : `  ${bold(result.url)}`);
+      console.log(`  ${bold(result.url)}`);
     }
     console.log(dim(`  generation ${result.generation}  ·  team ${team}`));
     if (result.applied === false) {

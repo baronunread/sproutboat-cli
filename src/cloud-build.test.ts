@@ -13,7 +13,6 @@ import {
   formatBuildSummary,
   formatLogLines,
   hostFor,
-  hostNote,
   Interrupted,
   parseBuildView,
   parseSseFrames,
@@ -478,9 +477,5 @@ describe("failure headline and host note", () => {
   });
   test("an empty message has a placeholder", () => {
     expect(buildFailureHeadline(undefined)).toBe("no reason given");
-  });
-  test("only sproutboat.app names carry the not-routed note", () => {
-    expect(hostNote("https://hello.baronunread.sproutboat.app")).toContain("not publicly routed");
-    expect(hostNote("https://hello.example.com")).toBeUndefined();
   });
 });
