@@ -67,6 +67,7 @@ describe("build formatting", () => {
   test("queue state and log gutter", () => {
     expect(formatBuildState("queued", 1)).toBe("queued (position 1)");
     expect(formatBuildState("queued", null)).toBe("queued");
+    expect(formatBuildState("queued", 1, "waiting for memory")).toBe("queued (position 1), waiting for memory");
     expect(formatLogLines("a\nb\n\n")).toEqual(["  | a", "  | b"]);
   });
   test("parseBuildView rejects a reply that is not a build", () => {
@@ -202,6 +203,25 @@ describe("buildAndDeploy", () => {
       await expect(buildAndDeploy(plan(cloud.url), fakeIo().io)).rejects.toThrow(
         "porffor stopped: hit the 1200 MB memory cap",
       );
+    });
+  });
+
+  test("a queued build held back for memory shows why, once, and keeps waiting", async () => {
+    const waiting = "waiting for memory (1172 MB available, a build needs 1600 MB)";
+    await withCloud({ build: { waiting } }, async (cloud) => {
+      const { io, lines } = fakeIo();
+      const result = await buildAndDeploy(plan(cloud.url), io);
+      expect(result.applied).toBe(true);
+      const building = lines.filter((l) => l.startsWith("  Building"));
+      expect(building).toEqual([`  Building   queued (position 1), ${waiting}`, "  Building   building"]);
+    });
+  });
+
+  test("a failed build prints its peak memory", async () => {
+    await withCloud({ build: { mode: "memory-cap" } }, async (cloud) => {
+      const { io, lines } = fakeIo();
+      await expect(buildAndDeploy(plan(cloud.url), io)).rejects.toThrow("hit the 1200 MB memory cap");
+      expect(lines.at(-1)).toBe("  peak memory 1200 MB (cap 1200 MB)");
     });
   });
 

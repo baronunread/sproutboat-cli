@@ -121,7 +121,8 @@ preselects the team on the approval page.
 
   An identical build is answered from the Cloud's cache. Ctrl-C cancels the
   build. `--no-wait` returns once the build is accepted and prints
-  `/v1/builds/<id>`. A build that fails prints the reason and exits 1; a source
+  `/v1/builds/<id>`. A queued build shows why it is held back (such as waiting for memory) and keeps
+  waiting. A build that fails prints the reason and its peak memory, and exits 1; a source
   is limited to 8 MiB. `--module app.so` and `--sproutd` with `--generation`
   are operator paths for a prebuilt or locally compiled module; a team key is
   refused with "modules are built by the Cloud", and regular deploys never need

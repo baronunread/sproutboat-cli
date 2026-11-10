@@ -275,6 +275,8 @@ export type BuildView = {
   state: string;
   cached: boolean;
   position: number | null;
+  /** Why a queued build is held back (not a failure), e.g. waiting for memory. */
+  waiting: string | null;
   error: { code?: string; message: string } | null;
   recordGeneration: number | undefined;
   stats: { wallMs: number | null; peakMemoryBytes: number | null; memoryCapBytes: number | null };
@@ -303,6 +305,7 @@ export function parseBuildView(body: JsonObject | undefined): BuildView {
     state,
     cached: body?.cached === true,
     position: int(body?.position),
+    waiting: isString(body?.waiting) ? body.waiting : null,
     error:
       error && isString(error.message)
         ? { code: isString(error.code) ? error.code : undefined, message: error.message }
@@ -338,8 +341,11 @@ export function formatBuildSummary(view: BuildView): string {
 }
 
 /** The "Building" status line for a queued or running build. */
-export function formatBuildState(state: string, position: number | null): string {
-  if (state === "queued") return position === null ? "queued" : `queued (position ${position})`;
+export function formatBuildState(state: string, position: number | null, waiting: string | null = null): string {
+  if (state === "queued") {
+    const queued = position === null ? "queued" : `queued (position ${position})`;
+    return waiting ? `${queued}, ${waiting}` : queued;
+  }
   if (state === "building") return "building";
   return state;
 }
@@ -402,7 +408,7 @@ async function followBuild(
   call: CallFn,
   first: BuildView,
   io: CloudIo,
-  onState: (state: string, position: number | null) => void,
+  onState: (state: string, position: number | null, waiting: string | null) => void,
   signal: AbortSignal | undefined,
 ): Promise<BuildView> {
   const headers = new Headers(authHeaders(plan.token));
@@ -438,7 +444,11 @@ async function followBuild(
         for (const frame of parsed.frames) {
           const body = parseBody(frame.data);
           if (frame.event === "state") {
-            onState(isString(body?.state) ? body.state : "", int(body?.position));
+            onState(
+              isString(body?.state) ? body.state : "",
+              int(body?.position),
+              isString(body?.waiting) ? body.waiting : null,
+            );
           } else if (frame.event === "log") {
             const seq = Number(frame.id);
             if (Number.isFinite(seq)) {
@@ -464,7 +474,7 @@ async function followBuild(
   for (;;) {
     if (signal?.aborted) throw new Interrupted("build canceled");
     const view = parseBuildView((await call({ method: "GET", path: `/v1/builds/${first.id}` })).body);
-    onState(view.state, view.position);
+    onState(view.state, view.position, view.waiting);
     if (TERMINAL.has(view.state)) return view;
     await io.sleep(plan.pollMs ?? 2000);
   }
@@ -530,16 +540,16 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
   const url = plan.hosts[0] === undefined ? undefined : `https://${plan.hosts[0]}`;
 
   let shown = "";
-  const onState = (state: string, position: number | null) => {
+  const onState = (state: string, position: number | null, waiting: string | null) => {
     if (state === "") return;
-    const line = `  Building   ${formatBuildState(state, position)}`;
+    const line = `  Building   ${formatBuildState(state, position, waiting)}`;
     if (line === shown || TERMINAL.has(state)) return;
     shown = line;
     io.log(line);
   };
 
   if (!TERMINAL.has(view.state)) {
-    onState(view.state, view.position);
+    onState(view.state, view.position, view.waiting);
     if (plan.noWait) {
       io.log(`  Build      ${view.id} accepted; status at /v1/builds/${view.id}`);
       return { created, generation: undefined, url, applied: "skipped", buildId: view.id, build: view };
@@ -558,6 +568,13 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
     }
   }
   if (view.state === "canceled") throw new CloudError(`build canceled${view.error ? `: ${view.error.message}` : ""}`);
+  if (view.state === "failed") {
+    const { peakMemoryBytes, memoryCapBytes } = view.stats;
+    if (peakMemoryBytes !== null)
+      io.log(
+        `  peak memory ${formatMB(peakMemoryBytes)}${memoryCapBytes === null ? "" : ` (cap ${formatMB(memoryCapBytes)})`}`,
+      );
+  }
   if (view.state === "failed") throw new CloudError(`build failed: ${view.error?.message ?? "no reason given"}`);
   io.log(ok(formatBuildSummary(view)));
   const generation = view.recordGeneration;

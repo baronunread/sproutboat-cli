@@ -28,6 +28,8 @@ export type FakeBuildOptions = {
   mode?: "ready" | "cached" | "failed" | "memory-cap" | "hang" | "disabled" | "no-builder" | "queue-full";
   logs?: string[];
   position?: number | null;
+  /** The queued state carries this `waiting` text (builder holding work back), then the build starts. */
+  waiting?: string;
   wallMs?: number;
   peakMemoryBytes?: number | null;
   /** Drop the first events connection after this many log frames. */
@@ -80,7 +82,10 @@ export function startFakeCloud(options: FakeOptions = {}) {
     driver: "fake",
     wall_ms: buildOptions.wallMs ?? 4100,
     cpu_ms: 3900,
-    peak_memory_bytes: buildOptions.peakMemoryBytes === undefined ? 742 * MiB : buildOptions.peakMemoryBytes,
+    peak_memory_bytes:
+      buildOptions.peakMemoryBytes === undefined
+        ? (mode === "memory-cap" ? 1200 : 742) * MiB
+        : buildOptions.peakMemoryBytes,
     memory_cap_bytes: 1200 * MiB,
     module_bytes: 1000,
   });
@@ -89,13 +94,14 @@ export function startFakeCloud(options: FakeOptions = {}) {
     project: "hello",
     state: b.state,
     cached: b.cached,
+    waiting: b.state === "queued" ? (buildOptions.waiting ?? null) : null,
     position: b.state === "queued" ? (buildOptions.position === undefined ? 1 : buildOptions.position) : null,
     error: b.error,
     module_sha256: b.state === "ready" ? "f".repeat(64) : null,
     record_generation: b.generation,
     hosts: jsonObject(b.body.spec ?? null)?.hosts ?? [],
     input_hash: "1".repeat(64),
-    stats: b.state === "ready" && !b.cached ? stats() : null,
+    stats: (b.state === "ready" && !b.cached) || b.state === "failed" ? stats() : null,
   });
   /** The Cloud writes the app when a build is ready: a new record generation. */
   const finish = (b: FakeBuild) => {
@@ -258,9 +264,15 @@ export function startFakeCloud(options: FakeOptions = {}) {
             const send = (text: string) => controller.enqueue(encoder.encode(text));
             const frame = (event: string, data: JsonObject, id?: number) =>
               `${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-            send(frame("state", { state: "queued", position: view(build).position }));
+            send(
+              frame("state", {
+                state: "queued",
+                position: view(build).position,
+                waiting: buildOptions.waiting ?? null,
+              }),
+            );
             send(": keepalive\n\n");
-            send(frame("state", { state: "building", position: null }));
+            send(frame("state", { state: "building", position: null, waiting: null }));
             let seq = 0;
             for (const text of logs) {
               seq++;
