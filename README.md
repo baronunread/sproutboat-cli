@@ -138,8 +138,12 @@ preselects the team on the approval page.
   need the `secret:write` and `secret:list` permissions and say so on a 403. An app
   that is not deployed yet has nowhere to keep them: deploy first, or pass
   `deploy --secrets-file <file>` (`.dev.vars` or `.env` syntax, `UPPER_SNAKE` names)
-  on the first deploy; its values are merged into the app's secrets in the same
-  write and nothing else is removed. A deploy never reads `.dev.vars` on its
+  on the first deploy; its values are merged into the app's secrets and nothing
+  else is removed. A build deploy stores its spec in plaintext, so the secrets
+  are never in it: once the build is ready they are set with one
+  `PATCH /v1/apps/<app>/secrets`, and the deploy waits for that newer
+  generation. On a first deploy the app is briefly live before its secrets
+  land, and `--secrets-file` cannot be combined with `--no-wait`. A deploy never reads `.dev.vars` on its
   own (the Community deploy does not either): name the file. Production
   values do not belong in `.dev.vars`; keep a separate file.
 - **Service bindings.** `services: [{ "binding": "PEER", "service": "quote-service" }]`

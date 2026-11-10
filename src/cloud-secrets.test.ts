@@ -49,13 +49,32 @@ const plan = (apiUrl: string, extra: Partial<BuildPlan> = {}): BuildPlan => ({
 const nonGets = (cloud: ReturnType<typeof startFakeCloud>) => cloud.calls.filter((c) => c.method !== "GET");
 
 describe("secrets on deploy", () => {
-  test("the first deploy sends secrets_patch.set and never `secrets`", async () => {
+  test("a build deploy never puts secrets in the build body; they follow the ready build in one PATCH", async () => {
     await withCloud({}, async (cloud) => {
-      await buildAndDeploy(plan(cloud.url, { secrets: { ADMIN_TOKEN: "s3cret" }, noWait: false }), io);
+      const lines: string[] = [];
+      const result = await buildAndDeploy(plan(cloud.url, { secrets: { ADMIN_TOKEN: "s3cret" }, noWait: false }), {
+        ...io,
+        log: (l) => lines.push(l),
+      });
       const sent = sentSpec(cloud);
-      expect(sent.secrets_patch).toEqual({ set: { ADMIN_TOKEN: "s3cret" } });
-      expect("secrets" in sent).toBe(false);
+      expect("secrets" in sent || "secrets_patch" in sent).toBe(false);
+      expect(JSON.stringify(cloud.calls.find((c) => c.path === "/v1/apps/hello/builds"))).not.toContain("s3cret");
+      expect(cloud.patches).toEqual([{ set: { ADMIN_TOKEN: "s3cret" } }]);
       expect(cloud.secrets).toEqual({ ADMIN_TOKEN: "s3cret" });
+      expect(result.generation).toBe(2);
+      expect(lines.some((l) => l.includes("secrets    1 set (ADMIN_TOKEN); generation 2 written"))).toBe(true);
+      expect(lines.join("\n")).not.toContain("s3cret");
+      const order = cloud.calls.map((c) => `${c.method} ${c.path}`);
+      expect(order.indexOf("PATCH /v1/apps/hello/secrets")).toBeGreaterThan(
+        order.indexOf("POST /v1/apps/hello/builds"),
+      );
+    });
+  });
+
+  test("--secrets-file with --no-wait is refused before any call", async () => {
+    await withCloud({}, async (cloud) => {
+      await expect(buildAndDeploy(plan(cloud.url, { secrets: { A_KEY: "a" } }), io)).rejects.toThrow("--no-wait");
+      expect(cloud.calls).toEqual([]);
     });
   });
 
@@ -126,9 +145,11 @@ describe("secrets commands against the Cloud", () => {
     });
   });
 
-  test("a deploy with secrets but no secret:write permission fails the write", async () => {
+  test("a deploy with secrets but no secret:write permission says the app is deployed without them", async () => {
     await withCloud({ denyPermissions: ["secret:write"] }, async (cloud) => {
-      await expect(buildAndDeploy(plan(cloud.url, { secrets: { A_KEY: "a" } }), io)).rejects.toThrow("secret:write");
+      await expect(buildAndDeploy(plan(cloud.url, { secrets: { A_KEY: "a" }, noWait: false }), io)).rejects.toThrow(
+        "its secrets were not set: this key lacks the secret:write",
+      );
     });
   });
 });
