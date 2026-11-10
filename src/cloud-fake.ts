@@ -64,6 +64,7 @@ export function startFakeCloud(options: FakeOptions = {}) {
   let spec: JsonObject = {};
   const secretStore = new Map<string, string>(Object.entries(options.existingSecrets ?? {}));
   const written: JsonObject[] = [];
+  const patches: JsonObject[] = [];
   const denied = new Set(options.denyPermissions ?? []);
   const permissionDenied = (need: string) => Response.json({ error: "forbidden", need }, { status: 403 });
   /** The Cloud's spec rules for service bindings and secrets, then the merge. Returns an error reply or null. */
@@ -285,8 +286,10 @@ export function startFakeCloud(options: FakeOptions = {}) {
             { error: "at most 2 builds at once per team; wait for one to finish", reason: "team-queue-full" },
             { status: 429 },
           );
-        if (jsonObject(jsonObject(sent.spec ?? null)?.secrets_patch ?? null) && denied.has("secret:write"))
-          return permissionDenied("secret:write");
+        // The build spec is stored in plaintext, so the real Cloud refuses secrets in it.
+        const buildSpec = jsonObject(sent.spec ?? null) ?? {};
+        if ("secrets" in buildSpec || "secrets_patch" in buildSpec)
+          return Response.json({ error: "secrets do not belong in a build spec" }, { status: 400 });
         if (!sources.has(sent.source_sha256))
           return Response.json({ error: "source not uploaded", reason: "source-missing" }, { status: 409 });
         buildRequests.push(sent);
@@ -384,6 +387,21 @@ export function startFakeCloud(options: FakeOptions = {}) {
           apps: [...new Set(apps)].map((project) => ({ project, app_id: fakeAppId(project), record_generation: 1 })),
         });
       }
+      m = /^\/v1\/apps\/([^/]+)\/secrets$/.exec(path);
+      if (m && request.method === "PATCH") {
+        if (denied.has("secret:write")) return permissionDenied("secret:write");
+        if (!appExists) return Response.json({ error: "no such app" }, { status: 404 });
+        const patch = JSON.parse(body);
+        for (const [k, v] of Object.entries(jsonObject(patch.set ?? null) ?? {})) secretStore.set(k, String(v));
+        for (const k of Array.isArray(patch.delete) ? patch.delete : []) secretStore.delete(String(k));
+        generation++;
+        patches.push(patch);
+        return Response.json({
+          app_id: fakeAppId(m[1]!),
+          record_generation: generation,
+          names: [...secretStore.keys()].sort(),
+        });
+      }
       m = /^\/v1\/apps\/([^/]+)\/secrets(?:\/([^/]+))?$/.exec(path);
       if (m) {
         const need = request.method === "GET" ? "secret:list" : "secret:write";
@@ -448,6 +466,8 @@ export function startFakeCloud(options: FakeOptions = {}) {
     },
     /** Every spec the Cloud accepted, secrets_patch and all (values are the test's own). */
     written,
+    /** Bodies of PATCH /v1/apps/<app>/secrets. */
+    patches,
     get secrets() {
       return Object.fromEntries([...secretStore.entries()].sort());
     },

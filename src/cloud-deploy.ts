@@ -95,7 +95,10 @@ export type SpecExtras = {
   /** Service bindings from sproutboat.jsonc (`services`), resolved against the team's Cloud apps before anything is written. */
   services?: ServiceRef[];
   compatibilityDate?: string;
-  /** Sent as `secrets_patch.set`: merged into the app's secrets in the same write. A deploy never replaces the set. */
+  /**
+   * Merged into the app's secrets, never replacing the set. A module deploy sends them as `secrets_patch.set` in its PUT;
+   * a build deploy (whose spec is stored in plaintext) sets them with PATCH /v1/apps/<app>/secrets once the build is ready.
+   */
   secrets?: Record<string, string>;
 };
 
@@ -586,6 +589,29 @@ async function followBuild(
   }
 }
 
+/**
+ * Secrets of a build deploy: the app record exists now, so merge them with PATCH /v1/apps/<app>/secrets (set only,
+ * nothing removed) and return the newer record generation to wait for. The app is briefly live before they land.
+ */
+async function patchSecretsAfterBuild(
+  call: CallFn,
+  project: string,
+  secrets: Record<string, string>,
+  built: number,
+  io: CloudIo,
+): Promise<number> {
+  const names = Object.keys(secrets);
+  const reply = await call({ method: "PATCH", path: `/v1/apps/${project}/secrets`, json: { set: secrets }, ok: [403] });
+  if (reply.status === 403)
+    throw new CloudError(
+      `generation ${built} is deployed, but its secrets were not set: this key lacks the secret:write permission; set them with a key that has it (\`sproutboat secrets put\`)`,
+    );
+  const next = reply.body?.record_generation;
+  if (!isSafeInteger(next)) throw new CloudError("the Cloud's reply to the secrets write carried no record generation");
+  io.log(`  secrets    ${names.length} set (${names.join(", ")}); generation ${next} written`);
+  return next;
+}
+
 /** 503 and 429 from the build request, as plain sentences. */
 function explainBuildRefusal(result: CallResult): string {
   const body = result.body;
@@ -620,6 +646,11 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
 
   // Everything that can refuse the deploy runs before the first upload or write.
   checkServiceBindings(plan.project, plan.services ?? [], plan.compatibilityDate);
+  const secretNames = Object.keys(plan.secrets ?? {});
+  if (secretNames.length > 0 && plan.noWait)
+    throw new CloudError(
+      "--secrets-file is applied once the build is ready, so it cannot be combined with --no-wait; drop --no-wait, or set the secrets afterwards with `sproutboat secrets put`",
+    );
   const wiring = await resolveServiceBindings(call, plan.project, plan.services ?? []);
   const { created, assetsRef } = await resolveAssets(call, plan, io);
 
@@ -634,7 +665,8 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
 
   const spec: BuildSpec = { hosts: plan.hosts };
   if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
-  applyExtras(spec, wiring, plan.secrets);
+  // The build spec is stored in plaintext by the Cloud: secrets never go in it (they follow the build, below).
+  applyExtras(spec, wiring, undefined);
   const cli: BuildCli = { version: plan.cli.version };
   if (plan.cli.runtime) cli.runtime = plan.cli.runtime;
   if (plan.cli.toolchain) cli.toolchain = plan.cli.toolchain;
@@ -687,8 +719,11 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
   }
   if (view.state === "failed") throw new CloudError(`build failed: ${buildFailureHeadline(view.error?.message)}`);
   io.log(ok(formatBuildSummary(view)));
-  const generation = view.recordGeneration;
+  let generation = view.recordGeneration;
   if (generation === undefined) throw new CloudError("the Cloud's reply carried no record generation");
+  if (secretNames.length > 0) {
+    generation = await patchSecretsAfterBuild(call, plan.project, plan.secrets!, generation, io);
+  }
   if (plan.noWait) return { created, generation, url, applied: "skipped", buildId: view.id, build: view };
   const applied = await waitForApply(call, plan, generation, io, signal);
   return { created, generation, url, applied, buildId: view.id, build: view };
