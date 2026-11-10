@@ -516,7 +516,7 @@ describe("cloud deploy", () => {
     }
   });
 
-  test("without --module, --sproutd and --generation the error says how to supply a module", async () => {
+  test("without --module, --sproutd and --generation the error says deploys are built by the Cloud", async () => {
     const run = (extra: Partial<ModuleInputs>) =>
       compileModule({
         project: "hello",
@@ -525,7 +525,7 @@ describe("cloud deploy", () => {
         bun: process.execPath,
         ...extra,
       });
-    await expect(run({})).rejects.toThrow("no hosted compile service");
+    await expect(run({})).rejects.toThrow("Regular deploys are built by the Cloud");
     await expect(run({ sproutd: work, generation: work })).rejects.toThrow("compile-app.ts");
   });
 
