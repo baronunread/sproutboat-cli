@@ -57,7 +57,7 @@ npm run dev                # runs it right here, no control plane needed
 Happy with it? Log in once, then ship it:
 
 ```sh
-npx sproutboat login --api-url https://control.example.com   # one browser approval
+npx sproutboat login       # one approval in the browser; add --api-url for a self-hosted box
 npm run deploy             # or: npx sproutboat deploy
 ```
 
@@ -68,10 +68,60 @@ not pinned to anything, so keep it for `init`, `login` and `whoami`:
 npm i -g sproutboat       # then: sproutboat init, sproutboat whoami, ...
 ```
 
-`login` is one-time. It writes a long-lived token to
-`~/.config/sproutboat/credentials.json`, keyed by API URL, so you can hold
-logins for several instances at once. For CI or an agent, skip it and set
-`SPROUTBOAT_API_URL` + `SPROUTBOAT_TOKEN`.
+`login` is one-time. It writes the credential to `credentials.json` in the user
+config directory (mode 0600), keyed by API URL, so you can hold logins for
+several instances at once. The directory follows Wrangler: `SPROUTBOAT_CONFIG_DIR`
+or `XDG_CONFIG_HOME` if set, else `~/Library/Preferences/sproutboat` on macOS and
+`~/.config/sproutboat` elsewhere (the old macOS place is still read).
+
+### Sproutboat Cloud
+
+The default endpoint is `https://dash.sproutboat.com`, the Sproutboat Cloud.
+`login` there is the device-code flow, like `gh auth login`:
+
+```sh
+sproutboat login           # prints a code and a link, opens the browser when it can
+sproutboat whoami          # the team, the key and what it may do
+sproutboat deploy          # uploads the app, waits for a host, prints the live URL
+sproutboat logout          # deletes the key on the server, then the local copy
+```
+
+Open the link on any device where you are signed in, pick the team, check the
+machine name and Approve. That mints an account API key named
+`CLI on <hostname>` for that team, with your role capped at Developer. It shows
+up under Settings, API keys, where you can revoke it. `--account <team>`
+preselects the team on the approval page.
+
+- **Which target.** Like Wrangler, there is one target, chosen by your
+  credentials: the endpoint you are logged in to (`--api-url`, then
+  `SPROUTBOAT_API_URL`, then the saved active endpoint, then the default).
+  The CLI asks the endpoint what it is (`GET /v1/config`) and deploys the Cloud
+  way to a Cloud and the Community way to a self-hosted box. There is no
+  `--cloud` flag.
+- **CI.** `SPROUTBOAT_API_TOKEN` (an account API key, like `CLOUDFLARE_API_TOKEN`)
+  always wins over a stored login. `SPROUTBOAT_TOKEN` is the older name. With no
+  terminal and no token, `deploy` fails and names `SPROUTBOAT_API_TOKEN`; in a
+  terminal it starts the login itself.
+- **Which team.** `account` in `sproutboat.jsonc` (like `account_id`), else
+  `--account`, else `SPROUTBOAT_ACCOUNT`, else your only stored team, else a
+  prompt. Precedence is `--account`, the config field, then the environment
+  variable. A key from the environment belongs to one team, so a different
+  `account` is an error.
+- **Compile.** A Cloud app is a compiled module. Until there is a hosted compile
+  service, supply one: `deploy --module app.so`, or compile on this machine with
+  `--sproutd <checkout> --generation <built generation>` (or
+  `SPROUTBOAT_SPROUTD` and `SPROUTBOAT_GENERATION`).
+- **Result.** The first deploy creates the app (`Created`), later ones say
+  `Updated`. The app is served at `https://<app>.<team>.sproutboat.app`, and the
+  deploy waits until a host has applied the generation it printed.
+  `--dry-run` builds and prints the plan; `--no-wait` skips the wait.
+- **Not sent yet.** Bindings (KV, D1, R2, queues, Durable Objects, services),
+  cron triggers and secrets in `sproutboat.jsonc` are not sent to the Cloud by
+  the CLI yet; the deploy warns and the app runs without them. Static assets are
+  uploaded by content hash.
+
+For self-hosted (Community) endpoints, `login` keeps the browser flow, and for
+CI or an agent you can skip it and set `SPROUTBOAT_API_URL` + `SPROUTBOAT_API_TOKEN`.
 
 ## Commands
 

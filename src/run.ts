@@ -22,7 +22,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { parseConfig } from "./config";
+import { parseProjectConfig } from "./account-field";
 import {
   mergeEntries,
   MissingSecretsError,
@@ -115,7 +115,7 @@ export async function planRun(
   let name: string | undefined;
   const declared: string[] = [];
   if (existsSync(configPath)) {
-    const parsed = parseConfig(await readFile(configPath, "utf8"));
+    const parsed = parseProjectConfig(await readFile(configPath, "utf8"));
     if (!parsed.ok) throw new RunError(parsed.errors.join("\n"));
     name = parsed.value.name;
     declared.push(...(parsed.value.secrets ?? []));

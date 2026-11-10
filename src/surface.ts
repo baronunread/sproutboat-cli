@@ -127,10 +127,10 @@ export const COMMANDS: readonly Command[] = [
     name: "deploy",
     group: "Ship",
     emoji: "🚀",
-    args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision]",
+    args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] [--api-url <url>] [--account <team>] [--module <file.so>] [--sproutd <dir> --generation <dir>]",
     brief: "[project-dir] [--dry-run]",
     summary:
-      "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores.",
+      "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores. On a Sproutboat Cloud endpoint (the default, https://dash.sproutboat.com) it uploads a compiled module (--module, or compiled with --sproutd and --generation) and the assets by hash, writes the app, waits for a host to apply it and prints https://<app>.<team>.sproutboat.app; logged out in a terminal it starts the login, with no terminal it needs SPROUTBOAT_API_TOKEN.",
   },
   {
     name: "versions",
@@ -190,23 +190,26 @@ export const COMMANDS: readonly Command[] = [
     name: "login",
     group: "Account",
     emoji: "🔓",
-    args: "[--api-url <url>] [--token <token>]",
+    args: "[--api-url <url>] [--token <token>] [--account <team>]",
     brief: "[--token <token>]",
-    summary: "Device-code browser flow, or store <token> for <url> directly.",
+    summary:
+      "Sign in. On the Cloud: the device-code flow (RFC 8628), which prints a code and a link, opens the browser when it can, and stores an account API key named `CLI on <hostname>` for the team you approve (--account preselects it). Elsewhere the browser flow, or store <token> for <url> directly.",
   },
   {
     name: "logout",
     group: "Account",
     emoji: "🔒",
-    args: "[--api-url <url>]",
-    summary: "Forget the stored credential for the active endpoint, or for <url>.",
+    args: "[--api-url <url>] [--account <team>]",
+    summary:
+      "Forget the stored credential for the active endpoint, or for <url>. On the Cloud it also revokes the key on the server (the default team, or --account).",
   },
   {
     name: "whoami",
     group: "Account",
     emoji: "👤",
-    args: "",
-    summary: "Show the active endpoint and the account the stored token belongs to.",
+    args: "[--api-url <url>] [--account <team>]",
+    summary:
+      "Show the active endpoint and the account or team the credential belongs to (exits 1 when not logged in or the key is rejected).",
   },
   {
     name: "complete",
@@ -221,7 +224,25 @@ export type EnvVar = { name: string; purpose: string };
 
 export const ENV_VARS: readonly EnvVar[] = [
   { name: "SPROUTBOAT_API_URL", purpose: "Control-plane URL. Overrides the saved active endpoint." },
-  { name: "SPROUTBOAT_TOKEN", purpose: "API token. Overrides the saved credential for the endpoint." },
+  {
+    name: "SPROUTBOAT_API_TOKEN",
+    purpose:
+      "API token (an account API key on the Cloud), like CLOUDFLARE_API_TOKEN. Always wins over the stored login; use it in CI.",
+  },
+  {
+    name: "SPROUTBOAT_TOKEN",
+    purpose: "Older name for SPROUTBOAT_API_TOKEN; SPROUTBOAT_API_TOKEN wins when both are set.",
+  },
+  {
+    name: "SPROUTBOAT_ACCOUNT",
+    purpose:
+      "Cloud team (its URL name) a deploy targets, like account_id. Overridden by --account and the account field of sproutboat.jsonc.",
+  },
+  {
+    name: "SPROUTBOAT_SPROUTD",
+    purpose: "sproutd checkout whose compile-app turns the app into a Cloud module (same as --sproutd).",
+  },
+  { name: "SPROUTBOAT_GENERATION", purpose: "Built sproutd generation to compile against (same as --generation)." },
   { name: "SPROUTBOAT_ZIG", purpose: "Path to a Zig binary to use instead of downloading the pinned one." },
   {
     name: "SPROUTBOAT_ZIG_URL",
@@ -282,7 +303,11 @@ export const ENV_VARS: readonly EnvVar[] = [
     name: "SPROUTBOAT_BINDINGS_JSON",
     purpose: "The artifact's bindings.json, read by the wrapper to emit the `__sbInstallBindings` line.",
   },
-  { name: "SPROUTBOAT_CONFIG_DIR", purpose: "Directory for credentials.json (default ~/.config/sproutboat)." },
+  {
+    name: "SPROUTBOAT_CONFIG_DIR",
+    purpose:
+      "Directory for credentials.json (default ~/Library/Preferences/sproutboat on macOS, ~/.config/sproutboat elsewhere; the old macOS place is still read).",
+  },
   {
     name: "NO_COLOR",
     purpose:
