@@ -82,7 +82,76 @@ export function buildAssetBundle(projectDir: string, assets: NonNullable<Sproutb
   };
 }
 
-export type CloudDeployPlan = {
+/** The platform runtime gates service bindings between Cloud apps behind this compatibility date. */
+export const SERVICE_BINDINGS_MIN_DATE = "2026-11-18";
+
+export type ServiceRef = { binding: string; service: string };
+type ServiceBindingEntry = { name: string; kind: "service"; resource_id: null; config: Record<string, never> };
+/** What the app spec carries for service bindings: the binding entries and the callee app id per binding. */
+export type ServiceWiring = { bindings: ServiceBindingEntry[]; services: Record<string, string> };
+
+/** What a deploy adds to the app spec beyond module, hosts and assets. */
+export type SpecExtras = {
+  /** Service bindings from sproutboat.jsonc (`services`), resolved against the team's Cloud apps before anything is written. */
+  services?: ServiceRef[];
+  compatibilityDate?: string;
+  /** Sent as `secrets_patch.set`: merged into the app's secrets in the same write. A deploy never replaces the set. */
+  secrets?: Record<string, string>;
+};
+
+/** Refuse, before anything is uploaded, a service binding the Cloud would not run: too old a date, or the app itself. */
+export function checkServiceBindings(project: string, services: ServiceRef[], compatibilityDate: string | undefined) {
+  if (services.length === 0) return;
+  for (const { binding, service } of services)
+    if (service === project)
+      throw new CloudError(
+        `service binding ${binding} points at this app (${project}); an app cannot bind itself, bind a different app`,
+      );
+  if (compatibilityDate === undefined || compatibilityDate < SERVICE_BINDINGS_MIN_DATE)
+    throw new CloudError(
+      `service bindings between Cloud apps need compatibility_date ${SERVICE_BINDINGS_MIN_DATE} or later (sproutboat.jsonc has ${compatibilityDate ?? "none"}); set compatibility_date to ${SERVICE_BINDINGS_MIN_DATE} or later`,
+    );
+}
+
+/** Match each `service` to the team's Cloud app of that project name (GET /v1/apps); a missing callee fails the deploy. */
+export async function resolveServiceBindings(
+  call: CallFn,
+  project: string,
+  services: ServiceRef[],
+): Promise<ServiceWiring | undefined> {
+  if (services.length === 0) return undefined;
+  const listed = (await call({ method: "GET", path: "/v1/apps" })).body?.apps;
+  const ids = new Map<string, string>();
+  for (const entry of Array.isArray(listed) ? listed : []) {
+    const app = jsonObject(entry);
+    if (app && isString(app.project) && isString(app.app_id)) ids.set(app.project, app.app_id);
+  }
+  const wiring: ServiceWiring = { bindings: [], services: {} };
+  for (const { binding, service } of services) {
+    const id = ids.get(service);
+    if (id === undefined)
+      throw new CloudError(
+        `service binding ${binding} needs the app "${service}", which is not deployed in this team: deploy it first (run \`sproutboat deploy\` in its directory), then deploy ${project} again`,
+      );
+    wiring.bindings.push({ name: binding, kind: "service", resource_id: null, config: {} });
+    wiring.services[binding] = id;
+  }
+  return wiring;
+}
+
+function applyExtras(
+  spec: AppSpec | BuildSpec,
+  wiring: ServiceWiring | undefined,
+  secrets: Record<string, string> | undefined,
+) {
+  if (wiring) {
+    spec.bindings = wiring.bindings;
+    spec.services = wiring.services;
+  }
+  if (secrets && Object.keys(secrets).length > 0) spec.secrets_patch = { set: secrets };
+}
+
+export type CloudDeployPlan = SpecExtras & {
   apiUrl: string;
   token: string;
   tokenFromEnv: boolean;
@@ -103,7 +172,12 @@ export type CloudDeployResult = {
   applied: boolean | "skipped";
 };
 
-type AppSpec = { module: { sha256: string }; hosts: string[]; assets_manifest_ref?: string };
+type SpecAdditions = {
+  bindings?: ServiceBindingEntry[];
+  services?: Record<string, string>;
+  secrets_patch?: { set: Record<string, string> };
+};
+type AppSpec = { module: { sha256: string }; hosts: string[]; assets_manifest_ref?: string } & SpecAdditions;
 type Call = { method: string; path: string; body?: BodyInit; json?: object; ok?: number[] };
 type CallResult = { status: number; text: string; body?: JsonObject };
 type CallFn = (c: Call) => Promise<CallResult>;
@@ -183,6 +257,8 @@ async function waitForApply(
 
 export async function deployToCloud(plan: CloudDeployPlan, io: CloudIo): Promise<CloudDeployResult> {
   const call = makeCall(plan);
+  checkServiceBindings(plan.project, plan.services ?? [], plan.compatibilityDate);
+  const wiring = await resolveServiceBindings(call, plan.project, plan.services ?? []);
   const { created, assetsRef } = await resolveAssets(call, plan, io);
 
   const bytes = new Uint8Array(readFileSync(plan.modulePath));
@@ -192,6 +268,7 @@ export async function deployToCloud(plan: CloudDeployPlan, io: CloudIo): Promise
 
   const spec: AppSpec = { module: { sha256: sha }, hosts: plan.hosts };
   if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
+  applyExtras(spec, wiring, plan.secrets);
   const put = await call({ method: "PUT", path: `/v1/apps/${plan.project}`, json: spec });
   const generation = put.body?.record_generation;
   if (!isSafeInteger(generation)) throw new CloudError("the Cloud's reply carried no record generation");
@@ -279,24 +356,25 @@ export const SOURCE_MAX_BYTES = 8 * 1024 * 1024;
 /** Ctrl-C while the build runs: the build was asked to cancel (exit 130). */
 export class Interrupted extends CloudError {}
 
-type BuildSpec = { hosts: string[]; assets_manifest_ref?: string };
+type BuildSpec = { hosts: string[]; assets_manifest_ref?: string } & SpecAdditions;
 type BuildCli = { version: string; runtime?: string; toolchain?: string };
 
-export type BuildPlan = CloudCredentials & {
-  project: string;
-  hosts: string[];
-  /** The bundled source (sprout.generated.js, the "generated" input kind). */
-  sourcePath: string;
-  cli: BuildCli;
-  assets?: AssetBundle;
-  noWait: boolean;
-  waitMs?: number;
-  pollMs?: number;
-  /** Pause before an event stream is reopened. */
-  retryMs?: number;
-  /** Event stream reconnects before falling back to polling. */
-  maxReconnects?: number;
-};
+export type BuildPlan = CloudCredentials &
+  SpecExtras & {
+    project: string;
+    hosts: string[];
+    /** The bundled source (sprout.generated.js, the "generated" input kind). */
+    sourcePath: string;
+    cli: BuildCli;
+    assets?: AssetBundle;
+    noWait: boolean;
+    waitMs?: number;
+    pollMs?: number;
+    /** Pause before an event stream is reopened. */
+    retryMs?: number;
+    /** Event stream reconnects before falling back to polling. */
+    maxReconnects?: number;
+  };
 
 export type BuildView = {
   id: string;
@@ -540,6 +618,9 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
   }
   const sha = createHash("sha256").update(bytes).digest("hex");
 
+  // Everything that can refuse the deploy runs before the first upload or write.
+  checkServiceBindings(plan.project, plan.services ?? [], plan.compatibilityDate);
+  const wiring = await resolveServiceBindings(call, plan.project, plan.services ?? []);
   const { created, assetsRef } = await resolveAssets(call, plan, io);
 
   const missingBody = (await call({ method: "POST", path: "/v1/sources/missing", json: { sha256: [sha] } })).body
@@ -553,6 +634,7 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
 
   const spec: BuildSpec = { hosts: plan.hosts };
   if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
+  applyExtras(spec, wiring, plan.secrets);
   const cli: BuildCli = { version: plan.cli.version };
   if (plan.cli.runtime) cli.runtime = plan.cli.runtime;
   if (plan.cli.toolchain) cli.toolchain = plan.cli.toolchain;
