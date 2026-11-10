@@ -103,6 +103,13 @@ async function ensureSchema(env) {
   );
 }
 
+// KV list(): { keys: [{ name }], list_complete, cursor } from compatibility date 2026-10-25, an array of names before it.
+async function sessionNames(env) {
+  const listed = await env.SESSIONS.list("");
+  if (Array.isArray(listed)) return listed;
+  return (listed.keys || []).map((k) => k.name);
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -248,7 +255,7 @@ export default {
       const metrics = await env.METRICS.query({ limit: 8 });
       return json({
         site: env.SITE_NAME,
-        kv_sessions: (await env.SESSIONS.list("")).length,
+        kv_sessions: (await sessionNames(env)).length,
         d1_notes: await env.DB.prepare("SELECT count(*) AS n FROM notes").first("n"),
         r2_objects: (await env.UPLOADS.list()).objects.length,
         queue_emails_processed: await env.DB.prepare("SELECT count(*) AS n FROM email_log").first("n"),
@@ -286,7 +293,7 @@ export default {
   async scheduled(event) {
     await ensureSchema(env);
     const now = Date.now();
-    const keys = await env.SESSIONS.list("");
+    const keys = await sessionNames(env);
     for (let i = 0; i < keys.length; i++) {
       const raw = await env.SESSIONS.get(keys[i]);
       if (raw) {
