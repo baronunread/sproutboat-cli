@@ -127,10 +127,10 @@ export const COMMANDS: readonly Command[] = [
     name: "deploy",
     group: "Ship",
     emoji: "🚀",
-    args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] [--api-url <url>] [--account <team>] [--module <file.so>] [--sproutd <dir> --generation <dir>]",
+    args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] [--api-url <url>] [--account <team>] [--module <file.so>] [--sproutd <dir> --generation <dir>] [--secrets-file <file>]",
     brief: "[project-dir] [--dry-run]",
     summary:
-      "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores. On a Sproutboat Cloud endpoint (the default, https://dash.sproutboat.com) it bundles the project, uploads the source by sha256 (skipped when unchanged) and the assets by hash, has the Cloud build it while streaming the build log (Ctrl-C cancels the build), waits for a host to apply the generation the build wrote and prints https://<app>.<team>.sproutboat.app; --no-wait returns once the build is accepted and prints /v1/builds/<id>, and --dry-run says it would build in the Cloud. --module and --sproutd with --generation are the operator paths (an uploaded or locally compiled module, refused for team keys); regular deploys do not need them; logged out in a terminal it starts the login, with no terminal it needs SPROUTBOAT_API_TOKEN.",
+      "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores. On a Sproutboat Cloud endpoint (the default, https://dash.sproutboat.com) it bundles the project, uploads the source by sha256 (skipped when unchanged) and the assets by hash, has the Cloud build it while streaming the build log (Ctrl-C cancels the build), waits for a host to apply the generation the build wrote and prints https://<app>.<team>.sproutboat.app; --no-wait returns once the build is accepted and prints /v1/builds/<id>, and --dry-run says it would build in the Cloud. --module and --sproutd with --generation are the operator paths (an uploaded or locally compiled module, refused for team keys); regular deploys do not need them. On the Cloud, `services` in sproutboat.jsonc become service bindings to the team's Cloud apps of those names (each must be deployed first; compatibility_date 2026-11-18 or later; an app cannot bind itself), resolved before anything is uploaded; --secrets-file <file> (.dev.vars or .env format) sets those secrets once the build is ready (and cannot be combined with --no-wait), and a deploy never removes secrets it does not name (manage them with `secrets`); logged out in a terminal it starts the login, with no terminal it needs SPROUTBOAT_API_TOKEN.",
   },
   {
     name: "versions",
@@ -172,10 +172,10 @@ export const COMMANDS: readonly Command[] = [
     name: "secrets",
     group: "Configure",
     emoji: "🔑",
-    args: "<list | put <NAME> [--value <value>] | delete <NAME>> [project-dir]",
+    args: "<list | put <NAME> [--value <value>] | delete <NAME>> [project-dir] [--api-url <url>] [--account <team>]",
     brief: "<list | put | delete>",
     summary:
-      "Manage encrypted project secrets (read as env.NAME). `put` reads the value from stdin unless --value is given, so it stays out of shell history; applies on next deploy.",
+      "Manage encrypted project secrets (read as env.NAME). `put` reads the value from stdin unless --value is given, so it stays out of shell history; applies on next deploy. On a Cloud endpoint secrets are per app and independent of deploys (like wrangler secret): put, list and delete act on the deployed app at once (permissions secret:write and secret:list), and an app that is not deployed yet says to deploy first or pass --secrets-file on the first deploy.",
   },
   {
     name: "delete",

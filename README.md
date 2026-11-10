@@ -132,10 +132,31 @@ preselects the team on the approval page.
   deploy waits until a host has applied the generation it printed.
   `--dry-run` prints the plan and says it would build in the Cloud, without
   uploading; `--no-wait` skips the wait.
-- **Not sent yet.** Bindings (KV, D1, R2, queues, Durable Objects, services),
-  cron triggers and secrets in `sproutboat.jsonc` are not sent to the Cloud by
-  the CLI yet; the deploy warns and the app runs without them. Static assets are
-  uploaded by content hash.
+- **Secrets.** As with Wrangler, secrets belong to the app and a deploy never
+  wipes them. `sproutboat secrets put NAME` (value on stdin, or `--value`),
+  `secrets list` and `secrets delete NAME` act on the deployed app at once; they
+  need the `secret:write` and `secret:list` permissions and say so on a 403. An app
+  that is not deployed yet has nowhere to keep them: deploy first, or pass
+  `deploy --secrets-file <file>` (`.dev.vars` or `.env` syntax, `UPPER_SNAKE` names)
+  on the first deploy; its values are merged into the app's secrets and nothing
+  else is removed. A build deploy stores its spec in plaintext, so the secrets
+  are never in it: once the build is ready they are set with one
+  `PATCH /v1/apps/<app>/secrets`, and the deploy waits for that newer
+  generation. On a first deploy the app is briefly live before its secrets
+  land, and `--secrets-file` cannot be combined with `--no-wait`. A deploy never reads `.dev.vars` on its
+  own (the Community deploy does not either): name the file. Production
+  values do not belong in `.dev.vars`; keep a separate file.
+- **Service bindings.** `services: [{ "binding": "PEER", "service": "quote-service" }]`
+  binds to the Cloud app of that name in the same team. `deploy` looks the app
+  up first and refuses, before uploading anything, when it is not deployed
+  (deploy it first, with `sproutboat deploy` in its directory), when it is the
+  app itself, or when `compatibility_date` is older than `2026-11-18`, the date
+  from which the platform runtime serves service bindings between Cloud apps.
+  Hosts need the matching sproutd support.
+- **Not sent yet.** Other bindings (KV, D1, R2, queues, Durable Objects) and cron
+  triggers in `sproutboat.jsonc` are not sent to the Cloud by the CLI yet; the
+  deploy warns and the app runs without them. `secrets` names in
+  `sproutboat.jsonc` only declare them. Static assets are uploaded by content hash.
 
 For self-hosted (Community) endpoints, `login` keeps the browser flow, and for
 CI or an agent you can skip it and set `SPROUTBOAT_API_URL` + `SPROUTBOAT_API_TOKEN`.

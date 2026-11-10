@@ -16,6 +16,12 @@ export type FakeOptions = {
   failWith?: { status: number; body: JsonObject };
   /** A team key: PUT /v1/modules/<sha> is refused (403 module-upload-disabled), as on the real Cloud. */
   teamKey?: boolean;
+  /** The team's other Cloud apps, by project name, for GET /v1/apps and service binding callees. Ids are `<project>_<owner suffix>`. */
+  otherApps?: string[];
+  /** Permissions the key lacks: `secret:write` and `secret:list` answer 403. */
+  denyPermissions?: string[];
+  /** Secrets the app already holds (the app must exist). */
+  existingSecrets?: Record<string, string>;
   /** How POST /v1/apps/<project>/builds behaves. */
   build?: FakeBuildOptions;
 };
@@ -40,6 +46,8 @@ export type FakeBuildOptions = {
 };
 
 const MiB = 1048576;
+export const FAKE_OWNER_SUFFIX = "0123456789ab";
+export const fakeAppId = (project: string) => `${project}_${FAKE_OWNER_SUFFIX}`;
 
 export function startFakeCloud(options: FakeOptions = {}) {
   const calls: { method: string; path: string; body: string; auth: string | null }[] = [];
@@ -51,8 +59,48 @@ export function startFakeCloud(options: FakeOptions = {}) {
   let revoked = false;
   let appExists = options.appExists ?? false;
   let generation = 0;
+  let lastProject = "hello";
   let applies = [...(options.applyStates ?? ["applied"])];
   let spec: JsonObject = {};
+  const secretStore = new Map<string, string>(Object.entries(options.existingSecrets ?? {}));
+  const written: JsonObject[] = [];
+  const patches: JsonObject[] = [];
+  const denied = new Set(options.denyPermissions ?? []);
+  const permissionDenied = (need: string) => Response.json({ error: "forbidden", need }, { status: 403 });
+  /** The Cloud's spec rules for service bindings and secrets, then the merge. Returns an error reply or null. */
+  const checkAndStore = (sent: JsonObject, project: string): Response | null => {
+    const patch = jsonObject(sent.secrets_patch ?? null);
+    if (sent.secrets !== undefined && patch)
+      return Response.json({ error: "secrets and secrets_patch are exclusive" }, { status: 400 });
+    if ((patch || sent.secrets !== undefined) && denied.has("secret:write")) return permissionDenied("secret:write");
+    const bindings = Array.isArray(sent.bindings) ? sent.bindings.map((b) => jsonObject(b)) : [];
+    const services = jsonObject(sent.services ?? null) ?? {};
+    for (const b of bindings)
+      if (b?.kind === "service" && !(String(b.name) in services))
+        return Response.json({ error: `service binding ${String(b.name)} has no services entry` }, { status: 400 });
+    for (const [name, callee] of Object.entries(services)) {
+      if (!bindings.some((b) => b?.name === name && b.kind === "service"))
+        return Response.json({ error: `${name} is not a service binding` }, { status: 400 });
+      if (!String(callee).endsWith(`_${FAKE_OWNER_SUFFIX}`))
+        return Response.json({ error: "callee belongs to another owner" }, { status: 400 });
+      if (callee === fakeAppId(project)) return Response.json({ error: "an app cannot bind itself" }, { status: 400 });
+    }
+    written.push({ ...sent });
+    if (sent.secrets === null) secretStore.clear();
+    else if (jsonObject(sent.secrets ?? null)) {
+      secretStore.clear();
+      for (const [k, v] of Object.entries(jsonObject(sent.secrets)!)) secretStore.set(k, String(v));
+    }
+    if (patch) {
+      for (const [k, v] of Object.entries(jsonObject(patch.set ?? null) ?? {})) secretStore.set(k, String(v));
+      for (const k of Array.isArray(patch.delete) ? patch.delete : []) secretStore.delete(String(k));
+    }
+    return null;
+  };
+  const stored = (sent: JsonObject): JsonObject => {
+    const { secrets: _a, secrets_patch: _b, ...rest } = sent;
+    return rest;
+  };
   if (options.existingAssetsRef) spec.assets_manifest_ref = options.existingAssetsRef;
 
   const sources = new Map<string, Uint8Array>();
@@ -119,7 +167,14 @@ export function startFakeCloud(options: FakeOptions = {}) {
       return;
     }
     b.state = "ready";
-    spec = { ...jsonObject(b.body.spec ?? null), module: { sha256: "f".repeat(64) } };
+    const sent = jsonObject(b.body.spec ?? null) ?? {};
+    const refused = checkAndStore(sent, String(jsonObject(b.body.build ?? null)?.name ?? ""));
+    if (refused) {
+      b.state = "failed";
+      b.error = { code: "spec-refused", message: "the Cloud refused the app spec" };
+      return;
+    }
+    spec = { ...stored(sent), module: { sha256: "f".repeat(64) } };
     appExists = true;
     generation++;
     b.generation = generation;
@@ -231,9 +286,14 @@ export function startFakeCloud(options: FakeOptions = {}) {
             { error: "at most 2 builds at once per team; wait for one to finish", reason: "team-queue-full" },
             { status: 429 },
           );
+        // The build spec is stored in plaintext, so the real Cloud refuses secrets in it.
+        const buildSpec = jsonObject(sent.spec ?? null) ?? {};
+        if ("secrets" in buildSpec || "secrets_patch" in buildSpec)
+          return Response.json({ error: "secrets do not belong in a build spec" }, { status: 400 });
         if (!sources.has(sent.source_sha256))
           return Response.json({ error: "source not uploaded", reason: "source-missing" }, { status: 409 });
         buildRequests.push(sent);
+        lastProject = m[1]!;
         const build: FakeBuild = {
           id: `bld_${++buildCount}`,
           body: sent,
@@ -321,6 +381,44 @@ export function startFakeCloud(options: FakeOptions = {}) {
         modules.add(m[1]!);
         return Response.json({ sha256: m[1] });
       }
+      if (path === "/v1/apps" && request.method === "GET") {
+        const apps = [...(options.otherApps ?? []), ...(appExists ? [lastProject] : [])];
+        return Response.json({
+          apps: [...new Set(apps)].map((project) => ({ project, app_id: fakeAppId(project), record_generation: 1 })),
+        });
+      }
+      m = /^\/v1\/apps\/([^/]+)\/secrets$/.exec(path);
+      if (m && request.method === "PATCH") {
+        if (denied.has("secret:write")) return permissionDenied("secret:write");
+        if (!appExists) return Response.json({ error: "no such app" }, { status: 404 });
+        const patch = JSON.parse(body);
+        for (const [k, v] of Object.entries(jsonObject(patch.set ?? null) ?? {})) secretStore.set(k, String(v));
+        for (const k of Array.isArray(patch.delete) ? patch.delete : []) secretStore.delete(String(k));
+        generation++;
+        patches.push(patch);
+        return Response.json({
+          app_id: fakeAppId(m[1]!),
+          record_generation: generation,
+          names: [...secretStore.keys()].sort(),
+        });
+      }
+      m = /^\/v1\/apps\/([^/]+)\/secrets(?:\/([^/]+))?$/.exec(path);
+      if (m) {
+        const need = request.method === "GET" ? "secret:list" : "secret:write";
+        if (denied.has(need)) return permissionDenied(need);
+        if (!appExists) return Response.json({ error: "no such app" }, { status: 404 });
+        if (request.method === "GET" && !m[2]) return Response.json({ secrets: [...secretStore.keys()].sort() });
+        if (request.method === "PUT" && m[2]) {
+          secretStore.set(m[2], String(JSON.parse(body).value));
+          generation++;
+          return Response.json({ app_id: fakeAppId(m[1]!), record_generation: generation, name: m[2] });
+        }
+        if (request.method === "DELETE" && m[2]) {
+          if (!secretStore.delete(m[2])) return Response.json({ error: "no such secret" }, { status: 404 });
+          generation++;
+          return Response.json({ app_id: fakeAppId(m[1]!), record_generation: generation, name: m[2] });
+        }
+      }
       m = /^\/v1\/apps\/([^/]+)$/.exec(path);
       if (m && request.method === "GET") {
         if (!appExists) return Response.json({ error: "no such app" }, { status: 404 });
@@ -339,7 +437,10 @@ export function startFakeCloud(options: FakeOptions = {}) {
       if (m && request.method === "PUT") {
         const sent = JSON.parse(body);
         if (!modules.has(sent.module.sha256)) return Response.json({ error: "module not uploaded" }, { status: 400 });
-        spec = { ...sent };
+        const refused = checkAndStore(sent, m[1]!);
+        if (refused) return refused;
+        spec = stored(sent);
+        lastProject = m[1]!;
         appExists = true;
         generation++;
         return Response.json({ app_id: m[1], record_generation: generation, host_id: "h1", placement_generation: 1 });
@@ -362,6 +463,13 @@ export function startFakeCloud(options: FakeOptions = {}) {
     },
     get revoked() {
       return revoked;
+    },
+    /** Every spec the Cloud accepted, secrets_patch and all (values are the test's own). */
+    written,
+    /** Bodies of PATCH /v1/apps/<app>/secrets. */
+    patches,
+    get secrets() {
+      return Object.fromEntries([...secretStore.entries()].sort());
     },
     get spec() {
       return spec;
