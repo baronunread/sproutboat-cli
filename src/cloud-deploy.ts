@@ -13,6 +13,34 @@ import { dim, ok } from "./style";
 
 export const CLOUD_PROJECT_RE = /^[a-z0-9]([a-z0-9-]{1,30}[a-z0-9])?$/;
 
+/** Compiler progress lines ("parsed", "generated IR", "[12.3ms] optimized") say how far it got, not why it stopped. */
+const PROGRESS =
+  /^(\[[^\]]*\]\s*)?(\S+\s+)?(parsed|generated IR|optimi[sz]ed|compiled|linked|assembled|lowered|wrote)\b[^a-z]*$/i;
+const REASON = /error|fail|time(d)? ?out|exceed|reject|unsupported|cannot|can't|not allowed|killed|stopped/i;
+
+/**
+ * The one line the final "build failed:" shows: the most informative line of the Cloud's message. A reason beats progress
+ * lines, the last reason beats the first (the compiler's own message comes after its warnings), and with no reason at all the
+ * first line is shown. The full text stays in the build log above.
+ */
+export function buildFailureHeadline(message: string | undefined): string {
+  const lines = (message ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return "no reason given";
+  const real = lines.filter((l) => !PROGRESS.test(l));
+  const reasons = real.filter((l) => REASON.test(l));
+  return (reasons.at(-1) ?? real.at(-1) ?? lines[0])!;
+}
+
+/** The printed address of an app. *.sproutboat.app names have no public DNS or certificate yet (docs/app-hostnames.md in the Cloud repo). */
+export function hostNote(url: string): string | undefined {
+  return /^https:\/\/[^/]+\.sproutboat\.app(\/|$)/.test(url)
+    ? "not publicly routed yet: the name has no DNS record or certificate"
+    : undefined;
+}
+
 export const hostFor = (project: string, team: string): string => `${project}.${team}.sproutboat.app`;
 
 export type AssetBundle = {
@@ -575,7 +603,7 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
         `  peak memory ${formatMB(peakMemoryBytes)}${memoryCapBytes === null ? "" : ` (cap ${formatMB(memoryCapBytes)})`}`,
       );
   }
-  if (view.state === "failed") throw new CloudError(`build failed: ${view.error?.message ?? "no reason given"}`);
+  if (view.state === "failed") throw new CloudError(`build failed: ${buildFailureHeadline(view.error?.message)}`);
   io.log(ok(formatBuildSummary(view)));
   const generation = view.recordGeneration;
   if (generation === undefined) throw new CloudError("the Cloud's reply carried no record generation");

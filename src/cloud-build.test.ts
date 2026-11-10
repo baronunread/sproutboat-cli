@@ -6,12 +6,14 @@ import { join } from "node:path";
 import type { CloudIo } from "./cloud";
 import {
   buildAndDeploy,
+  buildFailureHeadline,
   cancelCloudBuild,
   deployToCloud,
   formatBuildState,
   formatBuildSummary,
   formatLogLines,
   hostFor,
+  hostNote,
   Interrupted,
   parseBuildView,
   parseSseFrames,
@@ -457,5 +459,28 @@ describe("the CLI end to end, building from source", () => {
     } finally {
       cloud.stop();
     }
+  });
+});
+
+describe("failure headline and host note", () => {
+  test("progress lines never headline a failure", () => {
+    expect(buildFailureHeadline("hello.js parsed\nhello.js generated IR\nthe compile did not finish")).toBe(
+      "the compile did not finish",
+    );
+  });
+  test("the compiler's reason wins over progress lines", () => {
+    expect(buildFailureHeadline("parsed\ngenerated IR\nError: unsupported syntax at index.js:3")).toBe(
+      "Error: unsupported syntax at index.js:3",
+    );
+    expect(buildFailureHeadline("[12ms] parsed\nthe compile timed out after 55 s")).toBe(
+      "the compile timed out after 55 s",
+    );
+  });
+  test("an empty message has a placeholder", () => {
+    expect(buildFailureHeadline(undefined)).toBe("no reason given");
+  });
+  test("only sproutboat.app names carry the not-routed note", () => {
+    expect(hostNote("https://hello.baronunread.sproutboat.app")).toContain("not publicly routed");
+    expect(hostNote("https://hello.example.com")).toBeUndefined();
   });
 });
