@@ -34,13 +34,6 @@ export function buildFailureHeadline(message: string | undefined): string {
   return (reasons.at(-1) ?? real.at(-1) ?? lines[0])!;
 }
 
-/** The printed address of an app. *.sproutboat.app names have no public DNS or certificate yet (docs/app-hostnames.md in the Cloud repo). */
-export function hostNote(url: string): string | undefined {
-  return /^https:\/\/[^/]+\.sproutboat\.app(\/|$)/.test(url)
-    ? "not publicly routed yet: the name has no DNS record or certificate"
-    : undefined;
-}
-
 export const hostFor = (project: string, team: string): string => `${project}.${team}.sproutboat.app`;
 
 export type AssetBundle = {
