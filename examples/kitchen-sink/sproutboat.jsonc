@@ -5,7 +5,7 @@
   // The source awaits every binding, so it also runs on 2026-11-18, which service
   // bindings between Cloud apps need. The standalone harness stays on this date
   // until the async R2 binding has createUploadUrl and createDownloadUrl.
-  "compatibility_date": "2026-08-26",
+  "compatibility_date": "2026-11-18",
 
   // Every binding Sproutboat supports, in one app.
   "vars": {
