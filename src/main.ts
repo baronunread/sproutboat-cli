@@ -28,7 +28,16 @@ import {
   storeGivenKey,
   type CloudIo,
 } from "./cloud";
-import { buildAssetBundle, CLOUD_PROJECT_RE, compileModule, deployToCloud, hostFor } from "./cloud-deploy";
+import {
+  buildAndDeploy,
+  buildAssetBundle,
+  CLOUD_PROJECT_RE,
+  compileModule,
+  deployToCloud,
+  formatKiB,
+  hostFor,
+  Interrupted,
+} from "./cloud-deploy";
 import { hostname as osHostname, platform as osPlatform, arch as osArch } from "node:os";
 import { CLI_NAME, COMMANDS, helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
 import { notifyIfOutdated } from "./update-check";
@@ -676,7 +685,7 @@ async function deploy(args: string[]) {
   const kind = await deployKind(targetUrl, dryRun);
   if (kind === "cloud") {
     if (args.includes("--artifact"))
-      fail("--artifact deploys a prebuilt Community artifact; the Cloud takes --module <file.so>");
+      fail("--artifact deploys a prebuilt Community artifact; the Cloud builds your source: run deploy without it");
     await guard(() => deployCloud(args, targetUrl, flags));
     return;
   }
@@ -1057,48 +1066,51 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     );
 
   const assets = project.config.assets ? buildAssetBundle(project.directory, project.config.assets) : undefined;
+  // Regular deploys build in the Cloud from the bundled source. --module (a prebuilt module) and --sproutd with
+  // --generation (compile here) are the operator paths; the Cloud refuses a module from a team key.
   let modulePath = flags["--module"];
-  const compiled = modulePath === undefined;
-  if (modulePath === undefined) {
+  const compiled =
+    modulePath === undefined && Boolean(flags["--sproutd"] ?? flags["--generation"] ?? process.env.SPROUTBOAT_SPROUTD);
+  const fromSource = modulePath === undefined && !compiled;
+  if (compiled) {
     modulePath = resolve(tmpdir(), `sproutboat-${name}-${process.pid}.so`);
-    if (dryRun && !(flags["--sproutd"] ?? process.env.SPROUTBOAT_SPROUTD)) {
-      io.warn("! no --module and no --sproutd: a real deploy would stop here (there is no hosted compile service yet)");
-    } else {
-      console.log(dim("Compiling the module (sproutd)…"));
-      await compileModule({
-        project: name,
-        emit: () => emitStandaloneUnit(directory),
-        sproutd: flags["--sproutd"] ?? process.env.SPROUTBOAT_SPROUTD,
-        generation: flags["--generation"] ?? process.env.SPROUTBOAT_GENERATION,
-        out: modulePath,
-        bun: process.versions.bun ? process.execPath : (Bun.which("bun") ?? "bun"),
-      });
-    }
-  } else if (!existsSync(modulePath)) fail(`no such module: ${modulePath}`);
+    console.log(dim("Compiling the module (sproutd)…"));
+    await compileModule({
+      project: name,
+      emit: () => emitStandaloneUnit(directory),
+      sproutd: flags["--sproutd"] ?? process.env.SPROUTBOAT_SPROUTD,
+      generation: flags["--generation"] ?? process.env.SPROUTBOAT_GENERATION,
+      out: modulePath,
+      bun: process.versions.bun ? process.execPath : (Bun.which("bun") ?? "bun"),
+    });
+  } else if (modulePath !== undefined && !existsSync(modulePath)) fail(`no such module: ${modulePath}`);
 
   console.log(`app       ${bold(name)}`);
   console.log(`team      ${team}${session ? "" : dim("  (not resolved)")}`);
   console.log(`endpoint  ${apiUrl}`);
   console.log(`route     https://${hosts[0]}`);
   if (assets) console.log(`assets    ${assets.files} files`);
+  if (fromSource) console.log(`build     in the Cloud, from your bundled source`);
   if (dryRun) {
     console.log("\n--dry-run: not uploading.");
+    if (fromSource) console.log(dim("  A real deploy bundles your source, uploads it and has the Cloud build it."));
+    if (compiled) rmSync(modulePath!, { force: true });
     return;
   }
-  try {
-    const result = await deployToCloud(
-      {
-        apiUrl,
-        token: session!.token,
-        tokenFromEnv: session!.source !== "stored login",
-        project: name,
-        hosts,
-        modulePath,
-        assets,
-        noWait: args.includes("--no-wait"),
-      },
-      io,
-    );
+  const tokenFromEnv = session!.source !== "stored login";
+  const noWait = args.includes("--no-wait");
+  const printResult = (result: {
+    created: boolean;
+    generation: number | undefined;
+    url: string | undefined;
+    applied: boolean | "skipped";
+    buildId?: string;
+  }) => {
+    if (result.generation === undefined) {
+      console.log(`\n${leaf("🌱")} ${bold(leaf(`Build queued for ${name}`))}`);
+      console.log(dim(`  status  ${apiUrl}/v1/builds/${result.buildId}`));
+      return;
+    }
     console.log(`\n${leaf("🌱")} ${bold(leaf(`${result.created ? "Created" : "Updated"} ${name}`))}`);
     if (result.url) console.log(`  ${bold(result.url)}`);
     console.log(dim(`  generation ${result.generation}  ·  team ${team}`));
@@ -1107,8 +1119,49 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
         `generation ${result.generation} is saved but no host has applied it after 120 s; it applies when a host is available (check with: sproutboat whoami, or the dashboard)`,
       );
     }
+  };
+  if (fromSource) {
+    const sourcePath = await emitStandaloneUnit(directory);
+    console.log(`  Bundling   ${cfg.main} (${formatKiB(Bun.file(sourcePath).size)})`);
+    const controller = new AbortController();
+    const interrupt = () => controller.abort();
+    process.once("SIGINT", interrupt);
+    try {
+      const result = await buildAndDeploy(
+        {
+          apiUrl,
+          token: session!.token,
+          tokenFromEnv,
+          project: name,
+          hosts,
+          sourcePath,
+          cli: { version: CLI_VERSION },
+          assets,
+          noWait,
+        },
+        io,
+        controller.signal,
+      );
+      printResult(result);
+    } catch (error) {
+      if (error instanceof Interrupted) {
+        console.error(error.message);
+        process.exit(130);
+      }
+      throw error;
+    } finally {
+      process.off("SIGINT", interrupt);
+    }
+    return;
+  }
+  try {
+    const result = await deployToCloud(
+      { apiUrl, token: session!.token, tokenFromEnv, project: name, hosts, modulePath: modulePath!, assets, noWait },
+      io,
+    );
+    printResult(result);
   } finally {
-    if (compiled) rmSync(modulePath, { force: true });
+    if (compiled) rmSync(modulePath!, { force: true });
   }
 }
 

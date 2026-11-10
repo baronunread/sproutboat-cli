@@ -167,6 +167,8 @@ export function authHeaders(token: string) {
 export function explainApiFailure(status: number, text: string, fromEnv: boolean): string {
   const body = parseBody(text);
   const detail = errorText(body, status);
+  if (status === 403 && body?.error === "module-upload-disabled")
+    return "modules are built by the Cloud; run `sproutboat deploy` without --module";
   if (status === 401)
     return fromEnv
       ? "SPROUTBOAT_API_TOKEN was rejected (invalid, expired or revoked); create a new key in Settings, API keys"

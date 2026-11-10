@@ -130,7 +130,7 @@ export const COMMANDS: readonly Command[] = [
     args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] [--api-url <url>] [--account <team>] [--module <file.so>] [--sproutd <dir> --generation <dir>]",
     brief: "[project-dir] [--dry-run]",
     summary:
-      "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores. On a Sproutboat Cloud endpoint (the default, https://dash.sproutboat.com) it uploads a compiled module (--module, or compiled with --sproutd and --generation) and the assets by hash, writes the app, waits for a host to apply it and prints https://<app>.<team>.sproutboat.app; logged out in a terminal it starts the login, with no terminal it needs SPROUTBOAT_API_TOKEN.",
+      "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores. On a Sproutboat Cloud endpoint (the default, https://dash.sproutboat.com) it bundles the project, uploads the source by sha256 (skipped when unchanged) and the assets by hash, has the Cloud build it while streaming the build log (Ctrl-C cancels the build), waits for a host to apply the generation the build wrote and prints https://<app>.<team>.sproutboat.app; --no-wait returns once the build is accepted and prints /v1/builds/<id>, and --dry-run says it would build in the Cloud. --module and --sproutd with --generation are the operator paths (an uploaded or locally compiled module, refused for team keys); regular deploys do not need them; logged out in a terminal it starts the login, with no terminal it needs SPROUTBOAT_API_TOKEN.",
   },
   {
     name: "versions",
@@ -240,7 +240,8 @@ export const ENV_VARS: readonly EnvVar[] = [
   },
   {
     name: "SPROUTBOAT_SPROUTD",
-    purpose: "sproutd checkout whose compile-app turns the app into a Cloud module (same as --sproutd).",
+    purpose:
+      "Operators only: sproutd checkout whose compile-app turns the app into a Cloud module (same as --sproutd). Regular deploys are built by the Cloud and do not need it.",
   },
   { name: "SPROUTBOAT_GENERATION", purpose: "Built sproutd generation to compile against (same as --generation)." },
   { name: "SPROUTBOAT_ZIG", purpose: "Path to a Zig binary to use instead of downloading the pinned one." },

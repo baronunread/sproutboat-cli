@@ -107,14 +107,30 @@ preselects the team on the approval page.
   prompt. Precedence is `--account`, the config field, then the environment
   variable. A key from the environment belongs to one team, so a different
   `account` is an error.
-- **Compile.** A Cloud app is a compiled module. Until there is a hosted compile
-  service, supply one: `deploy --module app.so`, or compile on this machine with
-  `--sproutd <checkout> --generation <built generation>` (or
-  `SPROUTBOAT_SPROUTD` and `SPROUTBOAT_GENERATION`).
+- **Build.** The Cloud builds your app. `deploy` bundles the project here, uploads
+  that one file by its sha256 (it skips the upload when the Cloud already has
+  it), asks the Cloud to build it and streams the build log:
+
+  ```
+    Bundling   src/index.js (212 KiB)
+    Uploading  source a3f1c9d2e044 (212 KiB)
+    Building   queued (position 1)
+    | porffor: compiled in 1.0 s
+  ✓ Built in 4.1 s · peak memory 742 MB (cap 1200 MB)
+  ```
+
+  An identical build is answered from the Cloud's cache. Ctrl-C cancels the
+  build. `--no-wait` returns once the build is accepted and prints
+  `/v1/builds/<id>`. A build that fails prints the reason and exits 1; a source
+  is limited to 8 MiB. `--module app.so` and `--sproutd` with `--generation`
+  are operator paths for a prebuilt or locally compiled module; a team key is
+  refused with "modules are built by the Cloud", and regular deploys never need
+  them.
 - **Result.** The first deploy creates the app (`Created`), later ones say
   `Updated`. The app is served at `https://<app>.<team>.sproutboat.app`, and the
   deploy waits until a host has applied the generation it printed.
-  `--dry-run` builds and prints the plan; `--no-wait` skips the wait.
+  `--dry-run` prints the plan and says it would build in the Cloud, without
+  uploading; `--no-wait` skips the wait.
 - **Not sent yet.** Bindings (KV, D1, R2, queues, Durable Objects, services),
   cron triggers and secrets in `sproutboat.jsonc` are not sent to the Cloud by
   the CLI yet; the deploy warns and the app runs without them. Static assets are
