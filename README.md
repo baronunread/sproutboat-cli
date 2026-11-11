@@ -70,7 +70,8 @@ npm i -g sproutboat       # then: sproutboat init, sproutboat whoami, ...
 
 `login` is one-time. It writes the credential to `credentials.json` in the user
 config directory (mode 0600), keyed by API URL, so you can hold logins for
-several instances at once. The directory follows Wrangler: `SPROUTBOAT_CONFIG_DIR`
+several instances at once. Profile names and the default profile are in `profiles.json` beside it;
+`credentials.json` keeps the format older CLIs read, so projects pinned to an older version keep working. The directory follows Wrangler: `SPROUTBOAT_CONFIG_DIR`
 or `XDG_CONFIG_HOME` if set, else `~/Library/Preferences/sproutboat` on macOS and
 `~/.config/sproutboat` elsewhere (the old macOS place is still read).
 

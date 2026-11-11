@@ -108,7 +108,7 @@ export const COMMANDS: readonly Command[] = [
     group: "Develop",
     emoji: "⚡",
     short: "Run the app locally, rebuilding on save",
-    args: "[project-dir] [--port <n>] [--no-watch] [--env <name>] [--env-file <file>]...",
+    args: "[project-dir] [--port <n>] [--no-watch] [-e, --env <name>] [--env-file <file>]...",
     brief: "[project-dir]",
     summary:
       "Run the project on this machine with local storage, rebuilding on save. Secrets come from .dev.vars or the .env files (never both), as in Wrangler; a declared secret with no value is a warning.",
@@ -222,7 +222,7 @@ export const COMMANDS: readonly Command[] = [
     args: "[--api-url <url>] [--token <token>] [--account <team>]",
     brief: "",
     summary:
-      "Sign in. On the Cloud: the device-code flow (RFC 8628), which prints a code and a link, opens the browser when it can, and stores an account API key named `CLI on <hostname>` for the team you approve (--account preselects it). Elsewhere the browser flow, or store <token> for <url> directly.",
+      "Sign in, as the profile named by --profile (the first login makes `default`). On the Cloud: the device-code flow (RFC 8628), which prints a code and a link, opens the browser when it can, and stores an account API key named `CLI on <hostname>` for the team you approve (--account preselects it). Elsewhere the browser flow, or store <token> for <url> directly.",
   },
   {
     name: "logout",
@@ -232,17 +232,27 @@ export const COMMANDS: readonly Command[] = [
     args: "[--api-url <url>] [--account <team>]",
     brief: "",
     summary:
-      "Forget the stored credential for the active endpoint, or for <url>. On the Cloud it also revokes the key on the server (the default team, or --account).",
+      "Forget the stored credential of the profile in use, or for <url>. On the Cloud it also revokes the key on the server (the default team, or --account).",
   },
   {
     name: "whoami",
     group: "Account",
     emoji: "👤",
-    short: "Show the endpoint and account you use",
+    short: "Show the profile and account you use",
     args: "[--api-url <url>] [--account <team>]",
     brief: "",
     summary:
-      "Show the active endpoint and the account or team the credential belongs to (exits 1 when not logged in or the key is rejected).",
+      "Show the profile and endpoint in use, and the account or team the credential belongs to (exits 1 when not logged in or the key is rejected).",
+  },
+  {
+    name: "profile",
+    group: "Account",
+    emoji: "🪪",
+    short: "List login profiles or pick the default",
+    args: "<list | use <name>>",
+    brief: "<list | use>",
+    summary:
+      "A profile is an endpoint, its stored credential and a default team. `list` shows them and marks the default, which a command uses when nothing else names one; `use <name>` makes another profile the default. `login --profile <name>` creates one, and `--profile <name>` or SPROUTBOAT_PROFILE picks one for a single command.",
   },
   {
     name: "complete",
@@ -258,7 +268,16 @@ export const COMMANDS: readonly Command[] = [
 export type EnvVar = { name: string; purpose: string };
 
 export const ENV_VARS: readonly EnvVar[] = [
-  { name: "SPROUTBOAT_API_URL", purpose: "Control-plane URL. Overrides the saved active endpoint." },
+  {
+    name: "SPROUTBOAT_API_URL",
+    purpose:
+      "Control-plane URL. Overrides the active profile's endpoint; it must match SPROUTBOAT_PROFILE when both are set.",
+  },
+  {
+    name: "SPROUTBOAT_PROFILE",
+    purpose:
+      "Stored login profile to use, like --profile (which wins). Its endpoint and credential apply unless --api-url or SPROUTBOAT_API_TOKEN overrides them.",
+  },
   {
     name: "SPROUTBOAT_API_TOKEN",
     purpose:
@@ -424,7 +443,24 @@ export type GlobalFlag = { flags: string; purpose: string; type: string };
 
 /** Flags every command accepts, listed by `sproutboat --help`. */
 export const GLOBAL_FLAGS: readonly GlobalFlag[] = [
+  { flags: "-c, --config", purpose: "Path to the project's config file", type: "string" },
+  { flags: "    --cwd", purpose: "Run as if sproutboat was started in this directory", type: "string" },
+  {
+    flags: "-e, --env",
+    purpose: "Environment for `dev`: selects the .dev.vars.<name> and .env.<name> files",
+    type: "string",
+  },
+  {
+    flags: "    --env-file",
+    purpose: "Path to an .env file to load; repeat it, and later files override earlier ones",
+    type: "array",
+  },
   { flags: "-h, --help", purpose: "Show help", type: "boolean" },
+  {
+    flags: "    --profile",
+    purpose: "Use a stored login profile (default: SPROUTBOAT_PROFILE, else the active profile)",
+    type: "string",
+  },
   { flags: "-v, --version", purpose: "Show version number", type: "boolean" },
 ];
 

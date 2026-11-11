@@ -23,6 +23,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseProjectConfig } from "./account-field";
+import { locateProject } from "./global-flags";
 import {
   mergeEntries,
   MissingSecretsError,
@@ -108,10 +109,15 @@ export type RunPlan = {
 /** Resolve what to launch and with which environment, or throw. Starts nothing. */
 export async function planRun(
   args: RunArgs,
-  io: { cwd: string; inherited: Record<string, string | undefined> },
+  io: { cwd: string; inherited: Record<string, string | undefined>; config?: string },
 ): Promise<RunPlan> {
-  const directory = resolve(io.cwd, args.dir ?? ".");
-  const configPath = resolve(directory, "sproutboat.jsonc");
+  let located: { directory: string; configPath: string };
+  try {
+    located = locateProject(args.dir, io.config, io.cwd);
+  } catch (error) {
+    throw new RunError(error instanceof Error ? error.message : String(error));
+  }
+  const { directory, configPath } = located;
   let name: string | undefined;
   const declared: string[] = [];
   if (existsSync(configPath)) {
@@ -121,7 +127,7 @@ export async function planRun(
     declared.push(...(parsed.value.secrets ?? []));
   } else if (args.binary === undefined) {
     throw new RunError(
-      `no sproutboat.jsonc found in ${directory}; pass --binary <file> to run a binary without a project`,
+      `no ${io.config === undefined ? "sproutboat.jsonc" : "config file"} found in ${io.config === undefined ? directory : configPath}; pass --binary <file> to run a binary without a project`,
     );
   }
   for (const required of args.require) if (!declared.includes(required)) declared.push(required);

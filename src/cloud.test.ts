@@ -68,7 +68,7 @@ describe("credentials", () => {
     expect((await stat(join(dir, "sproutboat"))).mode & 0o777).toBe(0o700);
   });
 
-  test("several teams per endpoint, the newest is the default, and the file still carries a plain token", async () => {
+  test("several teams per profile, the newest is the default, and the file carries a plain token", async () => {
     await saveTeam("https://dash.test", "acme", team("acme"));
     await saveTeam("https://dash.test", "beta", team("beta"));
     const profile = await savedProfile("https://dash.test");
@@ -77,7 +77,8 @@ describe("credentials", () => {
     expect(Object.keys(profile?.teams ?? {})).toEqual(["acme", "beta"]);
     const raw = JSON.parse(await Bun.file(join(dir, "sproutboat", "credentials.json")).text());
     expect(raw.version).toBe(1);
-    expect(raw.profiles["https://dash.test"].token).toBe("sbk_beta");
+    expect(raw.activeApiUrl).toBe("https://dash.test");
+    expect(raw.profiles["https://dash.test"]).toMatchObject({ team: "beta", token: "sbk_beta" });
   });
 
   test("forgetting the default team promotes another; the last one removes the endpoint", async () => {
@@ -101,7 +102,13 @@ describe("credentials", () => {
         profiles: { "https://old.test": { token: "t" } },
       }),
     );
-    expect(await savedProfile("https://old.test")).toEqual({ token: "t", kind: undefined, team: undefined, teams: {} });
+    expect(await savedProfile("https://old.test")).toEqual({
+      apiUrl: "https://old.test",
+      token: "t",
+      kind: undefined,
+      team: undefined,
+      teams: {},
+    });
     await saveToken("https://old.test", "t2", "community");
     expect((await savedProfile("https://old.test"))?.kind).toBe("community");
   });
