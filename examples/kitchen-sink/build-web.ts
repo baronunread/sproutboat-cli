@@ -59,9 +59,12 @@ export function buildWebUi(): string {
 
   const sourceText = readFileSync(join(HERE, config.main), "utf8");
   const regions = extractRegions(sourceText);
-  for (const name of ["kv", "d1", "r2", "chat", "queue", "service", "secrets"]) {
+  for (const name of ["timing", "kv", "d1", "r2", "chat", "queue", "service", "secrets"]) {
     if (!regions.get(name)) throw new Error(`src/index.js has no \`// #region ${name}\` block`);
   }
+  // The handlers that time themselves are shown with the two helpers they call.
+  for (const name of ["kv", "d1"]) regions.set(name, `${regions.get("timing")}\n\n${regions.get(name)}`);
+  regions.delete("timing");
 
   const bindings: Array<{ binding: string; type: string }> = [
     ...(config.kv_namespaces ?? []).map((binding) => ({ binding, type: "KV" })),

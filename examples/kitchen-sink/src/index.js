@@ -86,7 +86,7 @@ export class ChatRoom {
   }
 
   async webSocketMessage(ws, message) {
-    const started = performance.now();
+    const started = clock();
     let frame = null;
     try {
       frame = JSON.parse(String(message));
@@ -115,7 +115,7 @@ export class ChatRoom {
       text,
       at: entry.at,
       sent: frame.sent,
-      ms: performance.now() - started,
+      ms: clock() - started,
     });
   }
 
@@ -198,10 +198,21 @@ async function sessionNames(env) {
 
 // ---------------------------------------------------------------------------
 // Dashboard API (/api/*). Every reply carries how long the handler ran, measured
-// here with performance.now(), in the body (`ms`) and in a Server-Timing header.
+// here with clock(), in the body (`ms`) and in a Server-Timing header.
 // ---------------------------------------------------------------------------
 
-const ms2 = (t0) => Math.round((performance.now() - t0) * 100) / 100;
+// #region timing
+// Sub-millisecond clock. Date.now() is only the fallback for a runtime without performance.
+function clock() {
+  try {
+    return performance.now();
+  } catch {
+    return Date.now();
+  }
+}
+
+const ms2 = (t0) => Math.round((clock() - t0) * 100) / 100;
+// #endregion
 
 function timed(data, status, t0) {
   const ms = ms2(t0);
@@ -217,10 +228,10 @@ function timed(data, status, t0) {
 // #region kv
 async function kvIncrement(env) {
   const ops = [];
-  let t = performance.now();
+  let t = clock();
   const before = Number((await env.SESSIONS.get("counter:home")) || 0);
   ops.push({ op: "GET", value: before, ms: ms2(t) });
-  t = performance.now();
+  t = clock();
   await env.SESSIONS.put("counter:home", String(before + 1));
   ops.push({ op: "PUT", value: before + 1, ms: ms2(t) });
   return { n: before + 1, ops };
@@ -232,12 +243,12 @@ async function guestbookSign(env, name, msg) {
   const statements = [];
   const at = new Date().toISOString();
   const insert = "INSERT INTO guestbook (name, msg, at) VALUES (?, ?, ?)";
-  let t = performance.now();
+  let t = clock();
   await env.DB.prepare(insert).bind(name, msg, at).run();
   statements.push({ sql: insert, binds: [name, msg, at], ms: ms2(t) });
   // The demo keeps the newest 200 rows.
   const trim = "DELETE FROM guestbook WHERE id <= (SELECT max(id) FROM guestbook) - 200";
-  t = performance.now();
+  t = clock();
   await env.DB.prepare(trim).run();
   statements.push({ sql: trim, binds: [], ms: ms2(t) });
   return statements;
@@ -245,7 +256,7 @@ async function guestbookSign(env, name, msg) {
 
 async function guestbookList(env) {
   const sql = "SELECT id, name, msg, at FROM guestbook ORDER BY id DESC LIMIT 5";
-  const t = performance.now();
+  const t = clock();
   const res = await env.DB.prepare(sql).all();
   return { rows: res.results, statement: { sql, binds: [], ms: ms2(t), rows_read: res.meta.rows_read } };
 }
@@ -255,10 +266,11 @@ async function guestbookList(env) {
 async function filesList(env) {
   const listed = await env.UPLOADS.list({ prefix: "files/", limit: 100 });
   let bytes = 0;
-  const objects = listed.objects.map((o) => {
+  const objects = [];
+  for (const o of listed.objects) {
     bytes += o.size;
-    return { name: o.key.slice(6), size: o.size, uploaded: o.uploaded, etag: o.httpEtag };
-  });
+    objects.push({ name: o.key.slice(6), size: o.size, uploaded: o.uploaded, etag: o.httpEtag });
+  }
   return { objects, bytes, truncated: listed.truncated };
 }
 
@@ -290,7 +302,7 @@ async function feed(env) {
 async function quote(env) {
   const res = await env.PEER.fetch(new Request("https://peer/random"));
   if (res.status !== 200) throw new Error("quote-service answered " + res.status);
-  return res.json();
+  return JSON.parse(await res.text());
 }
 // #endregion
 
@@ -298,14 +310,16 @@ async function quote(env) {
 // Report whether each declared secret has a value. Reading a missing secret can
 // throw, so that counts as unset. The value itself never leaves this function.
 function secretStatus(env, names) {
-  return names.map((name) => {
+  const out = [];
+  for (const name of names) {
     let set = false;
     try {
       const value = env[name];
       set = !!value && String(value).length > 0;
     } catch {}
-    return { name, set };
-  });
+    out.push({ name, set });
+  }
+  return out;
 }
 // #endregion
 
@@ -315,10 +329,16 @@ function cleanFileName(raw) {
   let out = "";
   const text = String(raw || "").trim();
   for (let i = 0; i < text.length && out.length < 64; i++) {
-    const c = text[i];
+    const code = text.charCodeAt(i);
+    // a-z, A-Z, 0-9, dot, dash, underscore; anything else becomes an underscore
     const ok =
-      (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9") || c === "." || c === "-" || c === "_";
-    out += ok ? c : "_";
+      (code >= 97 && code <= 122) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 48 && code <= 57) ||
+      code === 46 ||
+      code === 45 ||
+      code === 95;
+    out += ok ? text[i] : "_";
   }
   return out;
 }
@@ -490,8 +510,8 @@ async function api(request, env, url, path, t0) {
 }
 
 export default {
-  async fetch(request, env, _ctx) {
-    const t0 = performance.now();
+  async fetch(request) {
+    const t0 = clock();
     const url = new URL(request.url);
     const path = url.pathname;
     await ensureSchema(env);
@@ -679,8 +699,8 @@ export default {
   },
 
   // cron */1: prune expired sessions, record a heartbeat
-  async scheduled(event, env, _ctx) {
-    const started = performance.now();
+  async scheduled(event) {
+    const started = clock();
     await ensureSchema(env);
     const now = Date.now();
     const keys = await sessionNames(env);
@@ -704,11 +724,11 @@ export default {
   },
 
   // queue consumer for EMAILS: pretend to send, log to D1
-  async queue(batch, env, _ctx) {
+  async queue(batch) {
     await ensureSchema(env);
     for (let i = 0; i < batch.messages.length; i++) {
       const m = batch.messages[i];
-      const started = performance.now();
+      const started = clock();
       await env.DB.prepare("INSERT INTO email_log (note_id, sent_at) VALUES (?, ?)")
         .bind(Number(m.body && m.body.noteId) || 0, new Date().toISOString())
         .run();

@@ -10,15 +10,17 @@
 import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { preludePath, wrapNativeFetchHandler, type Bindings } from "../../src/compile";
+import { loadPrelude, wrapNativeFetchHandler, type Bindings } from "../../src/compile";
 import { parseConfig } from "../../src/config";
 import { createBroker, listen } from "../../src/broker";
 import { walkAssets, type AssetManifest } from "../../src/assets";
 import { buildWebUi } from "./build-web";
+import { ensurePorffor } from "../../src/porffor-toolchain";
+import { ensureBearssl } from "../../src/bearssl";
 
 const HERE = import.meta.dir;
 const CLI = join(HERE, "../..");
-const PORF = join(CLI, "node_modules/porffor/runtime/index.js");
+const PORF = join(await ensurePorffor(), "runtime/index.js");
 const workdir = mkdtempSync(join(tmpdir(), "sb-kitchen-serve-"));
 
 const cfg = parseConfig(readFileSync(join(HERE, "sproutboat.jsonc"), "utf8"));
@@ -48,7 +50,9 @@ const bindings: Bindings = {
   queues: c.queues ?? [],
   analytics: c.analytics_engine_datasets ?? [],
   do: Object.entries(c.durable_objects ?? {}).map(([binding, className]) => ({ binding, className })),
+  services: c.services ?? [],
   crons: c.triggers?.crons ?? [],
+  ratelimiters: c.ratelimiters ?? [],
   assets: c.assets?.binding ?? "",
 };
 const vars = { ...c.vars, QUOTE_URL: `http://${upstreamHost}/random` };
@@ -70,14 +74,21 @@ if (c.assets) {
   writeFileSync(join(workdir, "assets.json"), JSON.stringify(assetManifest, null, 2));
 }
 
-const prelude = readFileSync(preludePath, "utf8");
+const prelude = await loadPrelude("broker");
 const gen = join(workdir, "sprout.generated.js");
 const bin = join(workdir, "sprout.bin");
 writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"), "utf8"), prelude, vars, bindings));
 
+// crypto.subtle needs BearSSL linked in, as in harness.ts.
+const tls = await ensureBearssl({ target: "host" });
 console.log("compiling sprout (host native)…");
 const compile = Bun.spawnSync(["node", PORF, "native", gen, "-o", bin], {
-  env: { ...process.env, PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}` },
+  env: {
+    ...process.env,
+    PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}`,
+    SB_EXTRA_CFLAGS: `-I ${tls.includeDir}`,
+    SB_EXTRA_LINK: tls.objects.slice(0, -1).join(" "),
+  },
   stdout: "pipe",
   stderr: "pipe",
 });
@@ -98,6 +109,10 @@ const broker = createBroker({
   secrets: { ADMIN_TOKEN: "s3cr3t-admin" },
   sproutUrl: `http://127.0.0.1:${sproutPort}/`,
   assetsDir: c.assets ? assetsDir : undefined,
+  // There is no edge here: point the PEER service binding at the stub upstream, which
+  // answers like quote-service. A deployed app reaches the real one through the edge.
+  services: { PEER: "quote-service.local" },
+  edgeUrl: `http://${upstreamHost}/`,
 });
 const brokerServer = listen(broker, "127.0.0.1", 0);
 const sprout = Bun.spawn([bin], {

@@ -390,3 +390,6 @@ kbd{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 
 .log .bad{color:var(--sb-danger-fg)}
 .skip{position:absolute;left:8px;top:-60px;z-index:100;background:var(--sb-raised);padding:8px 12px;border-radius:8px;box-shadow:var(--sb-shadow-float)}
 .sec-line{grid-template-columns:minmax(0,1fr) auto}
+[hidden]{display:none!important}
+.frame{white-space:normal;overflow:visible;text-overflow:clip;min-height:16px}
+.ops{height:104px}

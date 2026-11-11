@@ -453,7 +453,7 @@
   // ---- KV --------------------------------------------------------------------------
   function renderKv(data, withOps) {
     $("#kv-n").textContent = Number(data.n).toLocaleString("en-US");
-    $("#kv-keys").textContent = String(data.keys);
+    $("#kv-keys").textContent = data.keys + (data.keys === 1 ? " key" : " keys");
     if (!withOps) return;
     var ul = $("#kv-ops");
     clear(ul);
@@ -918,8 +918,15 @@
     }
   });
 
+  var polls = 0;
   setInterval(function () {
-    if (!document.hidden) queueLoad(false);
+    if (document.hidden) return;
+    queueLoad(false);
+    // The request count moves with every visitor, so refresh it now and then.
+    if (++polls % 3 === 0)
+      api("/api/info").then(function (res) {
+        if (res.ok && res.data.requests !== null) $("#m-req").textContent = res.data.requests.toLocaleString("en-US");
+      });
   }, 5000);
 
   // Cron countdown, for expressions of the form */N * * * *.
