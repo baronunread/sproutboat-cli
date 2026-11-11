@@ -150,10 +150,11 @@ test("login --profile makes a new profile and leaves the default alone", async (
   expect(result.stdout).toContain('stored as the profile "ci"');
   expect(result.stdout).toContain('the default profile stays "default"');
   const file = JSON.parse(await readFile(join(configDir, "sproutboat", "credentials.json"), "utf8"));
-  expect(file.version).toBe(2);
-  expect(file.activeProfile).toBe("default");
-  expect(file.profiles.ci.apiUrl).toBe(B);
-  expect(await readFile(join(configDir, "sproutboat", "credentials.v1.json"), "utf8")).toContain('"version":1');
+  expect(file.version).toBe(1);
+  expect(file.activeApiUrl).toBe(A);
+  const names = JSON.parse(await readFile(join(configDir, "sproutboat", "profiles.json"), "utf8"));
+  expect(names.activeProfile).toBe("default");
+  expect(names.profiles.ci.endpoint).toBe(B);
   expect((await cli(["whoami", "--profile", "ci"])).stdout).toContain("account   bob");
   const out = await cli(["logout", "--profile", "ci"]);
   expect(out.stdout).toContain("forgot the credential");

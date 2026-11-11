@@ -76,9 +76,9 @@ describe("credentials", () => {
     expect(profile?.token).toBe("sbk_beta");
     expect(Object.keys(profile?.teams ?? {})).toEqual(["acme", "beta"]);
     const raw = JSON.parse(await Bun.file(join(dir, "sproutboat", "credentials.json")).text());
-    expect(raw.version).toBe(2);
-    expect(raw.activeProfile).toBe("default");
-    expect(raw.profiles.default).toMatchObject({ apiUrl: "https://dash.test", token: "sbk_beta" });
+    expect(raw.version).toBe(1);
+    expect(raw.activeApiUrl).toBe("https://dash.test");
+    expect(raw.profiles["https://dash.test"]).toMatchObject({ team: "beta", token: "sbk_beta" });
   });
 
   test("forgetting the default team promotes another; the last one removes the endpoint", async () => {

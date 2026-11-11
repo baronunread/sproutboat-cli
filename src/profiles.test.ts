@@ -72,7 +72,7 @@ describe("migrating the credentials written before profiles", () => {
     expect((await listProfiles()).map((entry) => entry.name)).toEqual(["localhost-8787", "dash.sproutboat.com"]);
   });
 
-  test("reading changes nothing on disk; the first write keeps the old file and writes version 2", async () => {
+  test("reading changes nothing on disk; a write keeps credentials.json version 1 and adds profiles.json", async () => {
     const original = v1File(LOCAL);
     await writeFile(join(directory, "credentials.json"), original);
     await listProfiles();
@@ -80,18 +80,17 @@ describe("migrating the credentials written before profiles", () => {
     expect(await readdir(directory)).toEqual(["credentials.json"]);
 
     await saveToken("https://third.test", "t3");
-    expect(await readFile(join(directory, "credentials.v1.json"), "utf8")).toBe(original);
     const written = JSON.parse(await readFile(join(directory, "credentials.json"), "utf8"));
-    expect(written.version).toBe(2);
-    expect(written.activeProfile).toBe("default");
-    expect(Object.keys(written.profiles)).toEqual(["default", "dash.sproutboat.com", "third.test"]);
-
-    // a later write does not replace the backup with something newer
-    await saveToken("https://fourth.test", "t4");
-    expect(await readFile(join(directory, "credentials.v1.json"), "utf8")).toBe(original);
+    expect(written.version).toBe(1);
+    expect(written.activeApiUrl).toBe(LOCAL);
+    expect(Object.keys(written.profiles)).toEqual([LOCAL, CLOUD, "https://third.test"]);
+    const profiles = JSON.parse(await readFile(join(directory, "profiles.json"), "utf8"));
+    expect(profiles.activeProfile).toBe("default");
+    expect(Object.keys(profiles.profiles)).toEqual(["default", "dash.sproutboat.com", "third.test"]);
+    expect((await readdir(directory)).sort()).toEqual(["credentials.json", "profiles.json"]);
   });
 
-  test("a version 2 file round-trips", async () => {
+  test("a stored profile round-trips", async () => {
     await saveToken(CLOUD, "t1", "cloud");
     await saveToken(LOCAL, "t2", "community");
     expect((await listProfiles()).map((entry) => [entry.name, entry.active])).toEqual([
@@ -99,7 +98,7 @@ describe("migrating the credentials written before profiles", () => {
       ["localhost-8787", false],
     ]);
     expect(await activeApiUrl()).toBe(CLOUD);
-    expect(await readdir(directory)).toEqual(["credentials.json"]);
+    expect((await readdir(directory)).sort()).toEqual(["credentials.json", "profiles.json"]);
   });
 
   test("migrateV1 never repoints or drops anything", () => {

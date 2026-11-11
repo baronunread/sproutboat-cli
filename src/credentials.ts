@@ -20,12 +20,20 @@ export type Profile = {
   teams: Record<string, StoredTeam>;
 };
 
+/** A profile without its endpoint: what `credentials.json` keeps per endpoint, and what a profile can carry itself. */
+type Credential = Omit<Profile, "apiUrl">;
+
 /**
- * Version 2 keys the profiles by name. Version 1 (every release up to 0.53) keyed them by endpoint URL and kept a
- * machine-wide `activeApiUrl`; reading one converts it with `migrateV1`, and the file is rewritten as version 2
- * (after saving the old one as `credentials.v1.json`) the first time anything is saved or forgotten.
+ * Storage. Every CLI up to 0.53 reads `credentials.json` as version 1: `activeApiUrl` plus one credential per
+ * endpoint URL. That file keeps exactly that shape forever, so a project that still has an older CLI pinned keeps
+ * authenticating after the newest CLI logs in, logs out or switches profile. Profiles are a second file next to it,
+ * `profiles.json`: a name, the endpoint, and (only when the profile is not the one `credentials.json` holds for that
+ * endpoint) its own credential. Tokens are never copied between the files.
+ *
+ * In memory every profile has its full credential; `holders` says which profile each endpoint's entry in
+ * `credentials.json` belongs to (the one most recently saved or switched to on that endpoint).
  */
-type Credentials = { version: 2; activeProfile?: string; profiles: Record<string, Profile> };
+type Credentials = { activeProfile?: string; profiles: Record<string, Profile>; holders: Record<string, string> };
 
 /** The profile an existing machine-wide active endpoint becomes. */
 export const DEFAULT_PROFILE = "default";
@@ -55,16 +63,17 @@ function parseTeam(value: JsonValue | undefined): StoredTeam | undefined {
   };
 }
 
-function parseProfile(profile: JsonObject | undefined, apiUrl: string | undefined): Profile | undefined {
-  const token = str(profile?.token);
-  if (!profile || token === undefined || apiUrl === undefined) return undefined;
+function parseCredential(value: JsonValue | undefined): Credential | undefined {
+  const input = obj(value);
+  const token = str(input?.token);
+  if (!input || token === undefined) return undefined;
   const teams: Record<string, StoredTeam> = {};
-  for (const [slug, teamValue] of Object.entries(obj(profile.teams) ?? {})) {
+  for (const [slug, teamValue] of Object.entries(obj(input.teams) ?? {})) {
     const team = parseTeam(teamValue);
     if (team) teams[slug] = team;
   }
-  const kind = profile.kind === "cloud" || profile.kind === "community" ? profile.kind : undefined;
-  return { apiUrl, token, kind, team: str(profile.team), teams };
+  const kind = input.kind === "cloud" || input.kind === "community" ? input.kind : undefined;
+  return { token, kind, team: str(input.team), teams };
 }
 
 /** A name for an endpoint that has none: its host, as `dash.sproutboat.com` or `localhost-8787`. */
@@ -86,6 +95,11 @@ export function profileNameForUrl(apiUrl: string, taken: ReadonlySet<string>): s
   return name;
 }
 
+/** The version 1 file as an older CLI reads it. */
+type V1 = { activeApiUrl?: string; endpoints: Record<string, Credential> };
+/** `profiles.json`: `credential` is absent for the profile that `credentials.json` holds for its endpoint. */
+type ProfilesFile = { activeProfile?: string; profiles: Record<string, { endpoint: string; credential?: Credential }> };
+
 /**
  * Today's credentials become profiles. The active endpoint is the `default` profile; every other stored
  * endpoint is named after its host. Nothing is dropped and nothing is repointed: with no active endpoint there is
@@ -93,43 +107,122 @@ export function profileNameForUrl(apiUrl: string, taken: ReadonlySet<string>): s
  */
 export function migrateV1(activeApiUrl: string | undefined, byUrl: Record<string, Profile>): Credentials {
   const profiles: Record<string, Profile> = {};
+  const holders: Record<string, string> = {};
   let activeProfile: string | undefined;
   if (activeApiUrl !== undefined && byUrl[activeApiUrl]) {
     profiles[DEFAULT_PROFILE] = byUrl[activeApiUrl];
+    holders[activeApiUrl] = DEFAULT_PROFILE;
     activeProfile = DEFAULT_PROFILE;
   }
   for (const [apiUrl, profile] of Object.entries(byUrl)) {
     if (apiUrl === activeApiUrl && activeProfile !== undefined) continue;
-    profiles[profileNameForUrl(apiUrl, new Set(Object.keys(profiles)))] = profile;
+    const name = profileNameForUrl(apiUrl, new Set(Object.keys(profiles)));
+    profiles[name] = profile;
+    holders[apiUrl] = name;
   }
-  return { version: 2, activeProfile, profiles };
+  return { activeProfile, profiles, holders };
 }
 
-function parseCredentials(value: JsonValue): { credentials: Credentials; migrated: boolean } | undefined {
+function parseV1(input: JsonObject, rawProfiles: JsonObject): V1 | undefined {
+  const endpoints: Record<string, Credential> = {};
+  for (const [apiUrl, value] of Object.entries(rawProfiles)) {
+    const credential = parseCredential(value);
+    if (!credential) return undefined;
+    endpoints[apiUrl] = credential;
+  }
+  return { activeApiUrl: str(input.activeApiUrl), endpoints };
+}
+
+function parseProfilesFile(text: string | undefined): ProfilesFile | undefined {
+  if (text === undefined) return undefined;
+  let input: JsonObject | undefined;
+  try {
+    input = obj(JSON.parse(text));
+  } catch {
+    return undefined; // unreadable names only: the credentials themselves are in credentials.json
+  }
+  const raw = obj(input?.profiles);
+  if (!input || input.version !== 1 || !raw) return undefined;
+  const profiles: ProfilesFile["profiles"] = {};
+  for (const [name, value] of Object.entries(raw)) {
+    const entry = obj(value);
+    const endpoint = str(entry?.endpoint);
+    if (!entry || endpoint === undefined) continue;
+    profiles[name] = { endpoint, credential: parseCredential(entry.credential) };
+  }
+  return { activeProfile: str(input.activeProfile), profiles };
+}
+
+/** Put the endpoint credentials of `credentials.json` and the profiles of `profiles.json` together. */
+function combine(v1: V1, file: ProfilesFile | undefined): Credentials {
+  if (file === undefined || Object.keys(file.profiles).length === 0) {
+    const byUrl: Record<string, Profile> = {};
+    for (const [apiUrl, credential] of Object.entries(v1.endpoints)) byUrl[apiUrl] = { apiUrl, ...credential };
+    return migrateV1(v1.activeApiUrl, byUrl);
+  }
+  const profiles: Record<string, Profile> = {};
+  const holders: Record<string, string> = {};
+  for (const [name, entry] of Object.entries(file.profiles)) {
+    if (entry.credential) {
+      profiles[name] = { apiUrl: entry.endpoint, ...entry.credential };
+      continue;
+    }
+    const held = v1.endpoints[entry.endpoint];
+    if (!held) continue; // an older CLI logged out of that endpoint
+    profiles[name] = { apiUrl: entry.endpoint, ...held };
+    holders[entry.endpoint] ??= name;
+  }
+  // An endpoint stored by an older CLI after `profiles.json` was written has no profile yet.
+  for (const [apiUrl, credential] of Object.entries(v1.endpoints)) {
+    if (holders[apiUrl] !== undefined) continue;
+    const name = profileNameForUrl(apiUrl, new Set(Object.keys(profiles)));
+    profiles[name] = { apiUrl, ...credential };
+    holders[apiUrl] = name;
+  }
+  // The version 1 file owns "which endpoint is active" (an older CLI changes it); the name only picks among profiles.
+  let activeProfile: string | undefined;
+  if (v1.activeApiUrl !== undefined) {
+    const named = file.activeProfile === undefined ? undefined : profiles[file.activeProfile];
+    if (named && named.apiUrl === v1.activeApiUrl) activeProfile = file.activeProfile;
+    else
+      activeProfile =
+        holders[v1.activeApiUrl] ?? Object.keys(profiles).find((name) => profiles[name]!.apiUrl === v1.activeApiUrl);
+  }
+  return { activeProfile, profiles, holders };
+}
+
+/** Version 2 as pre-release builds of this change wrote it: profiles keyed by name in `credentials.json`. */
+function parsePreRelease(input: JsonObject, rawProfiles: JsonObject): Credentials | undefined {
+  const profiles: Record<string, Profile> = {};
+  for (const [name, value] of Object.entries(rawProfiles)) {
+    const entry = obj(value);
+    const credential = parseCredential(entry);
+    const apiUrl = str(entry?.apiUrl);
+    if (!credential || apiUrl === undefined) return undefined;
+    profiles[name] = { apiUrl, ...credential };
+  }
+  const active = str(input.activeProfile);
+  const activeProfile = active !== undefined && profiles[active] ? active : undefined;
+  return {
+    activeProfile,
+    profiles,
+    holders: activeProfile === undefined ? {} : { [profiles[activeProfile].apiUrl]: activeProfile },
+  };
+}
+
+type Parsed = { credentials: Credentials; preRelease: boolean };
+
+function parseFiles(value: JsonValue, profilesText: string | undefined): Parsed | undefined {
   const input = obj(value);
   const rawProfiles = obj(input?.profiles);
   if (!input || !rawProfiles) return undefined;
-  const profiles: Record<string, Profile> = {};
   if (input.version === 1) {
-    for (const [apiUrl, profileValue] of Object.entries(rawProfiles)) {
-      const profile = parseProfile(obj(profileValue), apiUrl);
-      if (!profile) return undefined;
-      profiles[apiUrl] = profile;
-    }
-    return { credentials: migrateV1(str(input.activeApiUrl), profiles), migrated: true };
+    const v1 = parseV1(input, rawProfiles);
+    return v1 && { credentials: combine(v1, parseProfilesFile(profilesText)), preRelease: false };
   }
   if (input.version !== 2) return undefined;
-  for (const [name, profileValue] of Object.entries(rawProfiles)) {
-    const profileObject = obj(profileValue);
-    const profile = parseProfile(profileObject, str(profileObject?.apiUrl));
-    if (!profile) return undefined;
-    profiles[name] = profile;
-  }
-  const active = str(input.activeProfile);
-  return {
-    credentials: { version: 2, activeProfile: active !== undefined && profiles[active] ? active : undefined, profiles },
-    migrated: false,
-  };
+  const credentials = parsePreRelease(input, rawProfiles);
+  return credentials && { credentials, preRelease: true };
 }
 
 /**
@@ -154,8 +247,12 @@ function legacyCredentialsPath(): string | undefined {
   return legacy === credentialsPath() ? undefined : legacy;
 }
 
+function profilesPath(): string {
+  return resolve(configDirectory(), "profiles.json");
+}
+
 function emptyCredentials(): Credentials {
-  return { version: 2, profiles: {} };
+  return { profiles: {}, holders: {} };
 }
 
 async function readFileOrMissing(path: string): Promise<string | undefined> {
@@ -167,23 +264,32 @@ async function readFileOrMissing(path: string): Promise<string | undefined> {
   }
 }
 
-/** What is on disk. `legacyText` is set when it was a version 1 file, so the first write can keep a copy. */
-type Loaded = { credentials: Credentials; legacyText?: string };
-
-async function readCredentials(): Promise<Loaded> {
+async function readCredentials(): Promise<Credentials> {
   let text = await readFileOrMissing(credentialsPath());
+  // profiles.json only ever sits next to the credentials.json that is in use; the old macOS place never had one.
+  let profilesText = text === undefined ? undefined : await readFileOrMissing(profilesPath());
   if (text === undefined) {
     const legacy = legacyCredentialsPath();
     text = legacy === undefined ? undefined : await readFileOrMissing(legacy);
+    profilesText = undefined;
   }
-  if (text === undefined) return { credentials: emptyCredentials() };
+  if (text === undefined) return emptyCredentials();
+  let parsed: Parsed | undefined;
   try {
-    const parsed = parseCredentials(JSON.parse(text));
-    if (!parsed) return { credentials: emptyCredentials() };
-    return { credentials: parsed.credentials, legacyText: parsed.migrated ? text : undefined };
+    parsed = parseFiles(JSON.parse(text), profilesText);
   } catch {
     throw new Error("could not read local Sproutboat credentials");
   }
+  if (!parsed) return emptyCredentials();
+  if (parsed.preRelease) {
+    // A pre-release build wrote version 2, which no CLI reads: put credentials.json back to version 1 right away.
+    try {
+      await writeCredentials(parsed.credentials);
+    } catch {
+      // read-only config directory: the next write converts it
+    }
+  }
+  return parsed.credentials;
 }
 
 /**
@@ -237,7 +343,7 @@ function activateIfNone(credentials: Credentials, name: string): void {
 export type ProfileSummary = { name: string; active: boolean; profile: Profile };
 
 export async function listProfiles(): Promise<ProfileSummary[]> {
-  const { credentials } = await readCredentials();
+  const credentials = await readCredentials();
   return Object.entries(credentials.profiles).map(([name, profile]) => ({
     name,
     active: name === credentials.activeProfile,
@@ -246,39 +352,40 @@ export async function listProfiles(): Promise<ProfileSummary[]> {
 }
 
 export async function getProfile(name: string): Promise<Profile | undefined> {
-  return (await readCredentials()).credentials.profiles[name];
+  return (await readCredentials()).profiles[name];
 }
 
 /** The machine's default profile: what a command uses when nothing names another one. */
 export async function activeProfileName(): Promise<string | undefined> {
-  return (await readCredentials()).credentials.activeProfile;
+  return (await readCredentials()).activeProfile;
 }
 
 /** `profile use`: make `name` the default profile. False when there is no such profile. */
 export async function useProfile(name: string): Promise<boolean> {
-  const { credentials, legacyText } = await readCredentials();
+  const credentials = await readCredentials();
   if (!credentials.profiles[name]) return false;
   credentials.activeProfile = name;
-  await writeCredentials(credentials, legacyText);
+  credentials.holders[credentials.profiles[name].apiUrl] = name;
+  await writeCredentials(credentials);
   return true;
 }
 
 /** The name of the profile a command would use for this endpoint, if one is stored. */
 export async function savedProfileName(apiUrl: string): Promise<string | undefined> {
-  return findProfile((await readCredentials()).credentials, apiUrl)?.name;
+  return findProfile(await readCredentials(), apiUrl)?.name;
 }
 
 export async function savedToken(apiUrl: string): Promise<string | undefined> {
-  return findProfile((await readCredentials()).credentials, apiUrl)?.profile.token;
+  return findProfile(await readCredentials(), apiUrl)?.profile.token;
 }
 
 export async function savedProfile(apiUrl: string): Promise<Profile | undefined> {
-  return findProfile((await readCredentials()).credentials, apiUrl)?.profile;
+  return findProfile(await readCredentials(), apiUrl)?.profile;
 }
 
 /** The endpoint of the machine's default profile. */
 export async function activeApiUrl(): Promise<string | undefined> {
-  const { credentials } = await readCredentials();
+  const credentials = await readCredentials();
   return credentials.activeProfile === undefined ? undefined : credentials.profiles[credentials.activeProfile].apiUrl;
 }
 
@@ -292,7 +399,7 @@ export async function forgetToken(
   apiUrl: string,
   team?: string,
 ): Promise<{ removed: boolean; activeApiUrl?: string; remaining: string[] }> {
-  const { credentials, legacyText } = await readCredentials();
+  const credentials = await readCredentials();
   const found = findProfile(credentials, apiUrl);
   const activeUrl = () =>
     credentials.activeProfile === undefined ? undefined : credentials.profiles[credentials.activeProfile]?.apiUrl;
@@ -306,13 +413,13 @@ export async function forgetToken(
       const next = profile.team === team || profile.team === undefined ? left[0]! : profile.team;
       profile.team = next;
       profile.token = profile.teams[next]!.token;
-      await writeCredentials(credentials, legacyText);
+      await writeCredentials(credentials);
       return { removed: true, activeApiUrl: activeUrl(), remaining: left };
     }
   }
   delete credentials.profiles[name];
   if (credentials.activeProfile === name) credentials.activeProfile = undefined;
-  await writeCredentials(credentials, legacyText);
+  await writeCredentials(credentials);
   return { removed: true, activeApiUrl: activeUrl(), remaining: [] };
 }
 
@@ -328,48 +435,76 @@ function saved(credentials: Credentials, profile: string): SaveResult {
  * a later login to a second endpoint keeps the existing one and reports it.
  */
 export async function saveToken(apiUrl: string, token: string, kind?: EndpointKind): Promise<SaveResult> {
-  const { credentials, legacyText } = await readCredentials();
+  const credentials = await readCredentials();
   const name = writeTarget(credentials, apiUrl);
   credentials.profiles[name] = { apiUrl, token, kind: kind ?? credentials.profiles[name]?.kind, teams: {} };
+  credentials.holders[apiUrl] = name;
   activateIfNone(credentials, name);
-  await writeCredentials(credentials, legacyText);
+  await writeCredentials(credentials);
   return saved(credentials, name);
 }
 
 /** Store one team's key for a Cloud profile. The newest login becomes that profile's default team. */
 export async function saveTeam(apiUrl: string, slug: string, team: StoredTeam): Promise<SaveResult> {
-  const { credentials, legacyText } = await readCredentials();
+  const credentials = await readCredentials();
   const name = writeTarget(credentials, apiUrl);
   const teams = { ...credentials.profiles[name]?.teams, [slug]: team };
   credentials.profiles[name] = { apiUrl, token: team.token, kind: "cloud", team: slug, teams };
+  credentials.holders[apiUrl] = name;
   activateIfNone(credentials, name);
-  await writeCredentials(credentials, legacyText);
+  await writeCredentials(credentials);
   return saved(credentials, name);
 }
 
-/** Atomic 0600 write of the whole credentials file. */
-async function writeCredentials(credentials: Credentials, legacyText?: string): Promise<void> {
-  const directory = configDirectory();
-  const path = credentialsPath();
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  await chmod(directory, 0o700);
-  // The first write of a version 2 file keeps the version 1 one, which an older CLI can still read.
-  if (legacyText !== undefined) {
-    try {
-      await writeFile(resolve(directory, "credentials.v1.json"), legacyText, { mode: 0o600, flag: "wx" });
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
-    }
+/** Decide which profile `credentials.json` holds for each endpoint: the one most recently saved or switched to there. */
+function settleHolders(credentials: Credentials): void {
+  const holders: Record<string, string> = {};
+  for (const [name, profile] of Object.entries(credentials.profiles)) {
+    const current = credentials.holders[profile.apiUrl];
+    if (holders[profile.apiUrl] === undefined || current === name) holders[profile.apiUrl] = name;
   }
+  credentials.holders = holders;
+}
+
+function credentialOf({ token, kind, team, teams }: Profile): Credential {
+  return { token, kind, team, teams };
+}
+
+async function writeAtomic(directory: string, path: string, text: string): Promise<void> {
   const temporary = `${path}.tmp-${crypto.randomUUID()}`;
   try {
-    await writeFile(temporary, `${JSON.stringify(credentials, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(temporary, text, { mode: 0o600 });
     await chmod(temporary, 0o600);
     await rename(temporary, path);
     await chmod(path, 0o600);
   } finally {
     await rm(temporary, { force: true });
   }
+}
+
+/**
+ * Atomic 0600 write of both files. `credentials.json` stays version 1 (see `Credentials`) and is written first, since
+ * it is the one older CLIs depend on.
+ */
+async function writeCredentials(credentials: Credentials): Promise<void> {
+  const directory = configDirectory();
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await chmod(directory, 0o700);
+  settleHolders(credentials);
+  const endpoints: Record<string, Credential> = {};
+  const profiles: Record<string, JsonObject> = {};
+  for (const [name, profile] of Object.entries(credentials.profiles)) {
+    const held = credentials.holders[profile.apiUrl] === name;
+    if (held) endpoints[profile.apiUrl] = credentialOf(profile);
+    profiles[name] = held
+      ? { endpoint: profile.apiUrl }
+      : { endpoint: profile.apiUrl, credential: credentialOf(profile) };
+  }
+  const active = credentials.activeProfile === undefined ? undefined : credentials.profiles[credentials.activeProfile];
+  const v1 = { version: 1, activeApiUrl: active?.apiUrl, profiles: endpoints };
+  await writeAtomic(directory, credentialsPath(), `${JSON.stringify(v1, null, 2)}\n`);
+  const file = { version: 1, activeProfile: credentials.activeProfile, profiles };
+  await writeAtomic(directory, profilesPath(), `${JSON.stringify(file, null, 2)}\n`);
 }
 
 /** $HOME when set (as Wrangler's xdg-app-paths does), else the account's home directory. */
