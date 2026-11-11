@@ -166,6 +166,15 @@ export const COMMANDS: readonly Command[] = [
       "Build (unless --artifact), create the storage bindings that have no id yet and write their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves those bindings as temporary stores that last only for the deploy. On a Sproutboat Cloud endpoint (the default, https://dash.sproutboat.com) it bundles the project, uploads the source by sha256 (skipped when unchanged) and the assets by hash, has the Cloud build it while streaming the build log (Ctrl-C cancels the build), waits for a host to apply the generation the build wrote and prints https://<app>.<team>.sproutboat.app; --no-wait returns once the build is accepted and prints /v1/builds/<id>, and --dry-run says it would build in the Cloud. --module and --sproutd with --generation are the operator paths (an uploaded or locally compiled module, refused for team keys); regular deploys do not need them. On the Cloud, `services` in sproutboat.jsonc become service bindings to the team's Cloud apps of those names (each must be deployed first; compatibility_date 2026-11-18 or later; an app cannot bind itself), resolved before anything is uploaded; --secrets-file <file> (.dev.vars or .env format) sets those secrets once the build is ready (and cannot be combined with --no-wait), and a deploy never removes secrets it does not name (manage them with `secrets`); logged out in a terminal it starts the login, with no terminal it needs SPROUTBOAT_API_TOKEN.",
   },
   {
+    name: "deployments",
+    group: "Ship",
+    emoji: "🚢",
+    args: "<list | status | tail <id>> [--json] [--api-url <url>] [--account <team>]",
+    brief: "<list | status | tail <id>>",
+    summary:
+      "The deployments of the project in this directory. `list` shows the 10 most recent, newest first, with the live one marked; `status` shows what is live and whether a host applied it; both take --json. On a Cloud endpoint a deployment is a build: `tail <id>` follows it server-side (its log, then its end state), from its first line, so a deploy that was detached with Ctrl-C can be picked up again; Ctrl-C stops following and never cancels the build. On self-hosted Community a deployment is a version (as in `versions list`), `status` shows the active one, and `tail` says there is nothing to follow, since a deploy there is finished when `deploy` returns.",
+  },
+  {
     name: "versions",
     group: "Ship",
     emoji: "📜",
