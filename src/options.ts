@@ -15,8 +15,14 @@ export type Options = {
   /** Flags that stand alone. */
   readonly flag?: readonly string[];
   /**
+   * Subcommands with options of their own, keyed by their leading words (`"execute"`, `"migrations apply"`): when the
+   * arguments start with one, its entry is what is checked, and the command's own `value`/`flag` are not.
+   * Arguments that start with none of them are checked against the command's own options.
+   */
+  readonly sub?: Readonly<Record<string, Options>>;
+  /**
    * The command's subcommands parse (and refuse) their own options, so only the plain verbs are checked, where the
-   * command itself does it (`storage` in main.ts). `d1 execute` and `r2 object` have flags of their own.
+   * command itself does it (`storage` in main.ts).
    */
   readonly own?: true;
 };
@@ -49,7 +55,17 @@ export const COMMAND_OPTIONS = {
     value: ["--output", "--path", "--prefix", "--cursor", "--limit"],
     flag: ["--force", "--text", "--yes"],
   },
-  d1: { own: true },
+  d1: {
+    sub: {
+      execute: {
+        value: ["--command", "--file", "--persist-to", "--account"],
+        flag: ["--json", "--local", "--remote", "--yes", "-y"],
+      },
+      "migrations create": {},
+      "migrations list": { value: ["--persist-to", "--account"], flag: ["--local", "--remote"] },
+      "migrations apply": { value: ["--persist-to", "--account"], flag: ["--local", "--remote"] },
+    },
+  },
   r2: { own: true },
   queues: {},
   login: { value: ["--token", "--account"] },
@@ -86,6 +102,19 @@ export type OptionsCheck = { args: string[] } | { error: string };
 
 const flagsOf = (spec: Options) => [...(spec.value ?? []), ...(spec.flag ?? [])];
 
+/** The subcommand's options when `args` start with one of the command's `sub` entries (one or two words). */
+function subOptions(spec: Options, args: readonly string[]): Options | undefined {
+  if (!spec.sub) return undefined;
+  const named = [args.slice(0, 2).join(" "), args.slice(0, 1).join(" ")];
+  for (const key of named) if (Object.hasOwn(spec.sub, key)) return spec.sub[key];
+  return undefined;
+}
+
+/** Every flag a command takes in any of its forms: its own and its subcommands'. */
+export function allFlags(spec: Options): string[] {
+  return [...new Set([...flagsOf(spec), ...Object.values(spec.sub ?? {}).flatMap(flagsOf)])];
+}
+
 /** The closest known flag to a mistyped one, when one is near enough to be a typo. */
 function suggest(name: string, known: readonly string[]): string | undefined {
   const distance = (a: string, b: string) => {
@@ -114,8 +143,9 @@ function suggest(name: string, known: readonly string[]): string | undefined {
 export function checkOptions(command: string, args: readonly string[]): OptionsCheck {
   if (!Object.hasOwn(COMMAND_OPTIONS, command)) return { args: [...args] };
   // SAFETY: `command` is a key of the table, checked above.
-  const spec: Options = COMMAND_OPTIONS[command as keyof typeof COMMAND_OPTIONS];
-  if (spec.own) return { args: [...args] };
+  const top: Options = COMMAND_OPTIONS[command as keyof typeof COMMAND_OPTIONS];
+  if (top.own) return { args: [...args] };
+  const spec = subOptions(top, args) ?? top;
   const values = new Set(spec.value);
   const flags = new Set(spec.flag);
   const out: string[] = [];

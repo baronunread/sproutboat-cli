@@ -1721,7 +1721,7 @@ async function d1Contents(args: string[]) {
     }
     let runner: Runner;
     if (flags.remote) {
-      const { apiUrl: targetUrl } = await resolveApiUrl(flags.apiUrl);
+      const { apiUrl: targetUrl } = await resolveApiUrl();
       const app = project.config.name;
       if ((await deployKind(targetUrl, false)) === "cloud") {
         const credentials = await cloudCredentials(targetUrl, flags.account ?? project.account);
@@ -1742,7 +1742,7 @@ async function d1Contents(args: string[]) {
           },
         });
       } else {
-        const { apiUrl, token } = await apiCredentials(flags.apiUrl);
+        const { apiUrl, token } = await apiCredentials();
         runner = remoteRunner({
           label: `${app} database ${binding.binding}`,
           project: app,

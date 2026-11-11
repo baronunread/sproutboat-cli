@@ -50,7 +50,6 @@ export type D1Flags = {
   remote: boolean;
   persistTo?: string;
   yes: boolean;
-  apiUrl?: string;
   account?: string;
 };
 
@@ -107,9 +106,6 @@ export function parseD1Flags(args: readonly string[], usage: string) {
         break;
       case "--persist-to":
         flags.persistTo = value();
-        break;
-      case "--api-url":
-        flags.apiUrl = value();
         break;
       case "--account":
         flags.account = value();

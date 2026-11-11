@@ -290,6 +290,27 @@ describe("remote database on a Cloud endpoint", () => {
     });
   });
 
+  test("--api-url (the global flag) picks the endpoint, in both forms, and an unknown flag is refused", async () => {
+    await withCloud({}, async (cloud) => {
+      const env = { SPROUTBOAT_API_URL: "http://127.0.0.1:9", SPROUTBOAT_API_TOKEN: FAKE_KEY };
+      for (const url of [["--api-url", cloud.url], [`--api-url=${cloud.url}`]]) {
+        const run = await cli(
+          project(),
+          ["d1", "execute", "DB", "--remote", "--command", "SELECT 1 AS one", ...url],
+          env,
+        );
+        expect(run.code).toBe(0);
+        expect(JSON.parse(run.stdout)[0].results).toEqual([{ one: 1 }]);
+      }
+      const typo = await cli(project(), ["d1", "execute", "DB", "--remote", "--comand", "SELECT 1"], env);
+      expect(typo.code).toBe(2);
+      expect(typo.stderr).toContain("unknown option --comand (did you mean --command?)");
+      const stray = await cli(project(), ["d1", "migrations", "create", "DB", "users", "--remote"], env);
+      expect(stray.code).toBe(2);
+      expect(stray.stderr).toContain("unknown option --remote");
+    });
+  });
+
   test("a SQL error names the message and leaves the database as it was", async () => {
     await withCloud({}, async (cloud, env) => {
       const dir = project();
