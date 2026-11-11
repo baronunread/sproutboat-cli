@@ -125,7 +125,19 @@ writeFileSync(join(workdir, "assets.json"), JSON.stringify(assetManifest, null, 
 const prelude = await loadPrelude("broker");
 const gen = join(workdir, "sprout.generated.js");
 const bin = join(workdir, "sprout.bin");
-writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"), "utf8"), prelude, vars, bindings));
+// The config's compatibility date, as serve.ts and the standalone build have it: from it a response body can
+// stream (the file downloads) and a Durable Object takes WebSockets (the chat room).
+writeFileSync(
+  gen,
+  wrapNativeFetchHandler(
+    readFileSync(join(HERE, "src/index.js"), "utf8"),
+    prelude,
+    vars,
+    bindings,
+    undefined,
+    c.compatibility_date,
+  ),
+);
 
 // The sprout uses crypto.subtle, so the compile needs BearSSL as a broker build gets it from the CLI.
 const tls = await harness.build("preparing BearSSL", () => ensureBearssl({ target: "host" })).catch(die);

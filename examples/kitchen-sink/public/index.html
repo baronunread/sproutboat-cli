@@ -21,7 +21,10 @@
   <body>
     <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
       <symbol id="mark" viewBox="0 0 24 24">
-        <path fill="currentColor" d="M1.92 15A8.4 8.4 0 0 1 2.8 8.4A11 11 0 0 1 10.73 15ZM11.36 15A16 16 0 0 1 20.8 3.2A11.5 11.5 0 0 1 21.28 15ZM11.4 21A8.4 8.4 0 0 1 2.51 16.5L11.23 16.5A11 11 0 0 1 11.4 21ZM11.4 21A16 16 0 0 1 11.16 16.5L20.31 16.5A11.5 11.5 0 0 1 11.4 21ZM11.4 21L11.23 16.5L11.16 16.5Z" />
+        <path
+          fill="currentColor"
+          d="M1.92 15A8.4 8.4 0 0 1 2.8 8.4A11 11 0 0 1 10.73 15ZM11.36 15A16 16 0 0 1 20.8 3.2A11.5 11.5 0 0 1 21.28 15ZM11.4 21A8.4 8.4 0 0 1 2.51 16.5L11.23 16.5A11 11 0 0 1 11.4 21ZM11.4 21A16 16 0 0 1 11.16 16.5L20.31 16.5A11.5 11.5 0 0 1 11.4 21ZM11.4 21L11.23 16.5L11.16 16.5Z"
+        />
       </symbol>
       <symbol id="i-gauge" viewBox="0 0 24 24">
         <path d="M4 18a9 9 0 1 1 16 0" />
@@ -91,6 +94,19 @@
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></symbol>
       <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24">
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <circle cx="9" cy="10" r="1.6" />
+        <path d="m4 18 5-5 4 4 3-3 4 4" />
+      </symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <path d="M14 3v5h5M8.5 13h7M8.5 16.5h5" />
+      </symbol>
+      <symbol id="i-bin" viewBox="0 0 24 24">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <path d="M14 3v5h5M9 12.5v4M12 12.5v4M15 12.5v4" />
+      </symbol>
       <symbol id="i-ext" viewBox="0 0 24 24">
         <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
       </symbol>
@@ -246,6 +262,8 @@
         ><span
           >Every button calls this app's own <span class="mono">/api</span> routes and the binding behind them.
           <b style="color: var(--sb-fg)">Code</b> on a tile shows the handler that runs.</span
+        ><span class="note" id="reset-note"
+          >Demo data resets daily at 04:00 UTC. Writes are rate limited per visitor.</span
         >
       </div>
 
@@ -320,10 +338,18 @@
               /><button class="btn sm primary" type="submit">Sign</button>
             </form>
             <div class="help" id="gb-help" role="status"></div>
-            <table class="mini" style="margin-top: -8px">
-              <tbody id="gb"></tbody>
-            </table>
-            <pre class="code sqlbox" id="sql" aria-label="SQL that ran" aria-live="polite">No query yet</pre>
+            <div class="listbox">
+              <table class="mini fixed gbt">
+                <colgroup>
+                  <col class="c-id" />
+                  <col class="c-nm" />
+                  <col />
+                  <col class="c-et" />
+                </colgroup>
+                <tbody id="gb"></tbody>
+              </table>
+            </div>
+            <pre class="code sqlbox" id="sql" aria-label="SQL that ran" tabindex="0">No query yet</pre>
             <div class="foot">
               <span class="tnum"><span id="gb-n">–</span> <span id="gb-unit">rows</span></span
               ><span class="tnum" id="gb-q"></span>
@@ -351,25 +377,45 @@
               ><span class="lat" id="lat-r2" title="Server time of the last request">last <b>–</b> ms</span>
             </div>
             <div class="dz" id="dz">
-              <input
-                type="file"
-                id="r2-file"
-                class="sr"
-                tabindex="-1"
-                aria-hidden="true"
-                accept="text/*,.json,.md,.csv,.log,.js,.ts,.jsonc,.yml,.yaml,.toml"
-              /><button class="btn sm primary" id="r2-pick" type="button">
+              <input type="file" id="r2-file" class="sr" tabindex="-1" aria-hidden="true" /><button
+                class="btn sm primary"
+                id="r2-pick"
+                type="button"
+              >
                 <svg class="sb-icon"><use href="#i-up" /></svg>Choose file</button
               ><button class="btn sm" id="r2-sample" type="button">Upload note</button
-              ><span class="note">or drop a text file, up to <span id="r2-cap">64</span> KB</span>
+              ><span class="note">or drop any file, up to <span id="r2-cap">25 MB</span>. Files reset daily.</span>
+              <div class="up" id="r2-up" hidden>
+                <span class="up-n" id="r2-up-name"></span><span class="up-p tnum" id="r2-up-pct"></span>
+                <div
+                  class="bar"
+                  id="r2-up-bar"
+                  role="progressbar"
+                  aria-label="Upload progress"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="0"
+                >
+                  <i class="fill" id="r2-up-fill" style="width: 0%"></i>
+                </div>
+                <button class="btn sm ghost" id="r2-up-cancel" type="button">Cancel</button>
+              </div>
             </div>
             <div class="help" id="r2-help" role="status"></div>
-            <table class="mini">
-              <tbody id="r2-list"></tbody>
-            </table>
+            <div class="listbox scroll" id="r2-box" tabindex="0" aria-label="Files in the bucket">
+              <table class="mini fixed r2t">
+                <colgroup>
+                  <col />
+                  <col class="c-sz" />
+                  <col class="c-act" />
+                </colgroup>
+                <tbody id="r2-list"></tbody>
+              </table>
+            </div>
             <div class="foot">
-              <span class="tnum"><span id="r2-n">–</span> <span id="r2-unit">files</span></span
-              ><span class="tnum"><span id="r2-sz">–</span> stored</span>
+              <span class="tnum"
+                ><span id="r2-n">–</span> <span id="r2-unit">files</span> of <span id="r2-n-max">50</span></span
+              ><span class="tnum"><span id="r2-sz">–</span> of <span id="r2-max">200 MB</span></span>
             </div>
           </div>
         </div>
@@ -414,7 +460,7 @@
                 <svg class="sb-icon"><use href="#i-send" /></svg>Send
               </button>
             </form>
-            <div class="frame" id="frame">No message yet</div>
+            <div class="frame" id="frame" role="status">No message yet</div>
             <div class="foot">
               <span>room “main” · one object per room</span><span class="tnum">last 30 messages kept</span>
             </div>
@@ -461,6 +507,7 @@
                     <svg class="sb-icon"><use href="#i-plus" /></svg>Enqueue job
                   </button>
                 </form>
+                <div class="help" id="q-help" role="status"></div>
                 <ul class="jobs" id="jobs" aria-live="polite" aria-label="Job and cron feed"></ul>
               </div>
               <div style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
@@ -531,6 +578,7 @@
                 <svg class="sb-icon"><use href="#i-svc" /></svg>Call quote-service</button
               ><span class="note tnum" id="qm">0 calls</span>
             </div>
+            <div class="help" id="svc-wait" role="status"></div>
             <div class="svc-out" id="svc-out" aria-live="polite">
               <div class="req">env.PEER.fetch("https://peer/random")</div>
               <div class="quoteb muted" id="qt">Press the button to call another deployment.</div>
@@ -563,7 +611,13 @@
               ><span class="lat" id="lat-sec" title="Server time of the last request">last <b>–</b> ms</span>
             </div>
             <div id="secs"></div>
-            <div class="revnote" id="revnote" aria-live="polite">
+            <div
+              class="revnote"
+              id="revnote"
+              role="status"
+              aria-live="polite"
+              data-idle="Only names and whether each has a value are returned. The value never leaves the worker."
+            >
               Only names and whether each has a value are returned. The value never leaves the worker.
             </div>
             <form class="fl" id="sec-form" autocomplete="off">
@@ -574,7 +628,8 @@
                 aria-label="Token to check against ADMIN_TOKEN"
                 placeholder="Token to check"
                 autocomplete="new-password"
-              /><button class="btn sm" type="submit">Check</button>
+                maxlength="256"
+              /><button class="btn sm" id="sec-b" type="submit">Check</button>
             </form>
             <div class="foot">
               <span class="tnum"><span id="sec-n">–</span> declared</span

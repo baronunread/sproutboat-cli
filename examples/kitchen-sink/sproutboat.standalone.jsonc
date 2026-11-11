@@ -10,7 +10,9 @@
   "vars": {
     "SITE_NAME": "Sproutboat Notes",
     "QUOTE_URL": "https://api.quotable.local/random",
-    "MAX_UPLOAD_BYTES": "65536",
+    "MAX_UPLOAD_BYTES": "1048576",
+    // The whole demo bucket: every file together, so a stranger cannot fill the disk.
+    "MAX_TOTAL_BYTES": "8388608",
   },
   "secrets": ["ADMIN_TOKEN"],
   "kv_namespaces": ["SESSIONS"],
@@ -19,8 +21,19 @@
   "queues": ["EMAILS"],
   "analytics_engine_datasets": ["METRICS"],
   "durable_objects": { "VIEWS": "ViewCounter", "ROOM": "ChatRoom" },
-  "ratelimiters": [{ "binding": "THROTTLE", "limit": 3, "period": 60 }],
-  "triggers": { "crons": ["*/1 * * * *"] },
+  // Every one is a budget per client address (see src/index.js, gate()).
+  "ratelimiters": [
+    // the secret check and failed admin tokens
+    { "binding": "THROTTLE", "limit": 3, "period": 60 },
+    // every route that writes, plus outbound calls
+    { "binding": "WRITES", "limit": 30, "period": 60 },
+    // upload chunks (they do not count against WRITES; the hour's bytes are limited too)
+    { "binding": "BULK", "limit": 60, "period": 60 },
+    // the dashboard GET routes
+    { "binding": "READS", "limit": 240, "period": 60 },
+  ],
+  // */1 prunes sessions and logs a heartbeat; 0 4 * * * resets the demo data (UTC)
+  "triggers": { "crons": ["*/1 * * * *", "0 4 * * *"] },
   "assets": {
     "directory": "site",
     "binding": "ASSETS",

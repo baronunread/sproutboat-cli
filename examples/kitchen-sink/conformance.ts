@@ -16,6 +16,7 @@ import { isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject, t
 import { request as httpRequest } from "node:http";
 import { egressRefusal } from "@sproutboat/runtime";
 import type { Harness } from "../lib/harness";
+import { runR2RoundTrip } from "./r2-roundtrip";
 
 const obj = (value: JsonValue | undefined): JsonObject => jsonObject(value ?? null) ?? {};
 const arr = (value: JsonValue | undefined): JsonValue[] => (Array.isArray(value) ? value : []);
@@ -82,15 +83,37 @@ export async function runConformance(
 ): Promise<void> {
   const harness = options.harness;
   const step = (name: string) => harness?.step(name);
+  // The app keys its rate limits on the client address. Behind a proxy that is X-Forwarded-For,
+  // which the app believes when the TCP peer is a private address, as it is here. So each
+  // run gets its own address: a second run inside the same minute has a fresh budget, and a
+  // check that wants its own budget sends its own header.
+  const runAddress = `198.51.100.${20 + (Date.now() % 200)}`;
+  const addressed = (init: RequestInit | undefined, address: string): RequestInit => {
+    const headers = new Headers(init?.headers);
+    if (!headers.has("x-forwarded-for")) headers.set("x-forwarded-for", address);
+    return { ...init, headers };
+  };
   // Without a harness (a caller that does not own the child) requests are unbounded, as before.
   const fetch = (url: string, init?: RequestInit): Promise<Response> =>
-    harness ? harness.fetch(url, init) : globalThis.fetch(url, init);
+    harness ? harness.fetch(url, addressed(init, runAddress)) : globalThis.fetch(url, addressed(init, runAddress));
   const rawGet = (url: string, headers: Record<string, string>) =>
     harness
       ? harness.bounded("request-timeout", `GET ${new URL(url).pathname}`, harness.requestTimeoutMs, (signal) =>
-          rawGetFrom(url, headers, signal),
+          rawGetFrom(url, { "x-forwarded-for": runAddress, ...headers }, signal),
         )
-      : rawGetFrom(url, headers);
+      : rawGetFrom(url, { "x-forwarded-for": runAddress, ...headers });
+  /** A request from its own client address, for the checks that spend a whole budget. */
+  const jfrom = async (address: string, p: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    headers.set("x-forwarded-for", address);
+    const r = await fetch(base + p, { ...init, headers });
+    const t = await r.text();
+    let body: JsonValue = t;
+    try {
+      body = parseJsonValue(t);
+    } catch {}
+    return { status: r.status, body, headers: r.headers };
+  };
   const jget = async (p: string, init?: RequestInit): Promise<{ status: number; body: JsonValue }> => {
     const r = await fetch(base + p, init);
     const t = await r.text();
@@ -340,6 +363,185 @@ export async function runConformance(
     rlResets,
   );
 
+  step("rate limits per client address");
+  // Every route that writes has a per-address budget (WRITES, 30 a minute). The 31st call
+  // answers 429 with a retry-after and a JSON body the page can show; another address, and the
+  // reads, are unaffected.
+  const spender = `203.0.113.${20 + (Date.now() % 200)}`;
+  const spent: number[] = [];
+  let last = await jfrom(spender, "/login", { method: "POST" });
+  spent.push(last.status);
+  for (let i = 1; i < 31; i++) {
+    last = await jfrom(spender, "/login", { method: "POST" });
+    spent.push(last.status);
+  }
+  check(
+    "ratelimit: a write route allows 30 a minute per address, then answers 429",
+    spent.slice(0, 30).every((status) => status === 200) && spent[30] === 429,
+    spent,
+  );
+  const retryAfter = Number(last.headers.get("retry-after"));
+  check(
+    "ratelimit: the 429 carries retry-after and a clear JSON error",
+    retryAfter >= 1 &&
+      retryAfter <= 60 &&
+      obj(last.body).code === "rate_limited" &&
+      Number(obj(last.body).retry_after) === retryAfter &&
+      String(obj(last.body).error).includes("slow down"),
+    { retryAfter, body: last.body },
+  );
+  const guestBlocked = await jfrom(spender, "/api/guestbook", {
+    method: "POST",
+    body: JSON.stringify({ name: "a", msg: "b" }),
+  });
+  const otherAddress = await jfrom(`203.0.113.${220 + (Date.now() % 30)}`, "/login", { method: "POST" });
+  const readStillOpen = await jfrom(spender, "/api/info");
+  check(
+    "ratelimit: the budget is per address and shared by every write route; reads have their own",
+    guestBlocked.status === 429 && otherAddress.status === 200 && readStillOpen.status === 200,
+    { guestBlocked: guestBlocked.status, otherAddress: otherAddress.status, readStillOpen: readStillOpen.status },
+  );
+
+  step("R2: large files, binary round trip");
+  // Bytes survive at 5 MB and at the 25 MB cap: binary, PNG and JPEG come back with the same sha256,
+  // with their own content type and Range support; an SVG and anything unlisted is an attachment, so
+  // an upload cannot run script here. Each file comes from its own client address, so its upload
+  // has its own per-minute and per-hour budget, as it would from a different visitor.
+  const fileAddress = new Map<string, string>();
+  let nextHost = 20 + (Date.now() % 100);
+  await runR2RoundTrip(base, check, (url, init) => {
+    const name = new URL(url).searchParams.get("name") ?? "-";
+    if (!fileAddress.has(name)) fileAddress.set(name, `192.0.2.${20 + ((nextHost++ - 20) % 200)}`);
+    return fetch(url, addressed(init, fileAddress.get(name) ?? runAddress));
+  });
+
+  step("input caps");
+  // Every input is capped and validated with a 4xx, never a 500.
+  const writer = `192.0.2.${20 + (Date.now() % 200)}`;
+  const sign = (body: string) => jfrom(writer, "/api/guestbook", { method: "POST", body });
+  const refused = [
+    (await sign(JSON.stringify({ name: { a: 1 }, msg: "x" }))).status,
+    (await sign(JSON.stringify({ name: "n".repeat(21), msg: "x" }))).status,
+    (await sign(JSON.stringify({ name: "n", msg: "m".repeat(61) }))).status,
+    (await sign(JSON.stringify({ name: "n", msg: "   " }))).status,
+    (await sign("{not json")).status,
+    (await sign("x".repeat(5000))).status,
+  ];
+  check(
+    "input: the guestbook refuses non-text, too-long, blank, malformed and oversized input with a 4xx",
+    JSON.stringify(refused) === "[400,400,400,400,400,413]",
+    refused,
+  );
+  const signed = await sign(JSON.stringify({ name: "  Zoë\u202e  ", msg: "line\none\u0000two" }));
+  const signedRow = obj(arr(obj(signed.body).rows)[0]);
+  check(
+    "input: control and bidi-override characters are cleaned before they are stored",
+    signed.status === 201 && signedRow.name === "Zoë" && signedRow.msg === "line one two",
+    signed.body,
+  );
+  const chunkUrl = (name: string, total: number, id = "0123456789abcdef", n = 0, count = 1) =>
+    `/api/r2/chunk?name=${name}&id=${id}&n=${n}&count=${count}&total=${total}&type=text%2Fplain`;
+  const longName = await jfrom(writer, chunkUrl("n".repeat(65), 1), { method: "PUT", body: "x" });
+  const tooBig = await jfrom(writer, chunkUrl("big.txt", 26214401, "0123456789abcdef", 0, 26), {
+    method: "PUT",
+    body: "x",
+  });
+  const wrongSize = await jfrom(writer, chunkUrl("short.txt", 5), { method: "PUT", body: "x" });
+  const badId = await jfrom(writer, chunkUrl("badid.txt", 1, "nothex"), { method: "PUT", body: "x" });
+  const orphan = await jfrom(writer, chunkUrl("orphan.txt", 2097152, "fedcba9876543210", 1, 2), {
+    method: "PUT",
+    body: "x".repeat(1048576),
+  });
+  const emptyFile = await jfrom(writer, chunkUrl("empty.txt", 0), { method: "PUT", body: "" });
+  check(
+    "input: R2 refuses a long name, a file over the 25 MB cap, a chunk of the wrong size, a bad id and a chunk without its first; a 0-byte file is stored",
+    longName.status === 400 &&
+      tooBig.status === 413 &&
+      wrongSize.status === 400 &&
+      badId.status === 400 &&
+      orphan.status === 409 &&
+      emptyFile.status === 201,
+    [longName.status, tooBig.status, wrongSize.status, badId.status, orphan.status, emptyFile.status],
+  );
+  await jfrom(writer, "/api/r2?name=empty.txt", { method: "DELETE" });
+  const secretFlood = await jfrom(writer, "/api/secrets/check", {
+    method: "POST",
+    body: JSON.stringify({ token: "t".repeat(300) }),
+  });
+  const queueLabel = await jfrom(writer, "/api/queue/enqueue", {
+    method: "POST",
+    body: JSON.stringify({ label: "L".repeat(41) }),
+  });
+  const notesBody = await jfrom(writer, "/notes", {
+    method: "POST",
+    body: JSON.stringify({ title: "t", body: "b".repeat(4001) }),
+  });
+  check(
+    "input: the secret check, the queue label and a note body are capped too",
+    secretFlood.status === 400 && queueLabel.status === 400 && notesBody.status === 400,
+    [secretFlood.status, queueLabel.status, notesBody.status],
+  );
+
+  step("chat room limits");
+  // The room caps a frame, the rate per connection and the connections per address.
+  const wsUrl = base.replace("http", "ws") + "/api/chat";
+  const chatter = `198.18.0.${20 + (Date.now() % 200)}`;
+  const openChat = (address: string) =>
+    new Promise<{ socket: WebSocket; frames: JsonObject[] }>((resolve, reject) => {
+      const frames: JsonObject[] = [];
+      const socket = new WebSocket(wsUrl, { headers: { "x-forwarded-for": address } });
+      socket.onmessage = (event) => {
+        const frame = jsonObject(parseJsonValue(String(event.data)));
+        if (frame) frames.push(frame);
+      };
+      socket.onopen = () => resolve({ socket, frames });
+      socket.onerror = () => reject(new Error("the chat socket did not open"));
+    });
+  const room = await openChat(chatter);
+  room.socket.send(JSON.stringify({ type: "hello", name: "\u202e" + "n".repeat(30) }));
+  room.socket.send(JSON.stringify({ type: "hello", name: "Ada\u0000" }));
+  await Bun.sleep(1100);
+  room.socket.send(JSON.stringify({ type: "msg", text: "x".repeat(121) }));
+  room.socket.send("null");
+  await Bun.sleep(1100);
+  for (let i = 0; i < 30; i++)
+    room.socket.send(JSON.stringify({ type: "msg", text: "flood " + i, sent: { evil: true } }));
+  await Bun.sleep(800);
+  const errors = room.frames.filter((f) => f.type === "error").map((f) => String(f.code));
+  const said = room.frames.filter((f) => f.type === "msg");
+  check(
+    "chat: a message over 120 characters and a non-object frame get an error frame",
+    errors.includes("too_long") && errors.includes("bad_frame"),
+    errors,
+  );
+  check(
+    "chat: a flood is answered with rate_limited errors; at most 3 messages a second pass",
+    errors.includes("rate_limited") && said.length >= 1 && said.length <= 6,
+    { errors: errors.length, said: said.length },
+  );
+  check(
+    "chat: the name is cleaned and a non-numeric sent field is not echoed",
+    said.length > 0 && said.every((f) => f.name === "Ada" && f.sent === 0),
+    said[0] ?? null,
+  );
+  // The flood above closed that socket (too many strikes), so the cap is tried from a new address.
+  const crowd = `198.18.1.${20 + (Date.now() % 200)}`;
+  const sockets: WebSocket[] = [];
+  let turnedAway = 0;
+  for (let i = 0; i < 7; i++) {
+    try {
+      sockets.push((await openChat(crowd)).socket);
+    } catch {
+      turnedAway++;
+    }
+  }
+  check("chat: five connections per address, the rest are refused", sockets.length === 5 && turnedAway === 2, {
+    opened: sockets.length,
+    turnedAway,
+  });
+  for (const socket of sockets) socket.close();
+  room.socket.close();
+
   step("Durable Object alarm roll-up");
   // DO alarms (#125): viewing a note debounces an alarm a second out, whose
   // handler rolls the count up into D1. Poll, because the whole point is that
@@ -377,4 +579,25 @@ export async function runConformance(
   check("cron: scheduled() runs (204)", sched.status === 204, sched.status);
   const afterCron = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
   check("cron: heartbeat row written by scheduled()", Number(obj(afterCron.body).cron_heartbeats) > 0, afterCron.body);
+
+  // The daily reset is its own cron (0 4 * * *), told apart by event.cron: it empties the bucket,
+  // goes back to the three seed guestbook rows and clears the chat history.
+  step("cron: the daily reset");
+  await jget("/notes/" + noteId + "/attach", { method: "POST", body: "to be reset" });
+  const reset = await fetch(base + "/", {
+    method: "POST",
+    headers: { "x-sb-trigger": "scheduled", "x-sb-token": TOKEN, "content-type": "application/json" },
+    body: JSON.stringify({ cron: "0 4 * * *", scheduledTime: Date.now() }),
+  });
+  check("cron: the daily reset runs (204)", reset.status === 204, reset.status);
+  const afterReset = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
+  const seeded = obj((await jget("/api/guestbook")).body);
+  check(
+    "cron: the daily reset empties R2, notes and sessions and goes back to the seed guestbook",
+    Number(obj(afterReset.body).r2_objects) === 0 &&
+      Number(obj(afterReset.body).d1_notes) === 0 &&
+      Number(obj(afterReset.body).kv_sessions) === 0 &&
+      Number(seeded.total) === 3,
+    { stats: afterReset.body, total: seeded.total },
+  );
 }
