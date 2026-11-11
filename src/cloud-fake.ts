@@ -1,7 +1,10 @@
 /** An in-process stand-in for the Sproutboat Cloud API, exactly the routes the CLI calls. Used by tests only. */
+import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 
-import { jsonObject, type JsonObject } from "./json";
+import { parseBody } from "./cloud";
+import { isString, jsonObject, type JsonObject } from "./json";
+import { splitSql } from "./sql-split";
 
 export const FAKE_KEY = "sbk_fakekey0123456789";
 
@@ -18,10 +21,14 @@ export type FakeOptions = {
   teamKey?: boolean;
   /** The team's other Cloud apps, by project name, for GET /v1/apps and service binding callees. Ids are `<project>_<owner suffix>`. */
   otherApps?: string[];
-  /** Permissions the key lacks: `secret:write` and `secret:list` answer 403. */
+  /** Permissions the key lacks: `secret:write`, `secret:list`, `data:read` and `data:write` answer 403. */
   denyPermissions?: string[];
   /** Secrets the app already holds (the app must exist). */
   existingSecrets?: Record<string, string>;
+  /** D1 databases the app's host holds (binding names): POST /v1/apps/<p>/d1/<BINDING>/query runs on a real SQLite. */
+  d1?: string[];
+  /** Every data route (D1 query, R2 object) answers this instead of working: the status, the JSON body, extra headers. */
+  dataFailure?: { status: number; body?: JsonObject; headers?: Record<string, string> };
   /** How POST /v1/apps/<project>/builds behaves. */
   build?: FakeBuildOptions;
 };
@@ -66,6 +73,10 @@ export function startFakeCloud(options: FakeOptions = {}) {
   const written: JsonObject[] = [];
   const patches: JsonObject[] = [];
   const denied = new Set(options.denyPermissions ?? []);
+  const dataFailureReply = (failure: NonNullable<FakeOptions["dataFailure"]>) =>
+    Response.json(failure.body ?? {}, { status: failure.status, headers: failure.headers });
+  const dataDenied = (need: string) =>
+    Response.json({ error: "forbidden", reason: "forbidden", need }, { status: 403 });
   const permissionDenied = (need: string) => Response.json({ error: "forbidden", need }, { status: 403 });
   /** The Cloud's spec rules for service bindings and secrets, then the merge. Returns an error reply or null. */
   const checkAndStore = (sent: JsonObject, project: string): Response | null => {
@@ -103,6 +114,8 @@ export function startFakeCloud(options: FakeOptions = {}) {
   };
   if (options.existingAssetsRef) spec.assets_manifest_ref = options.existingAssetsRef;
 
+  const databases = new Map<string, Database>((options.d1 ?? []).map((name) => [name, new Database(":memory:")]));
+  const d1Requests: JsonObject[] = [];
   const sources = new Map<string, Uint8Array>();
   const buildRequests: JsonObject[] = [];
   const eventRequests: string[] = [];
@@ -387,6 +400,55 @@ export function startFakeCloud(options: FakeOptions = {}) {
           apps: [...new Set(apps)].map((project) => ({ project, app_id: fakeAppId(project), record_generation: 1 })),
         });
       }
+      m = /^\/v1\/apps\/([^/]+)\/d1\/([^/]+)\/query$/.exec(path);
+      if (m && request.method === "POST") {
+        if (options.dataFailure) return dataFailureReply(options.dataFailure);
+        if (!appExists) return Response.json({ error: "no such app" }, { status: 404 });
+        const db = databases.get(m[2]!);
+        if (!db) return Response.json({ error: "no such database", reason: "no-database" }, { status: 404 });
+        const sent = parseBody(body) ?? {};
+        d1Requests.push(sent);
+        const statements = (Array.isArray(sent.statements) ? sent.statements : []).flatMap((item) => {
+          const entry = jsonObject(item);
+          // SAFETY: the CLI sends only JSON scalars as bound parameters, which bun:sqlite binds directly.
+          const params = Array.isArray(entry?.params) ? (entry.params as (string | number | null)[]) : undefined;
+          return entry && isString(entry.sql) ? [{ sql: entry.sql, params }] : [];
+        });
+        if (denied.has("data:read")) return dataDenied("data:read");
+        if (
+          denied.has("data:write") &&
+          statements.some((entry) => splitSql(entry.sql).some((sql) => !/^\s*(select|pragma)\b/i.test(sql)))
+        )
+          return dataDenied("data:write");
+        const results: JsonObject[] = [];
+        let index = 0;
+        try {
+          db.run("BEGIN");
+          for (const [at, entry] of statements.entries()) {
+            index = at;
+            for (const sql of entry.params ? [entry.sql] : splitSql(entry.sql)) {
+              const q = db.query(sql);
+              // SAFETY: bun:sqlite rows are plain objects of SQLite values.
+              const rows = q.columnNames.length > 0 ? (q.all(...(entry.params ?? [])) as JsonObject[]) : [];
+              const info =
+                q.columnNames.length > 0 ? { changes: 0, lastInsertRowid: 0 } : q.run(...(entry.params ?? []));
+              results.push({
+                success: true,
+                results: rows,
+                meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid), duration: 0.1 },
+              });
+            }
+          }
+          db.run("COMMIT");
+        } catch (error) {
+          db.run("ROLLBACK");
+          return Response.json(
+            { error: error instanceof Error ? error.message : String(error), reason: "sql-error", statement: index },
+            { status: 400 },
+          );
+        }
+        return Response.json({ results });
+      }
       m = /^\/v1\/apps\/([^/]+)\/secrets$/.exec(path);
       if (m && request.method === "PATCH") {
         if (denied.has("secret:write")) return permissionDenied("secret:write");
@@ -456,6 +518,10 @@ export function startFakeCloud(options: FakeOptions = {}) {
     manifests,
     sources,
     buildRequests,
+    /** Bodies of POST /v1/apps/<app>/d1/<BINDING>/query. */
+    d1Requests,
+    /** The fake host's databases, to look at what a command left behind. */
+    databases,
     eventRequests,
     cancels,
     get tokenPolls() {

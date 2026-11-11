@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkOptions, COMMAND_OPTIONS, ENDPOINT_COMMANDS } from "./options";
+import { allFlags, checkOptions, COMMAND_OPTIONS, ENDPOINT_COMMANDS, type Options } from "./options";
 import { COMMANDS } from "./surface";
 
 const ok = (command: string, args: string[]) => {
@@ -76,6 +76,23 @@ describe("checkOptions", () => {
     expect(ok("tail", ["--search", "https://x.test"])).toEqual(["--search", "https://x.test"]);
   });
 
+  test("d1 checks the flags of the subcommand it names", () => {
+    expect(ok("d1", ["execute", "DB", "--command=SELECT 1", "--json", "-y"])).toEqual([
+      "execute",
+      "DB",
+      "--command",
+      "SELECT 1",
+      "--json",
+      "-y",
+    ]);
+    expect(ok("d1", ["migrations", "apply", "DB", "--remote", "--persist-to=x"])).toContain("--persist-to");
+    expect(bad("d1", ["migrations", "list", "DB", "--json"])).toContain("unknown option --json");
+    expect(bad("d1", ["migrations", "create", "DB", "name", "--local"])).toContain("takes no options");
+    expect(bad("d1", ["execute", "DB", "--comand", "x"])).toContain("did you mean --command?");
+    expect(bad("d1", ["list", "--json"])).toContain("`d1` takes no options");
+    expect(bad("d1", ["execute", "https://example.com"])).toContain("looks like a URL");
+  });
+
   test("a command that is not in the table is not checked", () => {
     expect(ok("surprise", ["--anything", "https://x.test"])).toEqual(["--anything", "https://x.test"]);
   });
@@ -91,10 +108,9 @@ describe("the table and the grammar agree", () => {
   test("every flag a command's grammar names is accepted", () => {
     for (const command of COMMANDS) {
       // SAFETY: the previous test checked that every command name is a key of the table.
-      const spec: { value?: readonly string[]; flag?: readonly string[]; own?: true } =
-        COMMAND_OPTIONS[command.name as keyof typeof COMMAND_OPTIONS];
+      const spec: Options = COMMAND_OPTIONS[command.name as keyof typeof COMMAND_OPTIONS];
       if (spec.own) continue;
-      const known = new Set([...(spec.value ?? []), ...(spec.flag ?? [])]);
+      const known = new Set(allFlags(spec));
       for (const [flag] of command.args.matchAll(/(?<![\w-])--[a-z][a-z0-9-]*/g))
         if (!GLOBAL.has(flag)) expect(known.has(flag), `${command.name} documents ${flag}`).toBe(true);
     }

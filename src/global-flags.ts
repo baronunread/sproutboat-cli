@@ -43,7 +43,7 @@ const VALUE_FLAGS: readonly Spec[] = [
 ];
 
 /** Per-command flags whose value is free text: it must never be read as a global flag (`--value -e`). */
-const FREE_TEXT_FLAGS = new Set(["--value", "--token", "--search", "--outcome", "--name"]);
+const FREE_TEXT_FLAGS = new Set(["--value", "--token", "--search", "--outcome", "--name", "--command"]);
 
 /** Split argv into the global flags and what is left for the command. Does not touch the filesystem. */
 export function extractGlobalFlags(argv: readonly string[]): GlobalParse {

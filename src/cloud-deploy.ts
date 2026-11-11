@@ -175,7 +175,7 @@ type SpecAdditions = {
 };
 type AppSpec = { module: { sha256: string }; hosts: string[]; assets_manifest_ref?: string } & SpecAdditions;
 type Call = { method: string; path: string; body?: BodyInit; json?: object; ok?: number[] };
-type CallResult = { status: number; text: string; body?: JsonObject };
+type CallResult = { status: number; text: string; body?: JsonObject; headers: Headers };
 type CallFn = (c: Call) => Promise<CallResult>;
 export type CloudCredentials = Pick<CloudDeployPlan, "apiUrl" | "token" | "tokenFromEnv">;
 
@@ -197,7 +197,7 @@ export function makeCall(plan: CloudCredentials): CallFn {
     const text = await response.text();
     if (!response.ok && !(c.ok ?? []).includes(response.status))
       throw new CloudError(explainApiFailure(response.status, text, plan.tokenFromEnv));
-    return { status: response.status, text, body: parseBody(text) };
+    return { status: response.status, text, body: parseBody(text), headers: response.headers };
   };
 }
 
