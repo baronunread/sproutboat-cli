@@ -6,7 +6,7 @@
 import { bold, dim, leaf } from "./style";
 
 export const CLI_NAME = "sproutboat";
-export const TAGLINE = "Deploy JavaScript handlers as tiny native binaries on your own VPS.";
+export const TAGLINE = "Build and deploy JavaScript handlers as tiny native binaries.";
 export const DOCS_URL = "https://sproutboat.com/docs";
 
 export type Group = "Develop" | "Ship" | "Storage" | "Configure" | "Account";
@@ -19,6 +19,8 @@ export type Command = {
   brief?: string;
   group: Group;
   emoji: string;
+  /** One short line (about 60 characters) for the grouped help list. Detail lives in `summary`, shown by `<command> --help`. */
+  short: string;
   summary: string;
 };
 
@@ -42,8 +44,8 @@ export type StorageProduct = {
 };
 
 export const STORAGE_PRODUCTS: readonly StorageProduct[] = [
-  { name: "kv", noun: "namespace", plural: "KV namespaces", emoji: "🗄" },
-  { name: "d1", noun: "database", plural: "D1 databases", emoji: "🛢" },
+  { name: "kv", noun: "namespace", plural: "KV namespaces", emoji: "🗄\uFE0F" },
+  { name: "d1", noun: "database", plural: "D1 databases", emoji: "🛢\uFE0F" },
   { name: "r2", noun: "bucket", plural: "R2 buckets", emoji: "🪣" },
   { name: "queues", noun: "queue", plural: "queues", emoji: "📨" },
 ];
@@ -53,12 +55,21 @@ export const STORAGE_VERBS = ["list", "create", "info", "rename", "delete"] as c
 
 const STORAGE_ARGS = "<list | create <name> | info <name> | rename <name> <new> | delete <name>>";
 
+/** What each storage command offers, in the words the grouped help uses. */
+const STORAGE_SHORT = {
+  kv: "Manage KV namespaces, keys, bulk data and exports",
+  d1: "Manage D1 databases",
+  r2: "Manage R2 buckets",
+  queues: "Manage queues",
+} satisfies Record<StorageProduct["name"], string>;
+
 const storageCommands: readonly Command[] = STORAGE_PRODUCTS.map((product) => ({
   name: product.name,
   group: "Storage" as const,
   emoji: product.emoji,
+  short: STORAGE_SHORT[product.name],
   args: product.name === "kv" ? `${STORAGE_ARGS} | <key | bulk | export> ...` : STORAGE_ARGS,
-  brief: `<${STORAGE_VERBS.join(" | ")}>`,
+  brief: "<command>",
   summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "kv" ? "; key and bulk operations manage contents, and export writes a restorable JSON dump" : ""}${product.name === "queues" ? "; consumers deliver in batches with retries, and stop after 5 attempts" : ""}.`,
 }));
 
@@ -67,7 +78,9 @@ export const COMMANDS: readonly Command[] = [
     name: "init",
     group: "Develop",
     emoji: "🌱",
+    short: "Scaffold a new project",
     args: "[name]",
+    brief: "[name]",
     summary:
       "Scaffold sproutboat.jsonc, src/index.js and package.json (sproutboat devDependency, dev, deploy and check scripts) in ./<name>.",
   },
@@ -75,14 +88,18 @@ export const COMMANDS: readonly Command[] = [
     name: "check",
     group: "Develop",
     emoji: "🔍",
+    short: "Validate the config and entry point",
     args: "[project-dir]",
+    brief: "[project-dir]",
     summary: "Validate the config and entry point without building.",
   },
   {
     name: "types",
     group: "Develop",
     emoji: "🧾",
+    short: "Write sproutboat-env.d.ts for your editor",
     args: "[project-dir]",
+    brief: "[project-dir]",
     summary:
       "Write sproutboat-env.d.ts from the config, so an editor knows what `env` holds. `dev` and `deploy` refresh it when the config is newer.",
   },
@@ -90,17 +107,19 @@ export const COMMANDS: readonly Command[] = [
     name: "dev",
     group: "Develop",
     emoji: "⚡",
+    short: "Run the app locally, rebuilding on save",
     args: "[project-dir] [--port <n>] [--no-watch] [--env <name>] [--env-file <file>]...",
-    brief: "[project-dir] [--port <n>]",
+    brief: "[project-dir]",
     summary:
-      "Run the project on this machine against a real broker, rebuilding on save. Secrets come from .dev.vars or the .env files (never both), as in Wrangler; a declared secret with no value is a warning.",
+      "Run the project on this machine with local storage, rebuilding on save. Secrets come from .dev.vars or the .env files (never both), as in Wrangler; a declared secret with no value is a warning.",
   },
   {
     name: "run",
     group: "Develop",
-    emoji: "🚀",
+    emoji: "🏃",
+    short: "Launch a built standalone binary",
     args: "[project-dir] [--binary <file>] [--env-file <file>]... [--port <n>] [--data-dir <dir>] [--require <NAME,...>] [--check]",
-    brief: "[--env-file <file>] [--port <n>]",
+    brief: "[project-dir]",
     summary:
       "Launch a standalone binary with its port, data directory and declared secrets supplied at launch, never baked in. Precedence: --port/--data-dir, then the --env-file files (later overrides earlier), then the environment. A missing declared secret fails the launch, like wrangler deploy; --check validates without starting.",
   },
@@ -108,15 +127,17 @@ export const COMMANDS: readonly Command[] = [
     name: "build",
     group: "Develop",
     emoji: "🔨",
+    short: "Compile the app to a native binary",
     args: "[project-dir] [--target host|linux-x64|linux-arm64] [--standalone] [--release] [--deploy-files] [--with-restore] [--emit-only]",
     brief: "[project-dir]",
     summary:
-      "Cross-compile the native-fetch sprout (Porffor + Zig). `--target host` builds for this machine instead, to run locally, not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no broker process; add `--target linux-arm64` for an aarch64 box (the default is `linux-x64`) and `--deploy-files` to write a Dockerfile, a systemd socket and service, a fly.toml and a push script beside it. `--release` makes a standalone build the full `-flto -O3` one to publish; without it the link skips LTO (1.5 to 2x faster cold, ~90 MB link memory instead of 1.1 to 1.6 GB, fewer requests per second); `SPROUTBOAT_RELEASE=1` does the same, and a non-standalone build is always the release build. `--with-restore` adds an offline `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command to a standalone executable; it runs before app initialization. `--emit-only` stops after writing `.sproutboat/porffor-units/<shape>/sprout.generated.js`, the module Porffor would compile, and prints its path: every check still runs, nothing is compiled.",
+      "Compile the app to a native binary (Porffor + Zig), cross-compiled for Linux x64 by default. `--target host` builds for this machine instead, to run locally, not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no separate storage process; add `--target linux-arm64` for an aarch64 box (the default is `linux-x64`) and `--deploy-files` to write a Dockerfile, a systemd socket and service, a fly.toml and a push script beside it. `--release` makes a standalone build the full `-flto -O3` one to publish; without it the link skips LTO (1.5 to 2x faster cold, ~90 MB link memory instead of 1.1 to 1.6 GB, fewer requests per second); `SPROUTBOAT_RELEASE=1` does the same, and a non-standalone build is always the release build. `--with-restore` adds an offline `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command to a standalone executable; it runs before app initialization. `--emit-only` stops after writing `.sproutboat/porffor-units/<shape>/sprout.generated.js`, the module Porffor would compile, and prints its path: every check still runs, nothing is compiled.",
   },
   {
     name: "toolchain",
     group: "Develop",
     emoji: "🩺",
+    short: "Check the compiler toolchain",
     args: "doctor [--json]",
     brief: "doctor",
     summary:
@@ -127,15 +148,17 @@ export const COMMANDS: readonly Command[] = [
     name: "deploy",
     group: "Ship",
     emoji: "🚀",
+    short: "Build the app and publish it",
     args: "[project-dir] [--dry-run] [--artifact <dir>] [--no-wait] [--no-provision] [--api-url <url>] [--account <team>] [--module <file.so>] [--sproutd <dir> --generation <dir>] [--secrets-file <file>]",
-    brief: "[project-dir] [--dry-run]",
+    brief: "[project-dir]",
     summary:
-      "Build (unless --artifact), auto-provision id-less storage bindings and pin their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves id-less bindings as ephemeral deploy-scoped stores. On a Sproutboat Cloud endpoint (the default, https://dash.sproutboat.com) it bundles the project, uploads the source by sha256 (skipped when unchanged) and the assets by hash, has the Cloud build it while streaming the build log (Ctrl-C cancels the build), waits for a host to apply the generation the build wrote and prints https://<app>.<team>.sproutboat.app; --no-wait returns once the build is accepted and prints /v1/builds/<id>, and --dry-run says it would build in the Cloud. --module and --sproutd with --generation are the operator paths (an uploaded or locally compiled module, refused for team keys); regular deploys do not need them. On the Cloud, `services` in sproutboat.jsonc become service bindings to the team's Cloud apps of those names (each must be deployed first; compatibility_date 2026-11-18 or later; an app cannot bind itself), resolved before anything is uploaded; --secrets-file <file> (.dev.vars or .env format) sets those secrets once the build is ready (and cannot be combined with --no-wait), and a deploy never removes secrets it does not name (manage them with `secrets`); logged out in a terminal it starts the login, with no terminal it needs SPROUTBOAT_API_TOKEN.",
+      "Build (unless --artifact), create the storage bindings that have no id yet and write their ids into sproutboat.jsonc, print the report, upload, wait until the URL serves. The control plane skips an upload that matches the live artifact byte-for-byte. --dry-run stops before upload; --no-wait skips the health check; --no-provision leaves those bindings as temporary stores that last only for the deploy. On a Sproutboat Cloud endpoint (the default, https://dash.sproutboat.com) it bundles the project, uploads the source by sha256 (skipped when unchanged) and the assets by hash, has the Cloud build it while streaming the build log (Ctrl-C cancels the build), waits for a host to apply the generation the build wrote and prints https://<app>.<team>.sproutboat.app; --no-wait returns once the build is accepted and prints /v1/builds/<id>, and --dry-run says it would build in the Cloud. --module and --sproutd with --generation are the operator paths (an uploaded or locally compiled module, refused for team keys); regular deploys do not need them. On the Cloud, `services` in sproutboat.jsonc become service bindings to the team's Cloud apps of those names (each must be deployed first; compatibility_date 2026-11-18 or later; an app cannot bind itself), resolved before anything is uploaded; --secrets-file <file> (.dev.vars or .env format) sets those secrets once the build is ready (and cannot be combined with --no-wait), and a deploy never removes secrets it does not name (manage them with `secrets`); logged out in a terminal it starts the login, with no terminal it needs SPROUTBOAT_API_TOKEN.",
   },
   {
     name: "versions",
     group: "Ship",
     emoji: "📜",
+    short: "List or view deployed versions",
     args: "<list | view <version-id>> [project-dir]",
     brief: "<list | view>",
     summary: "List the project's deployed versions, or show one version's artifact and bindings.",
@@ -143,7 +166,8 @@ export const COMMANDS: readonly Command[] = [
   {
     name: "rollback",
     group: "Ship",
-    emoji: "⏮",
+    emoji: "⏪",
+    short: "Re-activate a previous version",
     args: "<version-id> [project-dir]",
     brief: "<version-id>",
     summary: "Re-activate a previous version.",
@@ -152,10 +176,21 @@ export const COMMANDS: readonly Command[] = [
     name: "tail",
     group: "Ship",
     emoji: "📡",
+    short: "Stream live requests, logs and exceptions",
     args: "[project-dir] [--format pretty|json] [--status ok|error|<code>|5xx] [--method GET,POST] [--sampling-rate <0..1>] [--search <text>] [--outcome <name>] [--recent] [--sprout] [--file <log|-> [--lines <n>] [--no-follow]]",
-    brief: "[--status 5xx] [--search <text>]",
+    brief: "[project-dir]",
     summary:
-      "Stream live request events, console output and exceptions (like wrangler tail); --recent prints the last 100 request records, --sprout the running sprout + broker stdout/stderr. --file follows the JSON records a standalone binary writes with SB_LOG=json (no login needed).",
+      "Stream live request events, console output and exceptions (like wrangler tail); --recent prints the last 100 request records, --sprout the running app's own stdout and stderr logs. --file follows the JSON records a standalone binary writes with SB_LOG=json (no login needed).",
+  },
+
+  {
+    name: "delete",
+    group: "Ship",
+    emoji: "🗑️",
+    short: "Delete the app and all its versions",
+    args: "[project-dir] [--name <project>] --yes",
+    brief: "[project-dir]",
+    summary: "Delete the project, every version, and its route.",
   },
 
   ...storageCommands,
@@ -164,6 +199,7 @@ export const COMMANDS: readonly Command[] = [
     name: "domains",
     group: "Configure",
     emoji: "🌐",
+    short: "Attach custom domains",
     args: "<list | add <host> | verify <host> | delete <host>> [project-dir]",
     brief: "<list | add | verify | delete>",
     summary: "Attach a custom domain to the project (TXT-verified). No sub-command lists.",
@@ -172,26 +208,19 @@ export const COMMANDS: readonly Command[] = [
     name: "secrets",
     group: "Configure",
     emoji: "🔑",
+    short: "Manage encrypted secrets",
     args: "<list | put <NAME> [--value <value>] | delete <NAME>> [project-dir] [--api-url <url>] [--account <team>]",
     brief: "<list | put | delete>",
     summary:
       "Manage encrypted project secrets (read as env.NAME). `put` reads the value from stdin unless --value is given, so it stays out of shell history; applies on next deploy. On a Cloud endpoint secrets are per app and independent of deploys (like wrangler secret): put, list and delete act on the deployed app at once (permissions secret:write and secret:list), and an app that is not deployed yet says to deploy first or pass --secrets-file on the first deploy.",
   },
   {
-    name: "delete",
-    group: "Configure",
-    emoji: "🗑",
-    args: "[project-dir] [--name <project>] --yes",
-    brief: "[project-dir] --yes",
-    summary: "Delete the project, every version, and its route.",
-  },
-
-  {
     name: "login",
     group: "Account",
     emoji: "🔓",
+    short: "Sign in",
     args: "[--api-url <url>] [--token <token>] [--account <team>]",
-    brief: "[--token <token>]",
+    brief: "",
     summary:
       "Sign in. On the Cloud: the device-code flow (RFC 8628), which prints a code and a link, opens the browser when it can, and stores an account API key named `CLI on <hostname>` for the team you approve (--account preselects it). Elsewhere the browser flow, or store <token> for <url> directly.",
   },
@@ -199,7 +228,9 @@ export const COMMANDS: readonly Command[] = [
     name: "logout",
     group: "Account",
     emoji: "🔒",
+    short: "Forget the stored credential",
     args: "[--api-url <url>] [--account <team>]",
+    brief: "",
     summary:
       "Forget the stored credential for the active endpoint, or for <url>. On the Cloud it also revokes the key on the server (the default team, or --account).",
   },
@@ -207,15 +238,19 @@ export const COMMANDS: readonly Command[] = [
     name: "whoami",
     group: "Account",
     emoji: "👤",
+    short: "Show the endpoint and account you use",
     args: "[--api-url <url>] [--account <team>]",
+    brief: "",
     summary:
       "Show the active endpoint and the account or team the credential belongs to (exits 1 when not logged in or the key is rejected).",
   },
   {
     name: "complete",
     group: "Account",
-    emoji: "⌨",
+    emoji: "⌨️",
+    short: "Print a shell completion script",
     args: "[bash | zsh | fish]",
+    brief: "[shell]",
     summary: "Print a shell completion script for the top-level commands (defaults to $SHELL).",
   },
 ];
@@ -385,11 +420,13 @@ export function usageLine(): string {
   return `usage: ${CLI_NAME} <${parts.join(" | ")}>`;
 }
 
-/** First sentence of a summary — enough for the at-a-glance command list. */
-function firstSentence(text: string): string {
-  const end = text.indexOf(". ");
-  return end === -1 ? text.replace(/\.$/, "") : text.slice(0, end);
-}
+export type GlobalFlag = { flags: string; purpose: string; type: string };
+
+/** Flags every command accepts, listed by `sproutboat --help`. */
+export const GLOBAL_FLAGS: readonly GlobalFlag[] = [
+  { flags: "-h, --help", purpose: "Show help", type: "boolean" },
+  { flags: "-v, --version", purpose: "Show version number", type: "boolean" },
+];
 
 /** Wrangler-style grouped help: `sproutboat` with no command, or `--help`. */
 export function helpText(): string {
@@ -401,14 +438,14 @@ export function helpText(): string {
     lines.push("", leaf(group.toUpperCase()));
     for (const command of COMMANDS.filter((c) => c.group === group)) {
       const invocation = `${command.name} ${command.brief ?? command.args}`.trim();
-      lines.push(`  ${invocation.padEnd(width)}  ${command.emoji}  ${firstSentence(command.summary)}`);
+      lines.push(`  ${invocation.padEnd(width)}  ${command.emoji}  ${command.short}`);
     }
   }
 
-  lines.push(
-    "",
-    dim(`Run \`${CLI_NAME} <command>\` with no/invalid args to see that command's full usage.`),
-    dim(`Docs: ${DOCS_URL}`),
-  );
+  const flagWidth = Math.max(...GLOBAL_FLAGS.map((flag) => flag.flags.length));
+  lines.push("", leaf("GLOBAL FLAGS"));
+  for (const flag of GLOBAL_FLAGS) lines.push(`  ${flag.flags.padEnd(flagWidth)}  ${flag.purpose}  [${flag.type}]`);
+
+  lines.push("", dim(`Run \`${CLI_NAME} <command> --help\` for a command's options.`), dim(`Docs: ${DOCS_URL}`));
   return lines.join("\n");
 }

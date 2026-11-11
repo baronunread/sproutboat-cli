@@ -27,6 +27,7 @@ maintained going forward by the `release` skill.
 - **`build --standalone` skips LTO unless you pass `--release`** (or set `SPROUTBOAT_RELEASE=1`). Units still compile at `-O3`; only the link changes. Cold builds are faster and the link takes about 90 MB instead of 1.1 to 1.6 GB, at some request throughput: see docs/standalone.md, "Dev and release builds", for the measured numbers. `--release` is the old `-flto -O3` build, so publish binaries with it. Release and non-release binaries have separate build-cache entries. `deploy` and non-standalone builds are unchanged.
 - **The default endpoint is `https://dash.sproutboat.com`** (it was `https://dashboard.sproutboat.com`).
 - **Credentials live in `~/Library/Preferences/sproutboat` on macOS,** Wrangler's choice. The old `~/.config/sproutboat/credentials.json` is still read, and the next login writes the new place. Elsewhere nothing moves.
+- **`sproutboat --help` is shorter and plainer.** The tagline no longer says "on your own VPS", so it fits the Cloud and a self-hosted server alike. Each command has one short line (the detail is in `sproutboat <command> --help`), internal terms like "native-fetch sprout", "broker" and "id-less storage bindings" are gone, `delete` is under SHIP, and `kv` says it covers keys, bulk data and exports. Every command has its own emoji (`run` is 🏃, `rollback` is ⏪), and the ones that drew one cell wide now carry U+FE0F so the columns line up. A GLOBAL FLAGS section lists `-h, --help` and `-v, --version`, and the footer points to `--help` for a command's options.
 
 ### Fixed
 
