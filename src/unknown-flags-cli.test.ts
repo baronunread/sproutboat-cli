@@ -146,7 +146,7 @@ describe("--api-url on the commands that use an endpoint", () => {
       }
     const list = await cli(["secrets", "list", `--api-url=${PLANE}`]);
     expect(list.stdout).toContain("FROM_COMMUNITY");
-  });
+  }, 60_000);
 
   test("a command with no control plane refuses it, and says how to choose one", async () => {
     for (const command of ["init", "check", "types", "dev", "run", "build", "toolchain", "profile", "complete"]) {
@@ -157,21 +157,24 @@ describe("--api-url on the commands that use an endpoint", () => {
         expect(run.stderr).toContain("--profile <name> or SPROUTBOAT_API_URL");
       }
     }
-  });
+  }, 60_000);
 });
 
 describe("unknown flags", () => {
+  // One CLI process per command and flag: run them together, with room for slow CI runners.
   test("every command refuses one, with exit 2 and the flag's name", async () => {
-    for (const command of Object.keys(COMMAND_OPTIONS)) {
-      for (const flag of ["--definitely-not-a-flag", "--definitely-not-a-flag=1", "-Q"]) {
-        const run = await cli([command, flag]);
-        expect(run.code, `${command} ${flag}`).toBe(2);
-        expect(run.stderr, `${command} ${flag}`).toContain(`unknown option ${flag.split("=")[0]}`);
-        expect(run.stdout).toBe("");
-      }
-    }
+    const cases = Object.keys(COMMAND_OPTIONS).flatMap((command) =>
+      ["--definitely-not-a-flag", "--definitely-not-a-flag=1", "-Q"].map((flag) => [command, flag] as const),
+    );
+    const runs = await Promise.all(cases.map(([command, flag]) => cli([command, flag])));
+    cases.forEach(([command, flag], index) => {
+      const run = runs[index]!;
+      expect(run.code, `${command} ${flag}`).toBe(2);
+      expect(run.stderr, `${command} ${flag}`).toContain(`unknown option ${flag.split("=")[0]}`);
+      expect(run.stdout).toBe("");
+    });
     expect(hits).toEqual([]);
-  });
+  }, 60_000);
 
   test("a flag is checked wherever it sits, so a typo cannot ride along with a real command line", async () => {
     for (const args of [
@@ -186,7 +189,7 @@ describe("unknown flags", () => {
       expect(run.stderr).toContain("unknown option");
     }
     expect(hits).toEqual([]);
-  });
+  }, 60_000);
 
   test("a typo gets the nearest real flag", async () => {
     const run = await cli(["deploy", "--dry-runn"]);
