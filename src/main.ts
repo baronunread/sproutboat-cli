@@ -55,6 +55,7 @@ import {
   hostFor,
   Interrupted,
   makeCall,
+  waitForApply,
 } from "./cloud-deploy";
 import {
   APPLY_USAGE,
@@ -75,9 +76,24 @@ import {
   type D1Io,
   type Runner,
 } from "./d1-cli";
-import { deleteCloudSecret, listCloudSecrets, putCloudSecret, readSecretsFile } from "./cloud-secrets";
+import {
+  deleteCloudSecret,
+  listCloudSecrets,
+  patchCloudSecrets,
+  putCloudSecret,
+  readSecretsFile,
+} from "./cloud-secrets";
+import { parseBulkSecrets, type BulkPlan } from "./secrets-bulk";
 import { hostname as osHostname, platform as osPlatform, arch as osArch } from "node:os";
-import { CLI_NAME, COMMANDS, helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
+import {
+  CLI_NAME,
+  COMMANDS,
+  helpText,
+  resolveCommand,
+  STORAGE_PRODUCTS,
+  STORAGE_VERBS,
+  type StorageProduct,
+} from "./surface";
 import { notifyIfOutdated } from "./update-check";
 import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
@@ -1563,7 +1579,10 @@ async function domains(args: string[]) {
 }
 
 async function secrets(args: string[]) {
-  const sub = args[0] && ["list", "put", "delete"].includes(args[0]) ? args.shift()! : "list";
+  const sub = args[0] && ["list", "put", "delete", "bulk"].includes(args[0]) ? args.shift()! : "list";
+  // `--no-deploy`: change the secrets without waiting for a host to apply them as a new version.
+  const noDeploy = args.includes("--no-deploy");
+  if (noDeploy) args.splice(args.indexOf("--no-deploy"), 1);
   const flags = takeFlags(args, ["--api-url", "--account"] as const);
 
   // `--value` is opt-in; without it the value comes from stdin, so a secret does
@@ -1577,12 +1596,13 @@ async function secrets(args: string[]) {
     else positional.push(args[index]);
   }
 
+  if (sub === "bulk") return bulkSecrets(positional, flags, noDeploy);
   const name = sub === "list" ? undefined : positional.shift();
   if (sub !== "list" && !name) usageError(`secrets ${sub}: missing <NAME>`, `secrets ${sub} <NAME> [project-dir]`);
   if (name && !/^[A-Z][A-Z0-9_]*$/.test(name)) fail("secret name must be UPPER_SNAKE_CASE");
   const { apiUrl: targetUrl } = await resolveApiUrl(flags["--api-url"]);
   if ((await deployKind(targetUrl, false)) === "cloud") {
-    await guard(() => cloudSecrets(sub, name, inlineValue, positional[0], targetUrl, flags["--account"]));
+    await guard(() => cloudSecrets(sub, name, inlineValue, positional[0], targetUrl, flags["--account"], noDeploy));
     return;
   }
   const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(positional[0]), apiCredentials()]);
@@ -1612,7 +1632,98 @@ async function secrets(args: string[]) {
     }),
     "put rejected",
   );
-  console.log(ok(`set ${name} — applies on the next deploy or sprout restart`));
+  console.log(
+    ok(
+      `set ${name}; self-hosted Community applies it on the next deploy or sprout restart (it has no redeploy route yet)`,
+    ),
+  );
+}
+
+/**
+ * `secrets bulk [file]`: the input of `wrangler secret bulk` (JSON with null to delete, or .env; stdin when no file).
+ * On a Cloud endpoint it is one PATCH and so one new version; on self-hosted Community it is one call per name.
+ */
+async function bulkSecrets(
+  positional: string[],
+  flags: ReturnType<typeof takeFlags<"--api-url" | "--account">>,
+  noDeploy: boolean,
+) {
+  const file = positional.shift();
+  const directory = positional[0];
+  if (file === undefined && process.stdin.isTTY)
+    usageError(
+      "secrets bulk: missing <file>, and nothing is piped on stdin",
+      "secrets bulk [file.json | file.env] [project-dir]",
+    );
+  let text: string;
+  try {
+    text = file === undefined ? await Bun.stdin.text() : await readFile(resolve(file), "utf8");
+  } catch {
+    return fail(`${file}: cannot read the file`);
+  }
+  let plan: BulkPlan | undefined;
+  guardSync(() => {
+    plan = parseBulkSecrets(text, file ?? "stdin");
+  });
+  const bulk = plan!;
+  for (const warning of bulk.warnings) console.warn(amber(`! ${warning}`));
+  const sets = Object.keys(bulk.set).length;
+  const summary = `${sets} set, ${bulk.delete.length} deleted`;
+  const { apiUrl: targetUrl } = await resolveApiUrl(flags["--api-url"]);
+  const project = await readProjectConfig(directory);
+  const app = project.config.name;
+  if ((await deployKind(targetUrl, false)) === "cloud") {
+    await guard(async () => {
+      const credentials = await cloudCredentials(targetUrl, flags["--account"] ?? project.account);
+      const generation = await patchCloudSecrets(credentials, app, bulk);
+      await finishCloudSecretChange({ credentials, app, generation, noDeploy, what: `${summary} on ${app}` });
+    });
+    return;
+  }
+  const { apiUrl, token } = await apiCredentials(flags["--api-url"]);
+  const base = `${apiUrl}/api/projects/${app}/secrets`;
+  const auth = { "x-api-key": token };
+  for (const [secretName, value] of Object.entries(bulk.set))
+    await responseText(
+      await fetch(`${base}/${secretName}`, {
+        method: "PUT",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ value }),
+      }),
+      `put ${secretName} rejected`,
+    );
+  for (const secretName of bulk.delete)
+    await responseText(
+      await fetch(`${base}/${secretName}`, { method: "DELETE", headers: auth }),
+      `delete ${secretName} rejected`,
+    );
+  console.log(ok(`${summary}; self-hosted Community applies them on the next deploy or sprout restart`));
+}
+
+/**
+ * After a secrets write on the Cloud: it is a new record generation, which a host applies as a new version of the
+ * running module (the same module, the new secrets). Wait for that, as `wrangler secret put` deploys at once, unless
+ * --no-deploy asks to return as soon as the write is stored.
+ */
+async function finishCloudSecretChange(input: {
+  credentials: Awaited<ReturnType<typeof cloudCredentials>>;
+  app: string;
+  generation: number | undefined;
+  noDeploy: boolean;
+  what: string;
+}) {
+  const { credentials, app, generation, noDeploy, what } = input;
+  if (generation === undefined || noDeploy) {
+    console.log(ok(`${what}; applies when a host picks up the new record`));
+    return;
+  }
+  const io = terminalIo();
+  const applied = await waitForApply(makeCall(credentials), { project: app }, generation, io);
+  if (applied) console.log(ok(`${what}; a new version is live (generation ${generation})`));
+  else
+    console.log(
+      amber(`! ${what}; generation ${generation} is saved, but no host has applied it yet: it goes live when one does`),
+    );
 }
 
 /** The signed-in session for a Cloud endpoint as the credentials every Cloud call takes; logs in first when it can. */
@@ -1636,6 +1747,7 @@ async function cloudSecrets(
   directory: string | undefined,
   apiUrl: string,
   accountFlag: string | undefined,
+  noDeploy: boolean,
 ) {
   const project = await readProjectConfig(directory);
   const app = project.config.name;
@@ -1646,14 +1758,14 @@ async function cloudSecrets(
     return;
   }
   if (sub === "delete") {
-    await deleteCloudSecret(credentials, app, name!);
-    console.log(ok(`removed ${name} from ${app}; applies when a host picks up the new record`));
+    const generation = await deleteCloudSecret(credentials, app, name!);
+    await finishCloudSecretChange({ credentials, app, generation, noDeploy, what: `removed ${name} from ${app}` });
     return;
   }
   const value = inlineValue ?? (await Bun.stdin.text()).replace(/\r?\n$/, "");
   if (!value) fail("no value: pipe it on stdin, or pass --value <value>");
-  await putCloudSecret(credentials, app, name!, value);
-  console.log(ok(`set ${name} on ${app}; applies when a host picks up the new record`));
+  const generation = await putCloudSecret(credentials, app, name!, value);
+  await finishCloudSecretChange({ credentials, app, generation, noDeploy, what: `set ${name} on ${app}` });
 }
 
 async function confirmOnTerminal(question: string): Promise<boolean> {
@@ -2150,7 +2262,7 @@ function usageOf(name: string): string {
 }
 
 function commandHelp(name: string): never {
-  const found = COMMANDS.find((c) => c.name === name);
+  const found = COMMANDS.find((c) => c.name === resolveCommand(name));
   if (!found) usage();
   console.log(`${dim(`usage: ${CLI_NAME} ${name}${found.args ? ` ${found.args}` : ""}`)}\n\n${found.summary}`);
   process.exit(0);
@@ -2163,7 +2275,7 @@ const FISH_COMPLETION = (names: string) => `complete -c ${CLI_NAME} -n "__fish_u
 
 /** `sproutboat complete [shell]`: a static completion script for the top-level commands. */
 function complete(shell?: string): void {
-  const names = COMMANDS.map((c) => c.name).join(" ");
+  const names = COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]).join(" ");
   const scripts = { bash: BASH_COMPLETION(names), zsh: ZSH_COMPLETION(names), fish: FISH_COMPLETION(names) };
   const key = shell ?? process.env.SHELL?.split("/").pop() ?? "bash";
   const script = key === "bash" || key === "zsh" || key === "fish" ? scripts[key] : undefined;
@@ -2224,7 +2336,7 @@ args.splice(0, args.length, ...checked.args);
 if (!(command === "tail" && args.some((arg) => arg === "--file" || arg.startsWith("--file="))))
   await notifyIfOutdated(CLI_VERSION);
 
-switch (command) {
+switch (resolveCommand(command)) {
   case "init":
     await init(args[0]);
     break;

@@ -225,7 +225,7 @@ async function resolveAssets(
 }
 
 /** Wait for a host to apply `generation`; false at the deadline. */
-async function waitForApply(
+export async function waitForApply(
   call: CallFn,
   plan: { project: string; waitMs?: number; pollMs?: number },
   generation: number,
