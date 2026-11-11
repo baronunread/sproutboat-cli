@@ -1,0 +1,30 @@
+{
+  // The same app for `sproutboat build --standalone -c sproutboat.standalone.jsonc`.
+  // It is sproutboat.jsonc without the `services` entry: a standalone binary has
+  // no edge to route a service binding through, and the build refuses one. The
+  // dashboard sees `env.PEER` is missing and says so on that tile.
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "kitchen-sink",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-18",
+  "vars": {
+    "SITE_NAME": "Sproutboat Notes",
+    "QUOTE_URL": "https://api.quotable.local/random",
+    "MAX_UPLOAD_BYTES": "65536",
+  },
+  "secrets": ["ADMIN_TOKEN"],
+  "kv_namespaces": ["SESSIONS"],
+  "d1_databases": ["DB"],
+  "r2_buckets": ["UPLOADS"],
+  "queues": ["EMAILS"],
+  "analytics_engine_datasets": ["METRICS"],
+  "durable_objects": { "VIEWS": "ViewCounter", "ROOM": "ChatRoom" },
+  "ratelimiters": [{ "binding": "THROTTLE", "limit": 3, "period": 60 }],
+  "triggers": { "crons": ["*/1 * * * *"] },
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_sprout_first": true,
+  },
+}

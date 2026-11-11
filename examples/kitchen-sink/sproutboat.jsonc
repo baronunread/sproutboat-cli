@@ -22,7 +22,7 @@
   "r2_buckets": ["UPLOADS"],
   "queues": ["EMAILS"],
   "analytics_engine_datasets": ["METRICS"],
-  "durable_objects": { "VIEWS": "ViewCounter" },
+  "durable_objects": { "VIEWS": "ViewCounter", "ROOM": "ChatRoom" },
   "ratelimiters": [{ "binding": "THROTTLE", "limit": 3, "period": 60 }],
   // #48 — worker-to-worker. The target must be a *different* deployment: one
   // sprout serves one turn at a time, so a binding pointing back at its own
@@ -30,8 +30,8 @@
   "services": [{ "binding": "PEER", "service": "quote-service" }],
   "triggers": { "crons": ["*/1 * * * *"] },
   "assets": {
-    // built by Astro — run `bun --cwd web run build` (harness.ts / serve.ts do this for you)
-    "directory": "web/dist",
+    // dist/ is public/ plus build-info.json: run `bun run build` (the harnesses and serve.ts do it for you)
+    "directory": "dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_sprout_first": true,

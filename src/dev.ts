@@ -105,6 +105,52 @@ export type Running = {
   disableDispatch: () => void;
 };
 
+/** One browser WebSocket and the connection to the sprout that answers it. */
+type SocketRelay = {
+  url: string;
+  protocols: string[];
+  /** Frames that arrived before the sprout side finished opening. */
+  queued: Array<string | Uint8Array<ArrayBuffer>>;
+  upstream?: WebSocket;
+};
+
+const socketRelay: Bun.WebSocketHandler<SocketRelay> = {
+  open(client) {
+    const relay = client.data;
+    const upstream = new WebSocket(relay.url, relay.protocols);
+    upstream.binaryType = "arraybuffer";
+    relay.upstream = upstream;
+    upstream.addEventListener("open", () => {
+      for (const frame of relay.queued.splice(0)) upstream.send(frame);
+    });
+    upstream.addEventListener("message", (event) => {
+      if (client.readyState !== 1) return;
+      // SAFETY: binaryType is "arraybuffer", so a frame is a string or an ArrayBuffer.
+      client.send(event.data as string | ArrayBuffer);
+    });
+    upstream.addEventListener("close", (event) => {
+      // 1005 and 1006 are reserved for the receiver to report; they cannot be sent.
+      const code =
+        event.code >= 1000 && event.code < 5000 && event.code !== 1005 && event.code !== 1006 ? event.code : 1000;
+      client.close(code, event.reason);
+    });
+    upstream.addEventListener("error", () => client.close(1011, "sprout unavailable"));
+  },
+  message(client, message) {
+    const upstream = client.data.upstream;
+    const frame = message instanceof Uint8Array ? new Uint8Array(message) : message;
+    if (upstream && upstream.readyState === 1) upstream.send(frame);
+    else client.data.queued.push(frame);
+  },
+  close(client, code, reason) {
+    const upstream = client.data.upstream;
+    if (!upstream || upstream.readyState > 1) return;
+    try {
+      upstream.close(code === 1005 || code === 1006 ? 1000 : code, reason);
+    } catch {}
+  },
+};
+
 async function start(input: DevInput, port: number): Promise<Running> {
   const candidateDir = resolve(
     input.projectDir,
@@ -285,12 +331,26 @@ export async function runDev(input: DevInput): Promise<void> {
   // what lets a failed startup leave the last known-good process reachable.
   let proxy: ReturnType<typeof Bun.serve>;
   try {
-    proxy = Bun.serve({
+    proxy = Bun.serve<SocketRelay>({
       hostname: "127.0.0.1",
       port: input.port,
       maxRequestBodySize: 5 * 1024 * 1024 * 1024,
+      websocket: socketRelay,
       fetch(request, server) {
         const target = new URL(request.url);
+        // A WebSocket upgrade cannot go through fetch(): relay it, frame by frame, to the sprout.
+        if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+          target.protocol = "ws:";
+          target.host = `127.0.0.1:${activePort}`;
+          const protocols = request.headers.get("sec-websocket-protocol");
+          const data: SocketRelay = {
+            url: target.toString(),
+            protocols: protocols ? protocols.split(",").map((entry) => entry.trim()) : [],
+            queued: [],
+          };
+          if (server.upgrade(request, { data })) return undefined;
+          return new Response("WebSocket upgrade failed", { status: 400 });
+        }
         const directTransfer = /^\/__sb\/r2\/transfer\/[A-Z][A-Z0-9_]*\/[0-9a-f]{24}$/.test(target.pathname);
         if (directTransfer) server.timeout(request, 255);
         if (directTransfer && !activeTransferPort) return new Response("direct transfers unavailable", { status: 503 });
@@ -319,7 +379,8 @@ export async function runDev(input: DevInput): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     for (const watcher of watchers) watcher.close();
-    proxy.stop();
+    // Close open sockets too: a graceful stop waits for a WebSocket the browser keeps open.
+    proxy.stop(true);
     if (pendingCandidate) stop(pendingCandidate);
     stop(running);
     resolveShutdown?.();
