@@ -133,15 +133,16 @@ test("login to a second endpoint keeps whoami reporting the first, with the sour
       stdout: expect.stringContaining(`endpoint  ${prodUrl}  (--api-url)`),
       stderr: "",
     });
-    expect(first.stdout).not.toContain("active endpoint remains");
+    expect(first.stdout).toContain('stored as the profile "default"');
+    expect(first.stdout).not.toContain("the default profile stays");
 
     const second = await run(["login", "--api-url", "http://127.0.0.1:1", "--token", "dev-token"]);
-    expect(second.stdout).toContain(`active endpoint remains ${prodUrl}`);
+    expect(second.stdout).toContain(`the default profile stays "default" (${prodUrl})`);
 
     const who = await run(["whoami"]);
     expect(who).toEqual({
       code: 0,
-      stdout: expect.stringContaining(`endpoint  ${prodUrl}  (saved active endpoint)`),
+      stdout: expect.stringContaining(`endpoint  ${prodUrl}  (profile default)`),
       stderr: "",
     });
     expect(who.stdout).toContain("prod-account");

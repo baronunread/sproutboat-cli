@@ -4,7 +4,15 @@
  * against a fake server with an injected `CloudIo`.
  */
 import { isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject } from "./json";
-import { forgetToken, saveTeam, savedProfile, type EndpointKind, type Profile, type StoredTeam } from "./credentials";
+import {
+  forgetToken,
+  saveTeam,
+  savedProfile,
+  type EndpointKind,
+  type Profile,
+  type SaveResult,
+  type StoredTeam,
+} from "./credentials";
 
 export const DEFAULT_API_URL = "https://dash.sproutboat.com";
 export const CLI_CLIENT_ID = "sproutboat-cli";
@@ -315,12 +323,12 @@ async function teamsOf(apiUrl: string, profile: Profile): Promise<Record<string,
 /** Run the device flow and keep the key. */
 export async function loginAndStore(
   options: DeviceLoginOptions,
-): Promise<StoredLogin & { activeApiUrl: string; keyName: string }> {
+): Promise<StoredLogin & SaveResult & { keyName: string }> {
   const result = await deviceLogin(options);
-  const { activeApiUrl } = await saveTeam(options.apiUrl, result.slug, result.team);
+  const saved = await saveTeam(options.apiUrl, result.slug, result.team);
   if (options.account && options.account !== result.slug)
     options.io.warn(`You approved the team "${result.slug}", not "${options.account}".`);
-  return { slug: result.slug, team: result.team, activeApiUrl, keyName: result.keyName };
+  return { slug: result.slug, team: result.team, ...saved, keyName: result.keyName };
 }
 
 /** Store a key the person already holds (`login --token`), after asking the Cloud whose it is. */

@@ -14,7 +14,20 @@ import { runDev } from "./dev";
 import { buildStandalone, emitStandalone, isReleaseBuild } from "./standalone-build";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
-import { activeApiUrl, forgetToken, savedProfile, savedToken, saveToken } from "./credentials";
+import {
+  activeProfileName,
+  forgetToken,
+  listProfiles,
+  PROFILE_NAME,
+  savedProfile,
+  savedProfileName,
+  savedToken,
+  saveToken,
+  selectProfile,
+  useProfile,
+} from "./credentials";
+import { extractGlobalFlags, globalFlags, locateProject, setGlobalFlags } from "./global-flags";
+import { chooseTarget, TargetError, type Target } from "./target";
 import { configAccount, parseProjectConfig } from "./account-field";
 import {
   cloudLogout,
@@ -70,24 +83,54 @@ if (internalModeAt > 0) {
 
 const defaultApiUrl = DEFAULT_API_URL;
 
-type ApiUrlSource = "SPROUTBOAT_API_URL" | "--api-url" | "saved active endpoint" | "default";
-
 /**
- * baronunread/sproutboat#204 — the single place `defaultApiUrl` and
- * `activeApiUrl()` are read. Used to be implemented three different ways
- * across `apiCredentials()`, `whoami()` and `parseLoginArgs()`, none of which
- * told the user which endpoint it picked; `whoami` could report "not logged
- * in" on a machine where `deploy` would happily target prod. Precedence: an
- * explicit `--api-url` flag, then `SPROUTBOAT_API_URL`, then the saved active
- * endpoint, then the default.
+ * baronunread/sproutboat#204 — the single place the endpoint and the stored profile are chosen. `chooseTarget`
+ * (target.ts) holds the precedence: the flags, then the environment, then the machine's active profile, then the
+ * default endpoint, and a profile and a URL that name different places are an error. The choice is also what the
+ * credential lookups use for the rest of the run.
  */
-async function resolveApiUrl(explicitApiUrl?: string): Promise<{ apiUrl: string; source: ApiUrlSource }> {
-  if (explicitApiUrl) return { apiUrl: explicitApiUrl.replace(/\/$/, ""), source: "--api-url" };
-  const envUrl = process.env.SPROUTBOAT_API_URL;
-  if (envUrl) return { apiUrl: envUrl.replace(/\/$/, ""), source: "SPROUTBOAT_API_URL" };
-  const saved = await activeApiUrl();
-  if (saved) return { apiUrl: saved.replace(/\/$/, ""), source: "saved active endpoint" };
-  return { apiUrl: defaultApiUrl, source: "default" };
+async function resolveApiUrl(
+  explicitApiUrl?: string,
+  options: { allowNewProfile?: boolean } = {},
+): Promise<{ apiUrl: string; source: string; target: Target }> {
+  const profiles: Record<string, { apiUrl: string }> = {};
+  for (const { name, profile } of await listProfiles()) profiles[name] = { apiUrl: profile.apiUrl };
+  let target: Target;
+  try {
+    target = chooseTarget({
+      flagUrl: explicitApiUrl,
+      flagProfile: globalFlags().profile,
+      envUrl: process.env.SPROUTBOAT_API_URL || undefined,
+      envProfile: process.env.SPROUTBOAT_PROFILE || undefined,
+      profiles,
+      activeProfile: await activeProfileName(),
+      defaultUrl: defaultApiUrl,
+      allowNew: options.allowNewProfile,
+    });
+  } catch (error) {
+    if (error instanceof TargetError) fail(error.message);
+    throw error;
+  }
+  selectProfile(target.profile?.name);
+  return { apiUrl: target.apiUrl, source: target.source, target };
+}
+
+/** The two lines that say where a command is about to act: which profile, and which endpoint. */
+async function printTarget(target: Target): Promise<void> {
+  const profile = target.profile;
+  const name = profile?.name ?? (await savedProfileName(target.apiUrl));
+  const why = profile
+    ? `${profile.source}${profile.exists ? "" : ", new"}`
+    : name
+      ? "the stored login for this endpoint"
+      : "nothing stored for this endpoint";
+  const credential = envToken();
+  console.log(
+    `profile   ${name ?? "-"}  ${dim(`(${why}${credential ? `; the credential comes from ${credential.source}` : ""})`)}`,
+  );
+  const sourceLabel =
+    target.source === "profile" ? `profile ${profile?.name}` : target.source === "default" ? "default" : target.source;
+  console.log(`endpoint  ${target.apiUrl}  ${dim(`(${sourceLabel})`)}`);
 }
 
 /** Warn at most once per run: every API response carries the headers, and one
@@ -234,16 +277,29 @@ function usageError(what: string, usage: string): never {
   process.exit(2);
 }
 
+/** The project directory and config file, from a positional directory and `--config`. */
+function locate(directory?: string) {
+  try {
+    return locateProject(directory);
+  } catch (error) {
+    if (error instanceof Error) return fail(error.message);
+    throw error;
+  }
+}
+
 /** Read the project identity and configuration without touching application code.
  * Management commands must remain usable when a local checkout is incomplete. */
-async function readProjectConfig(directory = process.cwd()) {
-  const projectDirectory = resolve(directory);
-  const configPath = resolve(projectDirectory, "sproutboat.jsonc");
+async function readProjectConfig(directory?: string) {
+  const { directory: projectDirectory, configPath } = locate(directory);
   let configSource: string;
   try {
     configSource = await readFile(configPath, "utf8");
   } catch {
-    fail(`no sproutboat.jsonc found in ${projectDirectory}`);
+    fail(
+      globalFlags().config === undefined
+        ? `no sproutboat.jsonc found in ${projectDirectory}`
+        : `no config file at ${configPath}`,
+    );
   }
   const parsed = parseProjectConfig(configSource);
   if (!parsed.ok) fail(parsed.errors.join("\n"));
@@ -252,7 +308,7 @@ async function readProjectConfig(directory = process.cwd()) {
 }
 
 /** Full build input: configuration plus entry point, resolved imports and checks. */
-async function readProject(directory = process.cwd()) {
+async function readProject(directory?: string) {
   const project = await readProjectConfig(directory);
   const sourcePath = resolve(project.directory, project.config.main);
   let source: string;
@@ -484,23 +540,22 @@ async function emitStandaloneUnit(directory: string | undefined): Promise<string
 }
 
 /** #62 — build for this machine, run it against a real broker, rebuild on save. */
-const DEV_USAGE = "dev [project-dir] [--port <n>] [--no-watch] [--env <name>] [--env-file <file>]...";
+const DEV_USAGE = "dev [project-dir] [--port <n>] [--no-watch] [-e, --env <name>] [--env-file <file>]...";
 
 async function dev(args: string[]) {
   let directory: string | undefined;
   let portArg: string | undefined;
-  let envName: string | undefined;
-  const envFiles: string[] = [];
+  // --env and --env-file are global flags, already taken out of `args` (global-flags.ts).
+  const envName = globalFlags().env;
+  const envFiles = globalFlags().envFiles.map((file) => resolve(file));
   for (let at = 0; at < args.length; at += 1) {
     const arg = args[at];
     if (arg === "--no-watch") continue;
-    if (arg === "--port" || arg === "--env" || arg === "--env-file") {
+    if (arg === "--port") {
       const value = args[at + 1];
       if (value === undefined || value.startsWith("--")) usageError(`${arg} needs a value`, DEV_USAGE);
       at += 1;
-      if (arg === "--port") portArg = value;
-      else if (arg === "--env") envName = value;
-      else envFiles.push(resolve(value));
+      portArg = value;
     } else if (!arg.startsWith("--") && directory === undefined) directory = arg;
   }
   const port = Number(portArg ?? 8787);
@@ -534,9 +589,11 @@ async function dev(args: string[]) {
 async function run(args: string[]) {
   const result = parseRunArgs(args);
   if ("error" in result) usageError(result.error, RUN_USAGE);
+  // --env-file is a global flag, already taken out of `args` (global-flags.ts).
+  result.args.envFiles.unshift(...globalFlags().envFiles);
   let plan;
   try {
-    plan = await planRun(result.args, { cwd: process.cwd(), inherited: process.env });
+    plan = await planRun(result.args, { cwd: process.cwd(), inherited: process.env, config: globalFlags().config });
   } catch (error) {
     if (error instanceof RunError || error instanceof EnvFileError || error instanceof MissingSecretsError)
       fail(error.message);
@@ -570,8 +627,8 @@ const PROVISION_FIELDS = [
  * deploy, and the id is written back into `sproutboat.jsonc`. `--no-provision`
  * skips this — those bindings then get an ephemeral deploy-scoped store.
  */
-async function provisionBindings(directory = process.cwd()): Promise<void> {
-  const configPath = resolve(directory, "sproutboat.jsonc");
+async function provisionBindings(directory?: string): Promise<void> {
+  const { configPath } = locate(directory);
   let source = await readFile(configPath, "utf8");
   const parsed = parseProjectConfig(source);
   if (!parsed.ok) return; // build() re-reads and reports the config error
@@ -605,7 +662,8 @@ async function provisionBindings(directory = process.cwd()): Promise<void> {
 
 /** #79 — wrangler parity: drop the stored credential for an endpoint. */
 async function logout(args: string[]) {
-  const { apiUrl, account } = await parseLoginArgs(args);
+  const { apiUrl, account, target } = await parseLoginArgs(args);
+  await printTarget(target);
   if ((await savedProfile(apiUrl))?.kind === "cloud") {
     const outcome = await guard(() => cloudLogout(apiUrl, account));
     if (outcome.kind === "none") {
@@ -633,16 +691,47 @@ async function logout(args: string[]) {
     console.log(dim("no active endpoint remains — the next command falls through to the default"));
 }
 
+/** `profile list` and `profile use <name>`: the stored profiles, and which one a command uses by default. */
+async function profile(args: string[]) {
+  const sub = args[0] ?? "list";
+  if (sub === "use") {
+    const name = args[1];
+    if (!name || args.length > 2) usageError("profile use needs a profile name", "profile <list | use <name>>");
+    if (!(await useProfile(name))) {
+      const known = (await listProfiles()).map((entry) => entry.name);
+      fail(
+        `no profile named "${name}"${known.length > 0 ? ` (profiles: ${known.join(", ")})` : ""}; create it with \`sproutboat login --profile ${name}\``,
+      );
+    }
+    console.log(ok(`${name} is now the default profile`));
+    return;
+  }
+  if (sub !== "list" || args.length > 1)
+    usageError(`profile: unknown subcommand "${sub}"`, "profile <list | use <name>>");
+  const entries = await listProfiles();
+  if (entries.length === 0) {
+    console.log("no profiles stored; run `sproutboat login`");
+    return;
+  }
+  const width = Math.max(...entries.map((entry) => entry.name.length));
+  for (const { name, active, profile: stored } of entries) {
+    const kind = stored.kind === "cloud" ? "Cloud" : stored.kind === "community" ? "Community" : "";
+    const team = stored.kind === "cloud" && stored.team ? ` team ${stored.team}` : "";
+    console.log(`${active ? "*" : " "} ${name.padEnd(width)}  ${stored.apiUrl}  ${dim(`${kind}${team}`.trim())}`);
+  }
+  console.log(dim("* is the default profile; pick another for one command with --profile <name>"));
+}
+
 /**
  * #79 — wrangler parity: which endpoint, and who the stored token belongs to.
  * The account comes from the control plane, so this also proves the token still
  * works rather than only reporting what is on disk.
  */
 async function whoami(args: string[]) {
-  const { apiUrl, source, account: wanted } = await parseLoginArgs(args);
+  const { apiUrl, target, account: wanted } = await parseLoginArgs(args);
   const fromEnv = envToken();
   const saved = await savedProfile(apiUrl);
-  console.log(`endpoint  ${apiUrl}  (${source})`);
+  await printTarget(target);
   const kind = saved?.kind ?? (fromEnv ? await kindOf(apiUrl) : undefined);
   if (kind === "cloud") {
     const team = wanted ?? saved?.team ?? Object.keys(saved?.teams ?? {})[0];
@@ -692,7 +781,8 @@ async function whoami(args: string[]) {
 async function deploy(args: string[]) {
   const flags = takeFlags(args, DEPLOY_FLAGS);
   const dryRun = args.includes("--dry-run");
-  const { apiUrl: targetUrl } = await resolveApiUrl(flags["--api-url"]);
+  const { apiUrl: targetUrl, target } = await resolveApiUrl(flags["--api-url"]);
+  await printTarget(target);
   const kind = await deployKind(targetUrl, dryRun);
   if (kind === "cloud") {
     if (args.includes("--artifact"))
@@ -744,8 +834,7 @@ async function deploy(args: string[]) {
     console.log("\n--dry-run: not uploading.");
     return;
   }
-  const { apiUrl, token, source } = await apiCredentials(flags["--api-url"]);
-  console.log(`endpoint  ${apiUrl}  (${source})`);
+  const { apiUrl, token } = await apiCredentials(flags["--api-url"]);
   const form = new FormData();
   form.set("manifest", new File([await manifest.arrayBuffer()], "manifest.json", { type: "application/json" }));
   form.set("sprout", new File([await sprout.arrayBuffer()], "sprout", { type: "application/octet-stream" }));
@@ -835,7 +924,7 @@ async function waitForHealthy(url: string, timeoutMs: number): Promise<boolean> 
   return false;
 }
 
-async function parseLoginArgs(args: string[]) {
+async function parseLoginArgs(args: string[], options: { allowNewProfile?: boolean } = {}) {
   let explicitApiUrl: string | undefined;
   let token: string | undefined;
   let account: string | undefined;
@@ -850,19 +939,24 @@ async function parseLoginArgs(args: string[]) {
         "login [--api-url <url>] [--token <token>] [--account <team>]",
       );
   }
-  const { apiUrl, source } = await resolveApiUrl(explicitApiUrl);
-  return { apiUrl, source, token, account };
+  const { apiUrl, source, target } = await resolveApiUrl(explicitApiUrl, options);
+  return { apiUrl, source, target, token, account };
 }
 
-/** Announce a login that left the machine's active endpoint pointed elsewhere. */
-function reportActiveEndpoint(apiUrl: string, active: string): void {
-  if (active !== apiUrl)
-    console.log(dim(`active endpoint remains ${active} — \`sproutboat logout\` it first to switch`));
+/** Say which profile a login went to, and when it left the machine's default profile pointed elsewhere. */
+function reportSaved(saved: { profile: string; activeProfile: string; activeApiUrl: string }): void {
+  console.log(dim(`  stored as the profile "${saved.profile}"`));
+  if (saved.activeProfile !== saved.profile)
+    console.log(
+      dim(
+        `  the default profile stays "${saved.activeProfile}" (${saved.activeApiUrl}); use --profile ${saved.profile}, or \`sproutboat profile use ${saved.profile}\``,
+      ),
+    );
 }
 
 async function login(args: string[]) {
-  const { apiUrl, source, token: directToken, account } = await parseLoginArgs(args);
-  console.log(`endpoint  ${apiUrl}  (${source})`);
+  const { apiUrl, target, token: directToken, account } = await parseLoginArgs(args, { allowNewProfile: true });
+  await printTarget(target);
   const kind = await kindOf(apiUrl);
   if (kind === undefined && !directToken) fail(`cannot reach ${apiUrl}; check the address and your network`);
   if (kind === "cloud") {
@@ -872,9 +966,9 @@ async function login(args: string[]) {
   // Self-hosted / non-interactive: skip the browser flow and store the token
   // the admin already holds (e.g. SPROUTBOAT_BOOTSTRAP_TOKEN).
   if (directToken) {
-    const { activeApiUrl: active } = await saveToken(apiUrl, directToken, kind);
+    const saved = await saveToken(apiUrl, directToken, kind);
     console.log(`Saved credentials for ${apiUrl}.`);
-    reportActiveEndpoint(apiUrl, active);
+    reportSaved(saved);
     return;
   }
   const response = await fetch(`${apiUrl}/api/cli/authorizations`, { method: "POST" });
@@ -907,9 +1001,9 @@ async function login(args: string[]) {
     if (!exchange.ok) fail(`login failed (${exchange.status}): ${result}`);
     const token = parseToken(result);
     if (!token) fail("login response did not include a CLI token");
-    const { activeApiUrl: active } = await saveToken(apiUrl, token, "community");
+    const saved = await saveToken(apiUrl, token, "community");
     console.log(ok("login approved — credentials saved for this endpoint"));
-    reportActiveEndpoint(apiUrl, active);
+    reportSaved(saved);
     return;
   }
   fail("login expired before approval");
@@ -1045,7 +1139,7 @@ async function cloudLogin(apiUrl: string, directToken: string | undefined, accou
     ),
   );
   console.log(dim("  revoke it any time under Settings, API keys, or with `sproutboat logout`"));
-  reportActiveEndpoint(apiUrl, done.activeApiUrl);
+  reportSaved(done);
 }
 
 async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typeof takeFlags<DeployFlag>>) {
@@ -1925,13 +2019,37 @@ function complete(shell?: string): void {
   console.log(script);
 }
 
-const [command, ...args] = process.argv.slice(2);
-if (command === undefined || command === "help" || command === "-h" || command === "--help") help();
-if (command === "--version" || command === "-v") {
+const GLOBAL_USAGE =
+  "<command> [-c, --config <file>] [--cwd <dir>] [-e, --env <name>] [--env-file <file>]... [--profile <name>] [-v, --version]";
+const parsedArgv = extractGlobalFlags(process.argv.slice(2));
+if ("error" in parsedArgv) usageError(parsedArgv.error, GLOBAL_USAGE);
+const globals = parsedArgv.flags;
+if (globals.version) {
   console.log(`sproutboat ${CLI_VERSION}`);
   process.exit(0);
 }
+if (globals.cwd !== undefined) {
+  try {
+    process.chdir(globals.cwd);
+  } catch {
+    fail(`--cwd: no such directory: ${globals.cwd}`);
+  }
+}
+setGlobalFlags(globals);
+const [command, ...args] = parsedArgv.rest;
+if (command === undefined || command === "help" || command === "-h" || command === "--help") help();
 if (args.includes("-h") || args.includes("--help")) commandHelp(command);
+
+// A flag a command cannot honour is an error, not a quiet no-op: `deploy --env staging` must not deploy.
+if (globals.env !== undefined && command !== "dev")
+  usageError(
+    `${command} does not use --env: it only selects .dev.vars.<name> and the .env.<name> files for \`dev\`, and sproutboat.jsonc has no environments`,
+    GLOBAL_USAGE,
+  );
+if (globals.envFiles.length > 0 && command !== "dev" && command !== "run")
+  usageError(`${command} does not read env files; --env-file is for \`dev\` and \`run\``, GLOBAL_USAGE);
+if (globals.profile !== undefined && !PROFILE_NAME.test(globals.profile))
+  usageError(`"${globals.profile}" is not a profile name (letters, digits, . _ -; at most 64)`, GLOBAL_USAGE);
 
 // A local log needs no network: skip the version check for it (#268).
 if (!(command === "tail" && args.some((arg) => arg === "--file" || arg.startsWith("--file="))))
@@ -1997,6 +2115,9 @@ switch (command) {
     break;
   case "whoami":
     await whoami(args);
+    break;
+  case "profile":
+    await profile(args);
     break;
   case "deploy":
     await deploy(args);
