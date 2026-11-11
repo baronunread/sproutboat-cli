@@ -202,13 +202,13 @@ async function sessionNames(env) {
 // ---------------------------------------------------------------------------
 
 // #region timing
-// Sub-millisecond clock. Date.now() is only the fallback for a runtime without performance.
+// Millisecond clock: Date.now(), so timings are whole milliseconds. Do not reach for
+// performance.now() here: a free reference to `performance` (like process, Buffer,
+// setImmediate or MessageChannel) makes the compiler add an import of node:perf_hooks
+// to the program's shared part, and a Cloud build against the shared generation is
+// then refused with abi_rejected.
 function clock() {
-  try {
-    return performance.now();
-  } catch {
-    return Date.now();
-  }
+  return Date.now();
 }
 
 const ms2 = (t0) => Math.round((clock() - t0) * 100) / 100;
