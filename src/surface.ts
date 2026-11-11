@@ -159,7 +159,7 @@ export const COMMANDS: readonly Command[] = [
     group: "Ship",
     emoji: "📜",
     short: "List or view deployed versions",
-    args: "<list | view <version-id>> [project-dir]",
+    args: "<list | view <version-id>> [project-dir] [--api-url <url>]",
     brief: "<list | view>",
     summary: "List the project's deployed versions, or show one version's artifact and bindings.",
   },
@@ -168,7 +168,7 @@ export const COMMANDS: readonly Command[] = [
     group: "Ship",
     emoji: "⏪",
     short: "Re-activate a previous version",
-    args: "<version-id> [project-dir]",
+    args: "<version-id> [project-dir] [--api-url <url>]",
     brief: "<version-id>",
     summary: "Re-activate a previous version.",
   },
@@ -177,7 +177,7 @@ export const COMMANDS: readonly Command[] = [
     group: "Ship",
     emoji: "📡",
     short: "Stream live requests, logs and exceptions",
-    args: "[project-dir] [--format pretty|json] [--status ok|error|<code>|5xx] [--method GET,POST] [--sampling-rate <0..1>] [--search <text>] [--outcome <name>] [--recent] [--sprout] [--file <log|-> [--lines <n>] [--no-follow]]",
+    args: "[project-dir] [--format pretty|json] [--status ok|error|<code>|5xx] [--method GET,POST] [--sampling-rate <0..1>] [--search <text>] [--outcome <name>] [--recent] [--sprout] [--file <log|-> [--lines <n>] [--no-follow]] [--api-url <url>]",
     brief: "[project-dir]",
     summary:
       "Stream live request events, console output and exceptions (like wrangler tail); --recent prints the last 100 request records, --sprout the running app's own stdout and stderr logs. --file follows the JSON records a standalone binary writes with SB_LOG=json (no login needed).",
@@ -188,7 +188,7 @@ export const COMMANDS: readonly Command[] = [
     group: "Ship",
     emoji: "🗑️",
     short: "Delete the app and all its versions",
-    args: "[project-dir] [--name <project>] --yes",
+    args: "[project-dir] [--name <project>] --yes [--api-url <url>]",
     brief: "[project-dir]",
     summary: "Delete the project, every version, and its route.",
   },
@@ -200,7 +200,7 @@ export const COMMANDS: readonly Command[] = [
     group: "Configure",
     emoji: "🌐",
     short: "Attach custom domains",
-    args: "<list | add <host> | verify <host> | delete <host>> [project-dir]",
+    args: "<list | add <host> | verify <host> | delete <host>> [project-dir] [--api-url <url>]",
     brief: "<list | add | verify | delete>",
     summary: "Attach a custom domain to the project (TXT-verified). No sub-command lists.",
   },
@@ -271,7 +271,7 @@ export const ENV_VARS: readonly EnvVar[] = [
   {
     name: "SPROUTBOAT_API_URL",
     purpose:
-      "Control-plane URL. Overrides the active profile's endpoint; it must match SPROUTBOAT_PROFILE when both are set.",
+      "Control-plane URL, the same as --api-url (which wins). Overrides the active profile's endpoint; it must match SPROUTBOAT_PROFILE when both are set.",
   },
   {
     name: "SPROUTBOAT_PROFILE",

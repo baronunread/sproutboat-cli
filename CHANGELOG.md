@@ -35,6 +35,7 @@ maintained going forward by the `release` skill.
 
 ### Fixed
 
+- **A command never ignores a flag it does not know, and a URL is never a project directory.** In 0.53.1, `sproutboat deploy --api-url https://dash.sproutboat.com` read the URL as the project directory, and `--api-url=https://…` was ignored, so the deploy went to the saved endpoint (a stored Community login, say) instead of the one named. Now every command checks its options before it runs: an unknown one stops it with exit 2 (`unknown option --dry-runn (did you mean --dry-run?)`), `--flag=value` works for every flag that takes a value, and a positional that looks like `https://…` is refused where a project directory or a name goes, with a pointer to `--api-url`, `--profile` and `SPROUTBOAT_API_URL`. `--api-url <url>` and `--api-url=<url>` now work on `deploy` and on every command that talks to a control plane (`login`, `logout`, `whoami`, `secrets`, `versions`, `rollback`, `tail`, `domains`, `delete`, the storage commands); the commands that talk to none (`init`, `check`, `types`, `dev`, `run`, `build`, `toolchain`, `profile`, `complete`) refuse it and say to use `--profile` or `SPROUTBOAT_API_URL`. Before this, `versions`, `rollback`, `tail`, `domains`, `delete` and the storage commands had no `--api-url` at all and went to the saved endpoint.
 - **`init`'s help text and `SURFACE.md` now say it adds the `dev`, `deploy` and `check` scripts,** not just `dev` and `deploy`. Wording only.
 
 ## [0.53.1] - 2026-11-09

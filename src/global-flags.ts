@@ -7,6 +7,7 @@
  *   -e, --env <name>      environment: selects .dev.vars.<name> and the .env.<name> files
  *       --env-file <file> repeatable; values from later files override earlier ones
  *       --profile <name>  the credential profile (also SPROUTBOAT_PROFILE)
+ *       --api-url <url>   the control plane (also SPROUTBOAT_API_URL); only for commands that talk to one
  *   -v, --version         print the version
  *
  * They can sit anywhere on the line, before or after the command, as `--flag value` or `--flag=value`. A
@@ -23,12 +24,14 @@ export type GlobalFlags = {
   /** Every `--env-file`, in the order given. */
   envFiles: string[];
   profile?: string;
+  /** `--api-url`: taken out here so every command that talks to a control plane honours it, in both forms. */
+  apiUrl?: string;
   version: boolean;
 };
 
 export type GlobalParse = { flags: GlobalFlags; rest: string[] } | { error: string };
 
-type Spec = { names: readonly string[]; key: "config" | "cwd" | "env" | "envFiles" | "profile" };
+type Spec = { names: readonly string[]; key: "config" | "cwd" | "env" | "envFiles" | "profile" | "apiUrl" };
 
 const VALUE_FLAGS: readonly Spec[] = [
   { names: ["-c", "--config"], key: "config" },
@@ -36,6 +39,7 @@ const VALUE_FLAGS: readonly Spec[] = [
   { names: ["-e", "--env"], key: "env" },
   { names: ["--env-file"], key: "envFiles" },
   { names: ["--profile"], key: "profile" },
+  { names: ["--api-url"], key: "apiUrl" },
 ];
 
 /** Per-command flags whose value is free text: it must never be read as a global flag (`--value -e`). */
