@@ -248,7 +248,13 @@ describe("the Cloud's final data contract", () => {
       ];
       for (const [path, words] of cases)
         for (const verb of ["get", "put", "delete"]) {
-          const run = await cli(dir, ["r2", "object", verb, path, "--pipe"], env, new Uint8Array([1]));
+          // `delete` takes no --pipe (Wrangler's does not either).
+          const run = await cli(
+            dir,
+            ["r2", "object", verb, path, ...(verb === "delete" ? [] : ["--pipe"])],
+            env,
+            new Uint8Array([1]),
+          );
           expect(run.code, `${verb} ${path}`).toBe(2);
           expect(run.stderr).toContain(words);
         }
@@ -352,7 +358,7 @@ describe("the Cloud's final data contract", () => {
     test(`${verb}: ${title}`, async () => {
       await withCloud({ dataFailure: { status, body, headers } }, async (_cloud, env) => {
         const dir = project();
-        const args = ["r2", "object", verb, "FILES/a.txt", ...(verb === "put" ? ["--pipe"] : ["--pipe"])];
+        const args = ["r2", "object", verb, "FILES/a.txt", ...(verb === "delete" ? [] : ["--pipe"])];
         const run = await cli(dir, args, env, new Uint8Array([1]));
         expect(run.code).toBe(1);
         expect(run.stderr).toContain(expected);

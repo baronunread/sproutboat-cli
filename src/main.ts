@@ -2025,7 +2025,7 @@ async function r2Object(args: string[]) {
     const { bucket, key } = parseObjectPath(positional[0], usage);
     const project = await readProjectConfig();
     const app = project.config.name;
-    const { apiUrl: targetUrl } = await resolveApiUrl(flags.apiUrl);
+    const { apiUrl: targetUrl } = await resolveApiUrl();
     let target: ObjectTarget;
     if ((await deployKind(targetUrl, false)) === "cloud") {
       const bindings = (project.config.r2_buckets ?? []).map((entry) => (isString(entry) ? entry : entry.binding));
@@ -2038,7 +2038,7 @@ async function r2Object(args: string[]) {
       const credentials = await guard(() => cloudCredentials(targetUrl, flags.account ?? project.account));
       target = cloudTarget(credentials.apiUrl, credentials.token, app, bucket);
     } else {
-      const { apiUrl, token } = await apiCredentials(flags.apiUrl);
+      const { apiUrl, token } = await apiCredentials();
       const rows = await storageRows(`${apiUrl}/api/r2`, { "x-api-key": token }, STORAGE_PRODUCTS[2]);
       target = communityTarget(apiUrl, token, app, bucket, idForName(rows, bucket, STORAGE_PRODUCTS[2]));
     }

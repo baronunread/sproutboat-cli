@@ -114,6 +114,29 @@ describe("checkOptions", () => {
     expect(bad("deployments", ["--json"])).toContain("takes no options");
   });
 
+  test("r2 object checks the flags of the subcommand it names", () => {
+    expect(ok("r2", ["object", "put", "ASSETS/a.txt", "--file=a.txt", "--ct", "text/plain", "-p"])).toEqual([
+      "object",
+      "put",
+      "ASSETS/a.txt",
+      "--file",
+      "a.txt",
+      "--ct",
+      "text/plain",
+      "-p",
+    ]);
+    expect(ok("r2", ["object", "get", "ASSETS/a.txt", "--remote"])).toContain("--remote");
+    // Unsupported Wrangler flags reach the command, which says why.
+    expect(ok("r2", ["object", "get", "ASSETS/a.txt", "--local"])).toContain("--local");
+    expect(bad("r2", ["object", "get", "ASSETS/a.txt", "--content-type", "x"])).toContain("unknown option");
+    expect(bad("r2", ["object", "delete", "ASSETS/a.txt", "--pipe"])).toContain("unknown option --pipe");
+    expect(bad("r2", ["object", "delete", "ASSETS/a.txt", "--file", "x"])).toContain("unknown option --file");
+    expect(bad("r2", ["object", "put", "ASSETS/a.txt", "--cache-controll", "x"])).toContain(
+      "did you mean --cache-control?",
+    );
+    expect(bad("r2", ["list", "--json"])).toContain("`r2` takes no options");
+  });
+
   test("a command that is not in the table is not checked", () => {
     expect(ok("surprise", ["--anything", "https://x.test"])).toEqual(["--anything", "https://x.test"]);
   });

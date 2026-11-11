@@ -38,7 +38,6 @@ export type ObjectFlags = {
   contentLanguage?: string;
   cacheControl?: string;
   expires?: string;
-  apiUrl?: string;
   account?: string;
 };
 
@@ -152,9 +151,6 @@ export function parseObjectArgs(args: readonly string[], usage: string) {
         break;
       case "--expires":
         flags.expires = value();
-        break;
-      case "--api-url":
-        flags.apiUrl = value();
         break;
       case "--account":
         flags.account = value();
