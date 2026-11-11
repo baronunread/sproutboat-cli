@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
-  <img src="docs/logo-light.svg" alt="sproutboat" width="220" height="32">
+  <img src="docs/logo-light.svg" alt="sproutboat" width="220" height="34">
 </picture>
 
 https://sproutboat.com
