@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 
 import { parseBody } from "./cloud";
-import { isString, jsonObject, type JsonObject } from "./json";
+import { isSafeInteger, isString, jsonObject, type JsonObject, type JsonValue } from "./json";
 import { splitSql } from "./sql-split";
 
 export const FAKE_KEY = "sbk_fakekey0123456789";
@@ -58,6 +58,55 @@ const MiB = 1048576;
 export const FAKE_OWNER_SUFFIX = "0123456789ab";
 export const fakeAppId = (project: string) => `${project}_${FAKE_OWNER_SUFFIX}`;
 
+/** The Cloud's record rules for bindings, crons and queue consumers (sproutboat-cloud src/record.ts), as the first error or null. */
+function invalidRecordReason(sent: JsonObject): string | null {
+  const resourceId = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+  const kinds = ["kv", "d1", "r2", "queue", "do", "ae", "ratelimit", "assets", "secret", "service"];
+  const bindings = Array.isArray(sent.bindings) ? sent.bindings : [];
+  if (bindings.length > 64) return "bindings must be an array of at most 64 entries";
+  const names = new Set<string>();
+  for (const [i, entry] of bindings.entries()) {
+    const b = jsonObject(entry);
+    if (!b) return `bindings[${i}] must be an object`;
+    if (!isString(b.name) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(b.name)) return `invalid bindings[${i}].name`;
+    if (names.has(b.name)) return "duplicate binding name";
+    names.add(b.name);
+    if (!isString(b.kind) || !kinds.includes(b.kind)) return "unknown binding kind";
+    if (b.resource_id === null) {
+      if (["kv", "d1", "r2", "queue"].includes(b.kind)) return `${b.kind} binding needs a resource_id`;
+    } else if (!isString(b.resource_id) || !resourceId.test(b.resource_id)) return `invalid bindings[${i}].resource_id`;
+    if (!jsonObject(b.config ?? null)) return "config must be an object";
+  }
+  const crons = sent.crons ?? [];
+  if (!Array.isArray(crons) || crons.length > 16) return "crons must be an array of at most 16 entries";
+  for (const c of crons)
+    if (
+      !isString(c) ||
+      c.length > 128 ||
+      !/^[0-9A-Za-z*,/ -]+$/.test(c) ||
+      c.split(" ").length !== 5 ||
+      c.split(" ").some((f) => f === "")
+    )
+      return "invalid cron expression";
+  const consumers = sent.queue_consumers ?? [];
+  if (!Array.isArray(consumers) || consumers.length > 16)
+    return "queue_consumers must be an array of at most 16 entries";
+  const within = (v: JsonValue | undefined, lo: number, hi: number) => isSafeInteger(v) && v >= lo && v <= hi;
+  for (const entry of consumers) {
+    const q = jsonObject(entry);
+    if (!q || !isString(q.queue) || !resourceId.test(q.queue)) return "invalid queue_consumers.queue";
+    if (
+      !within(q.max_batch_size, 1, 100) ||
+      !within(q.max_batch_timeout_ms, 0, 60000) ||
+      !within(q.max_retries, 0, 100)
+    )
+      return "queue consumer settings out of range";
+    if (q.dead_letter_queue !== null && (!isString(q.dead_letter_queue) || !resourceId.test(q.dead_letter_queue)))
+      return "invalid queue_consumers.dead_letter_queue";
+  }
+  return null;
+}
+
 export function startFakeCloud(options: FakeOptions = {}) {
   const calls: { method: string; path: string; body: string; auth: string | null }[] = [];
   const modules = new Set<string>();
@@ -88,6 +137,8 @@ export function startFakeCloud(options: FakeOptions = {}) {
     if ((patch || sent.secrets !== undefined) && denied.has("secret:write")) return permissionDenied("secret:write");
     const bindings = Array.isArray(sent.bindings) ? sent.bindings.map((b) => jsonObject(b)) : [];
     const services = jsonObject(sent.services ?? null) ?? {};
+    const invalidRecord = invalidRecordReason(sent);
+    if (invalidRecord) return Response.json({ error: invalidRecord, reason: "invalid" }, { status: 400 });
     for (const b of bindings)
       if (b?.kind === "service" && !(String(b.name) in services))
         return Response.json({ error: `service binding ${String(b.name)} has no services entry` }, { status: 400 });

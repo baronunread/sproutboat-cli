@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { readAssetRules, walkAssets, type AssetManifest } from "./assets";
 import type { SproutboatConfig } from "./config";
+import { MAX_BINDINGS, type CloudBindings, type RecordBinding, type RecordQueueConsumer } from "./cloud-bindings";
 import { authHeaders, CloudError, explainApiFailure, parseBody, type CloudIo } from "./cloud";
 import { isSafeInteger, isString, jsonObject, type JsonObject, type JsonValue } from "./json";
 import { dim, ok } from "./style";
@@ -87,6 +88,8 @@ export type ServiceWiring = { bindings: ServiceBindingEntry[]; services: Record<
 export type SpecExtras = {
   /** Service bindings from sproutboat.jsonc (`services`), resolved against the team's Cloud apps before anything is written. */
   services?: ServiceRef[];
+  /** Every other binding in sproutboat.jsonc, mapped by `mapCloudBindings`: sent as `bindings`, `crons` and `queue_consumers`. */
+  cloudBindings?: CloudBindings;
   compatibilityDate?: string;
   /**
    * Merged into the app's secrets, never replacing the set. A module deploy sends them as `secrets_patch.set` in its PUT;
@@ -139,11 +142,15 @@ function applyExtras(
   spec: AppSpec | BuildSpec,
   wiring: ServiceWiring | undefined,
   secrets: Record<string, string> | undefined,
+  mapped: CloudBindings | undefined,
 ) {
-  if (wiring) {
-    spec.bindings = wiring.bindings;
-    spec.services = wiring.services;
-  }
+  const bindings: (RecordBinding | ServiceBindingEntry)[] = [...(mapped?.bindings ?? []), ...(wiring?.bindings ?? [])];
+  if (bindings.length > MAX_BINDINGS)
+    throw new CloudError(`the app has ${bindings.length} bindings; the Cloud takes at most ${MAX_BINDINGS}`);
+  if (bindings.length > 0) spec.bindings = bindings;
+  if (wiring) spec.services = wiring.services;
+  if (mapped && mapped.crons.length > 0) spec.crons = mapped.crons;
+  if (mapped && mapped.queue_consumers.length > 0) spec.queue_consumers = mapped.queue_consumers;
   if (secrets && Object.keys(secrets).length > 0) spec.secrets_patch = { set: secrets };
 }
 
@@ -169,8 +176,10 @@ export type CloudDeployResult = {
 };
 
 type SpecAdditions = {
-  bindings?: ServiceBindingEntry[];
+  bindings?: (RecordBinding | ServiceBindingEntry)[];
   services?: Record<string, string>;
+  crons?: string[];
+  queue_consumers?: RecordQueueConsumer[];
   secrets_patch?: { set: Record<string, string> };
 };
 type AppSpec = { module: { sha256: string }; hosts: string[]; assets_manifest_ref?: string } & SpecAdditions;
@@ -264,7 +273,7 @@ export async function deployToCloud(plan: CloudDeployPlan, io: CloudIo): Promise
 
   const spec: AppSpec = { module: { sha256: sha }, hosts: plan.hosts };
   if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
-  applyExtras(spec, wiring, plan.secrets);
+  applyExtras(spec, wiring, plan.secrets, plan.cloudBindings);
   const put = await call({ method: "PUT", path: `/v1/apps/${plan.project}`, json: spec });
   const generation = put.body?.record_generation;
   if (!isSafeInteger(generation)) throw new CloudError("the Cloud's reply carried no record generation");
@@ -688,7 +697,7 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
   const spec: BuildSpec = { hosts: plan.hosts };
   if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
   // The build spec is stored in plaintext by the Cloud: secrets never go in it (they follow the build, below).
-  applyExtras(spec, wiring, undefined);
+  applyExtras(spec, wiring, undefined, plan.cloudBindings);
   const cli: BuildCli = { version: plan.cli.version };
   if (plan.cli.runtime) cli.runtime = plan.cli.runtime;
   if (plan.cli.toolchain) cli.toolchain = plan.cli.toolchain;

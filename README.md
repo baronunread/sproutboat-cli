@@ -154,10 +154,20 @@ preselects the team on the approval page.
   app itself, or when `compatibility_date` is older than `2026-11-18`, the date
   from which the platform runtime serves service bindings between Cloud apps.
   Hosts need the matching sproutd support.
-- **Not sent yet.** Other bindings (KV, D1, R2, queues, Durable Objects) and cron
-  triggers in `sproutboat.jsonc` are not sent to the Cloud by the CLI yet; the
-  deploy warns and the app runs without them. `secrets` names in
-  `sproutboat.jsonc` only declare them. Static assets are uploaded by content hash.
+- **Every other binding.** `kv_namespaces`, `d1_databases`, `r2_buckets`, `queues`,
+  `analytics_engine_datasets`, `durable_objects`, `ratelimiters`, the `secrets` names, the
+  `assets` binding and `triggers.crons` go to the Cloud in the app record. On the Cloud each
+  app's storage is private to it, so nothing is provisioned and no id is needed: the binding
+  is the name (`DB` is the database `d1 execute --remote` addresses, `UPLOADS` the bucket
+  `r2 object` addresses), and the record's resource id is that name in lowercase (a queue's
+  is its queue name). An account-level `id` pinned in `sproutboat.jsonc` is ignored, with a
+  warning. The worker consumes every queue it binds, so each queue becomes one queue
+  consumer carrying its `max_batch_size`, `max_batch_timeout`, `max_retries` and
+  `dead_letter_queue` (Cloudflare's defaults when unset). `deploy` refuses, before
+  uploading anything, more than 16 crons, 16 queues or 64 bindings in all, a cron or name the
+  Cloud would refuse, and a `durable_objects` class the entry module does not export.
+  `deploy --dry-run` lists what would be sent. Storage itself is created by the host on first
+  use and survives deploys.
 
 For self-hosted (Community) endpoints, `login` keeps the browser flow, and for
 CI or an agent you can skip it and set `SPROUTBOAT_API_URL` + `SPROUTBOAT_API_TOKEN`.
