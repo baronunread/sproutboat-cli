@@ -8,10 +8,19 @@
  *   - every SPROUTBOAT_* / PORFFOR_VERSION / XDG_CONFIG_HOME env read in src/
  *     (outside tests) is documented in ENV_VARS
  */
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { CLI_NAME, COMMANDS, ENV_VARS, STORAGE_PRODUCTS, STORAGE_VERBS, usageLine } from "./surface";
+import {
+  CLI_NAME,
+  COMMANDS,
+  ENV_VARS,
+  GLOBAL_FLAGS,
+  STORAGE_PRODUCTS,
+  STORAGE_VERBS,
+  helpText,
+  usageLine,
+} from "./surface";
 import { ARTIFACT_SCHEMA_VERSION, CAPABILITY_PROFILE, RUNTIME } from "./manifest";
 import { ZIG_VERSION, toolchainStamp } from "./toolchain";
 import { CLI_VERSION as version } from "./report";
@@ -38,6 +47,12 @@ function render(): string {
     "```",
     usageLine(),
     "```",
+    "",
+    "## Global flags",
+    "",
+    "| Flag | Purpose |",
+    "| --- | --- |",
+    rows(GLOBAL_FLAGS.map((f) => [`\`${f.flags}\``, f.purpose])),
     "",
     "## Environment variables",
     "",
@@ -124,9 +139,9 @@ test("every storage product is a command with the same verbs", () => {
   const documented = new Set(COMMANDS.filter((c) => c.group === "Storage").map((c) => c.name));
   expect([...documented].sort()).toEqual(STORAGE_PRODUCTS.map((p) => p.name).sort());
 
-  const briefs = new Set(COMMANDS.filter((c) => c.group === "Storage").map((c) => c.brief));
-  expect(briefs.size, "storage products must offer an identical verb set").toBe(1);
-  expect([...briefs][0]).toBe(`<${STORAGE_VERBS.join(" | ")}>`);
+  for (const command of COMMANDS.filter((c) => c.group === "Storage")) {
+    for (const verb of STORAGE_VERBS) expect(command.args, `${command.name} must offer ${verb}`).toContain(verb);
+  }
 });
 
 test("main.ts dispatches every storage product to the shared handler", () => {
@@ -134,4 +149,51 @@ test("main.ts dispatches every storage product to the shared handler", () => {
   for (const product of STORAGE_PRODUCTS) {
     expect(main, `no dispatch case for ${product.name}`).toContain(`case "${product.name}":`);
   }
+});
+
+/** The grouped help is what people read first: keep it short, plain and aligned. */
+describe("the top-level help", () => {
+  // Colour is off whenever stdout is not a TTY, as it is under the test runner.
+  const plain = helpText();
+
+  test("every command has one short line", () => {
+    for (const command of COMMANDS) {
+      expect(command.short.length, `${command.name}: ${command.short}`).toBeLessThanOrEqual(60);
+      expect(command.short).not.toMatch(/[.\n]$/);
+    }
+  });
+
+  test("every command appears once, under its group", () => {
+    for (const command of COMMANDS) expect(plain, command.name).toMatch(new RegExp(`^  ${command.name}( |$)`, "m"));
+    expect(plain.indexOf("SHIP")).toBeLessThan(plain.indexOf("  delete"));
+    expect(plain.indexOf("  delete")).toBeLessThan(plain.indexOf("STORAGE"));
+    expect(COMMANDS.find((c) => c.name === "delete")?.group).toBe("Ship");
+  });
+
+  test("emojis are unique and render two cells wide", () => {
+    const emojis = COMMANDS.map((c) => c.emoji);
+    expect(new Set(emojis).size, "two commands share an emoji").toBe(emojis.length);
+    for (const emoji of emojis) {
+      expect(Bun.stringWidth(emoji), `width of ${emoji}`).toBe(2);
+      // Text-presentation symbols (⏮ ⌨ 🗄) need U+FE0F, or terminals draw them one cell wide.
+      expect(/^\p{Emoji_Presentation}$/u.test(emoji) || emoji.endsWith("\uFE0F"), `${emoji} needs U+FE0F`).toBe(true);
+    }
+  });
+
+  test("no internal jargon, and nothing that only fits one deployment", () => {
+    const text = [plain, ...COMMANDS.map((c) => c.summary)].join("\n").replace(/--sprout\b/g, "");
+    for (const jargon of [/native-fetch/, /\bbroker\b/, /id-less/, /\bsprout\b(?!\.generated)/, /your own VPS/])
+      expect(text, String(jargon)).not.toMatch(jargon);
+  });
+
+  test("lists the global flags and points to per-command help", () => {
+    expect(plain).toContain("GLOBAL FLAGS");
+    for (const flag of GLOBAL_FLAGS) expect(plain).toContain(flag.flags);
+    expect(plain).toContain("Run `sproutboat <command> --help` for a command's options");
+  });
+
+  test("storage lines say what exists", () => {
+    const kv = COMMANDS.find((c) => c.name === "kv")!;
+    for (const word of ["keys", "bulk", "exports"]) expect(kv.short).toContain(word);
+  });
 });
