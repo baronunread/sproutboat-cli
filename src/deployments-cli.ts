@@ -9,7 +9,7 @@ import { makeCall, parseBuildView, type BuildView, type CloudCredentials } from 
 import { isSafeInteger, isString, jsonObject, type JsonObject } from "./json";
 import { bold, dim, ok, rose } from "./style";
 
-export type DeploymentsFlags = { json: boolean; limit: number; apiUrl?: string; account?: string };
+export type DeploymentsFlags = { json: boolean; limit: number; account?: string };
 export const LIST_LIMIT = 10;
 export const LIST_USAGE = "deployments list [--json]";
 export const STATUS_USAGE = "deployments status [--json]";
@@ -35,12 +35,11 @@ export function parseDeploymentsArgs(args: readonly string[], usage: string) {
     if (name === "--json") {
       if (equals > 0) throw new DeploymentsUsageError("--json takes no value", usage);
       flags.json = true;
-    } else if (name === "--api-url" || name === "--account") {
+    } else if (name === "--account") {
       const value = equals > 0 ? arg.slice(equals + 1) : args[(index += 1)];
       if (!value || (equals < 0 && value.startsWith("--")))
         throw new DeploymentsUsageError(`${name} needs a value`, usage);
-      if (name === "--api-url") flags.apiUrl = value;
-      else flags.account = value;
+      flags.account = value;
     } else if (arg.startsWith("-")) throw new DeploymentsUsageError(`unknown option ${arg}`, usage);
     else positional.push(arg);
   }

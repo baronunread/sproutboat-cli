@@ -106,6 +106,14 @@ describe("checkOptions", () => {
     expect(bad("secrets", ["bulk", "https://example.com/keys.json"])).toContain("looks like a URL");
   });
 
+  test("deployments checks the flags of the subcommand it names", () => {
+    expect(ok("deployments", ["list", "--json", "--account=acme"])).toEqual(["list", "--json", "--account", "acme"]);
+    expect(ok("deployments", ["tail", "build_1", "--account", "acme"])).toContain("build_1");
+    expect(bad("deployments", ["tail", "build_1", "--json"])).toContain("unknown option --json");
+    expect(bad("deployments", ["status", "--jsno"])).toContain("did you mean --json?");
+    expect(bad("deployments", ["--json"])).toContain("takes no options");
+  });
+
   test("a command that is not in the table is not checked", () => {
     expect(ok("surprise", ["--anything", "https://x.test"])).toEqual(["--anything", "https://x.test"]);
   });

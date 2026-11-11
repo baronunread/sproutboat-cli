@@ -1411,12 +1411,12 @@ async function deployments(args: string[]) {
   if (positional.length > (sub === "tail" ? 1 : 0)) usageError(`unexpected argument "${positional.at(-1)}"`, usage);
   const project = await readProjectConfig();
   const app = project.config.name;
-  const { apiUrl: targetUrl } = await resolveApiUrl(flags.apiUrl);
+  const { apiUrl: targetUrl } = await resolveApiUrl();
   const kind = await deployKind(targetUrl, false);
 
   if (kind !== "cloud") {
     if (sub === "tail") return fail(COMMUNITY_TAIL);
-    const { apiUrl, token } = await apiCredentials(flags.apiUrl);
+    const { apiUrl, token } = await apiCredentials();
     const body = await responseText(
       await fetch(`${apiUrl}/api/projects/${app}/deployments`, { headers: { "x-api-key": token } }),
       "could not list deployments",

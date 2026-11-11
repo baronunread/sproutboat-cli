@@ -26,13 +26,13 @@ const build = (over: JsonObject = {}): JsonObject => ({
   ...over,
 });
 
-test("arguments: --json, --api-url, --account, positionals, and refusals", () => {
+test("arguments: --json, --account, positionals, and refusals", () => {
   expect(parseDeploymentsArgs(["--json", "abc", "--account", "acme"], LIST_USAGE)).toEqual({
     positional: ["abc"],
     flags: { json: true, limit: 10, account: "acme" },
   });
   expect(() => parseDeploymentsArgs(["--wat"], LIST_USAGE)).toThrow("unknown option --wat");
-  expect(() => parseDeploymentsArgs(["--api-url"], LIST_USAGE)).toThrow("--api-url needs a value");
+  expect(() => parseDeploymentsArgs(["--account"], LIST_USAGE)).toThrow("--account needs a value");
 });
 
 test("the live deployment is the ready build whose generation a host applied", () => {
