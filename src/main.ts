@@ -1591,9 +1591,15 @@ async function secrets(args: string[]) {
   // and read the value as the project directory.
   let inlineValue: string | undefined;
   const positional: string[] = [];
+  const grammar = `secrets ${sub} ${sub === "list" ? "" : sub === "bulk" ? "[file.json | file.env] " : "<NAME> "}[project-dir] [--api-url <url>] [--account <team>]`;
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--value") inlineValue = args[(index += 1)];
-    else positional.push(args[index]);
+    const arg = args[index];
+    if (arg === "--value" || arg.startsWith("--value=")) {
+      if (sub !== "put") usageError(`secrets ${sub} does not take --value`, grammar);
+      inlineValue = arg === "--value" ? args[(index += 1)] : arg.slice("--value=".length);
+      if (inlineValue === undefined) usageError("--value needs a value", grammar);
+    } else if (arg.startsWith("-") && arg !== "-") usageError(`unknown option ${arg.split("=")[0]}`, grammar);
+    else positional.push(arg);
   }
 
   if (sub === "bulk") return bulkSecrets(positional, flags, noDeploy);
@@ -1605,7 +1611,10 @@ async function secrets(args: string[]) {
     await guard(() => cloudSecrets(sub, name, inlineValue, positional[0], targetUrl, flags["--account"], noDeploy));
     return;
   }
-  const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(positional[0]), apiCredentials()]);
+  const [project, { apiUrl, token }] = await Promise.all([
+    readProjectConfig(positional[0]),
+    apiCredentials(flags["--api-url"]),
+  ]);
   const base = `${apiUrl}/api/projects/${project.config.name}/secrets`;
   const auth = { "x-api-key": token };
 
@@ -1634,7 +1643,7 @@ async function secrets(args: string[]) {
   );
   console.log(
     ok(
-      `set ${name}; self-hosted Community applies it on the next deploy or sprout restart (it has no redeploy route yet)`,
+      `set ${name}; self-hosted Community applies it on the next deploy or restart of the app (it has no redeploy route yet)`,
     ),
   );
 }
@@ -1697,7 +1706,7 @@ async function bulkSecrets(
       await fetch(`${base}/${secretName}`, { method: "DELETE", headers: auth }),
       `delete ${secretName} rejected`,
     );
-  console.log(ok(`${summary}; self-hosted Community applies them on the next deploy or sprout restart`));
+  console.log(ok(`${summary}; self-hosted Community applies them on the next deploy or restart of the app`));
 }
 
 /**
