@@ -517,9 +517,9 @@ async function compileSproutA21(
     extraLink: [...(input.extraLink ?? []), ...build.restoreObjects],
     extraCflags: [...(input.extraCflags ?? []), ...(input.withRestore ? ["-Dmain=sb_app_main"] : [])],
     optimize: input.optimize === "dev" && host ? 0 : 3,
-    // LTO on for every optimized build, zig's musl cross builds included (romeo, M4: +11% req/s on hello,
-    // +7% on stress, and 4% smaller); SPROUTBOAT_FLTO=0 turns it off for measurements
-    // (`lto: false`, a standalone build without --release, turns it off too)
+    // LTO on for optimized builds, zig's musl cross builds included (romeo, M4: +11% req/s on hello,
+    // +7% on stress, and 4% smaller), except a standalone build without --release (`lto: false`),
+    // which skips it to link faster; SPROUTBOAT_FLTO=0 turns it off for measurements
     flto: ltoEnabled(input),
     musl: !host,
     strip: true,

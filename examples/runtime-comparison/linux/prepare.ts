@@ -40,6 +40,7 @@ const bundle = await bundleHandler(entry, here);
 const upstreamPort = 18081;
 const started = performance.now();
 const built = await buildStandalone({
+  release: true, // compared against workerd: the LTO build users publish
   projectDir: here,
   config: {
     name: "runtime-comparison",

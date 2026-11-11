@@ -100,6 +100,7 @@ async function buildApp(porfforDir: string, outPath: string) {
   const bundle = await bundleHandler(sourcePath, appDir);
   const t0 = performance.now();
   const built = await buildStandalone({
+    release: true, // the size gate and req/s compare the LTO build users publish
     projectDir: appDir,
     config,
     sourcePath,

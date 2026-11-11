@@ -187,6 +187,7 @@ const config :Workerd.Config = (
         const bundle = await bundleHandler(sourcePath, here);
         const started = performance.now();
         await buildStandalone({
+          release: true, // a throughput comparison: the LTO build users publish
           projectDir: here,
           config: {
             name: "runtime-comparison",
