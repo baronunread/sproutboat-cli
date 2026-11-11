@@ -1583,7 +1583,7 @@ async function secrets(args: string[]) {
   // `--no-deploy`: change the secrets without waiting for a host to apply them as a new version.
   const noDeploy = args.includes("--no-deploy");
   if (noDeploy) args.splice(args.indexOf("--no-deploy"), 1);
-  const flags = takeFlags(args, ["--api-url", "--account"] as const);
+  const flags = takeFlags(args, ["--account"] as const);
 
   // `--value` is opt-in; without it the value comes from stdin, so a secret does
   // not land in shell history. It is also what disambiguates the positionals:
@@ -1606,15 +1606,12 @@ async function secrets(args: string[]) {
   const name = sub === "list" ? undefined : positional.shift();
   if (sub !== "list" && !name) usageError(`secrets ${sub}: missing <NAME>`, `secrets ${sub} <NAME> [project-dir]`);
   if (name && !/^[A-Z][A-Z0-9_]*$/.test(name)) fail("secret name must be UPPER_SNAKE_CASE");
-  const { apiUrl: targetUrl } = await resolveApiUrl(flags["--api-url"]);
+  const { apiUrl: targetUrl } = await resolveApiUrl();
   if ((await deployKind(targetUrl, false)) === "cloud") {
     await guard(() => cloudSecrets(sub, name, inlineValue, positional[0], targetUrl, flags["--account"], noDeploy));
     return;
   }
-  const [project, { apiUrl, token }] = await Promise.all([
-    readProjectConfig(positional[0]),
-    apiCredentials(flags["--api-url"]),
-  ]);
+  const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(positional[0]), apiCredentials()]);
   const base = `${apiUrl}/api/projects/${project.config.name}/secrets`;
   const auth = { "x-api-key": token };
 
@@ -1652,11 +1649,7 @@ async function secrets(args: string[]) {
  * `secrets bulk [file]`: the input of `wrangler secret bulk` (JSON with null to delete, or .env; stdin when no file).
  * On a Cloud endpoint it is one PATCH and so one new version; on self-hosted Community it is one call per name.
  */
-async function bulkSecrets(
-  positional: string[],
-  flags: ReturnType<typeof takeFlags<"--api-url" | "--account">>,
-  noDeploy: boolean,
-) {
+async function bulkSecrets(positional: string[], flags: ReturnType<typeof takeFlags<"--account">>, noDeploy: boolean) {
   const file = positional.shift();
   const directory = positional[0];
   if (file === undefined && process.stdin.isTTY)
@@ -1678,7 +1671,7 @@ async function bulkSecrets(
   for (const warning of bulk.warnings) console.warn(amber(`! ${warning}`));
   const sets = Object.keys(bulk.set).length;
   const summary = `${sets} set, ${bulk.delete.length} deleted`;
-  const { apiUrl: targetUrl } = await resolveApiUrl(flags["--api-url"]);
+  const { apiUrl: targetUrl } = await resolveApiUrl();
   const project = await readProjectConfig(directory);
   const app = project.config.name;
   if ((await deployKind(targetUrl, false)) === "cloud") {
@@ -1689,7 +1682,7 @@ async function bulkSecrets(
     });
     return;
   }
-  const { apiUrl, token } = await apiCredentials(flags["--api-url"]);
+  const { apiUrl, token } = await apiCredentials();
   const base = `${apiUrl}/api/projects/${app}/secrets`;
   const auth = { "x-api-key": token };
   for (const [secretName, value] of Object.entries(bulk.set))

@@ -93,6 +93,19 @@ describe("checkOptions", () => {
     expect(bad("d1", ["execute", "https://example.com"])).toContain("looks like a URL");
   });
 
+  test("secrets takes --no-deploy and bulk's file, and refuses the rest", () => {
+    expect(ok("secrets", ["bulk", "keys.json", "--no-deploy", "--account=acme"])).toEqual([
+      "bulk",
+      "keys.json",
+      "--no-deploy",
+      "--account",
+      "acme",
+    ]);
+    expect(bad("secrets", ["put", "TOKEN", "--no-deplyo"])).toContain("did you mean --no-deploy?");
+    expect(bad("secrets", ["--no-deploy=yes"])).toBe("--no-deploy takes no value");
+    expect(bad("secrets", ["bulk", "https://example.com/keys.json"])).toContain("looks like a URL");
+  });
+
   test("a command that is not in the table is not checked", () => {
     expect(ok("surprise", ["--anything", "https://x.test"])).toEqual(["--anything", "https://x.test"]);
   });
