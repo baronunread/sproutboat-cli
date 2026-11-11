@@ -435,7 +435,7 @@
       var live = kinds.filter(function (k) {
         return info.bindings[k];
       }).length;
-      $("#live-count").textContent = live + " of " + kinds.length + " bindings in this build";
+      $("#live-count").textContent = live + " of " + kinds.length + " tiles live";
       if (!info.bindings.service) {
         notAvailable(
           "#t-svc",
