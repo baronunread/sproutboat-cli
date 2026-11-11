@@ -1,12 +1,12 @@
 /**
- * Build the dashboard's static assets: copy public/ to dist/ and write what only
+ * Build the dashboard's static assets: copy public/ to site/ and write what only
  * the build knows. `sproutboat build` itself only copies `assets.directory`, so
  * this runs first, Wrangler-style (`bun run build`; the harnesses call it too).
  *
- * dist/build-info.json is the one place the page gets build-time facts from:
+ * site/build-info.json is the one place the page gets build-time facts from:
  *
  *   module     bytes of src/index.js, the worker source this build ships
- *   assets     every file in dist/ with its size (build-info.json itself and the
+ *   assets     every file in site/ with its size (build-info.json itself and the
  *              harness fixture left out), so the size card sums real files
  *   snippets   the code between `// #region <name>` markers in src/index.js,
  *              copied verbatim into the tiles' Code panels
@@ -22,7 +22,7 @@ import { parseConfig } from "../../src/config";
 
 const HERE = import.meta.dir;
 const PUBLIC = join(HERE, "public");
-const DIST = join(HERE, "dist");
+const DIST = join(HERE, "site");
 
 /** The code between `// #region name` and `// #endregion`, by name. */
 export function extractRegions(source: string): Map<string, string> {

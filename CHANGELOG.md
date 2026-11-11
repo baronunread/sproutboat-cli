@@ -10,6 +10,11 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Added
+
+- **`sproutboat dev` relays WebSockets.** The stable port now forwards an upgrade to the sprout and passes frames both ways, so a browser can use a WebSocket or a Durable Object chat under `dev`. Before, the upgrade went through a plain `fetch` and the client got a protocol error. Stopping `dev` closes open sockets instead of waiting for them.
+- **`examples/kitchen-sink` is a dashboard.** Every tile calls its real binding: a KV counter, a D1 guestbook that shows the SQL it ran, R2 upload and list, a Durable Object chat over WebSocket (hibernation API), a queue and cron feed read from D1, a service binding to `quote-service`, and secret names. Latency is measured in the worker with `performance.now()` and returned in `Server-Timing`; sizes are measured at build time. The Astro UI is gone; `sproutboat.standalone.jsonc` builds the same app as a standalone binary.
+
 ## [0.54.0] - 2026-11-11
 
 Built on `@sproutboat/runtime` 0.44.0, `@sproutboat/wire` 0.22.4 and `@sproutboat/toolchain` 0.24.2 (runtime and wire from 0.43.0 and 0.22.3). Runtime 0.44.0 adds service bindings between Cloud apps from compatibility date 2026-11-18; every app is recompiled on its next build, since the runtime prelude changed. The Cloud-only features below need a Cloud control plane with sproutboat-cloud#42, #45 and #49; remote D1 and R2 also need a host whose agent serves the data routes (sproutd#93).

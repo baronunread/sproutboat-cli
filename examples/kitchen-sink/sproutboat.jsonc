@@ -30,8 +30,8 @@
   "services": [{ "binding": "PEER", "service": "quote-service" }],
   "triggers": { "crons": ["*/1 * * * *"] },
   "assets": {
-    // dist/ is public/ plus build-info.json: run `bun run build` (the harnesses and serve.ts do it for you)
-    "directory": "dist",
+    // site/ is public/ plus build-info.json: run `bun run build` (the harnesses and serve.ts do it for you)
+    "directory": "site",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_sprout_first": true,

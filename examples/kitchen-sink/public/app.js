@@ -518,6 +518,7 @@
       body.appendChild(tr);
     });
     $("#gb-n").textContent = Number(data.total).toLocaleString("en-US");
+    $("#gb-unit").textContent = data.total === 1 ? "row" : "rows";
     var box = $("#sql");
     clear(box);
     data.sql.forEach(function (st) {
@@ -533,7 +534,8 @@
             .join(", ") +
           " · "
         : "";
-      var extra = st.rows_read !== undefined ? ", " + st.rows_read + " rows read" : "";
+      var extra =
+        st.rows_read !== undefined ? ", " + st.rows_read + (st.rows_read === 1 ? " row read" : " rows read") : "";
       box.appendChild(el("span", "c muted", "-- " + binds + fmtMs(st.ms) + " ms" + extra));
     });
     var last = data.sql[data.sql.length - 1];
@@ -620,6 +622,7 @@
       tr.appendChild(act);
       body.appendChild(tr);
     });
+    $("#r2-unit").textContent = data.objects.length === 1 ? "file" : "files";
     $("#r2-n").textContent =
       String(data.objects.length) + (data.truncated ? "+" : "") + (data.objects.length > 5 ? " (newest 5 shown)" : "");
     $("#r2-sz").textContent = fmtBytes(data.bytes);
@@ -841,6 +844,7 @@
   var skew = 0;
   var seenEvents = {};
   var cronEveryMin = null;
+  var lastCronAt = null;
   var lastQueue = null;
 
   function renderQueue(data) {
@@ -872,6 +876,7 @@
     var lastCron = data.recent.filter(function (e) {
       return e.kind === "cron";
     })[0];
+    lastCronAt = lastCron ? new Date(lastCron.at).getTime() : null;
     var out = $("#cron-last");
     clear(out);
     if (lastCron) {
@@ -939,7 +944,10 @@
     }
     var period = cronEveryMin * 60000;
     var now = Date.now() + skew;
-    var next = Math.ceil((now + 1) / period) * period;
+    // Count from the last run seen: the broker, sproutd and a standalone binary do not all fire on the minute.
+    var next = lastCronAt
+      ? lastCronAt + Math.ceil((now + 1 - lastCronAt) / period) * period
+      : Math.ceil((now + 1) / period) * period;
     var left = next - now;
     var s = Math.ceil(left / 1000);
     $("#cd").textContent = String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");

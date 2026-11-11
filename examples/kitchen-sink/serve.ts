@@ -77,7 +77,18 @@ if (c.assets) {
 const prelude = await loadPrelude("broker");
 const gen = join(workdir, "sprout.generated.js");
 const bin = join(workdir, "sprout.bin");
-writeFileSync(gen, wrapNativeFetchHandler(readFileSync(join(HERE, "src/index.js"), "utf8"), prelude, vars, bindings));
+// The compatibility date turns on WebSockets (2026-11-01), which the dashboard's chat needs.
+writeFileSync(
+  gen,
+  wrapNativeFetchHandler(
+    readFileSync(join(HERE, "src/index.js"), "utf8"),
+    prelude,
+    vars,
+    bindings,
+    undefined,
+    c.compatibility_date,
+  ),
+);
 
 // crypto.subtle needs BearSSL linked in, as in harness.ts.
 const tls = await ensureBearssl({ target: "host" });

@@ -6,7 +6,7 @@ calls each one for real, and the conformance suite both backends are held to.
 ```
 src/index.js                    the worker: /api routes, ChatRoom Durable Object, scheduled and queue handlers
 public/                         the dashboard: index.html, app.css, app.js, fonts (no framework, no build step)
-build-web.ts                    public/ -> dist/, plus dist/build-info.json (sizes, config, code excerpts)
+build-web.ts                    public/ -> site/, plus site/build-info.json (sizes, config, code excerpts)
 conformance.ts                  the binding checks, run against the broker and standalone backends
 harness.ts                      broker backend: host sprout + in-process broker (38 checks)
 harness-standalone.ts           one binary with the bindings compiled in (same checks)
@@ -44,7 +44,7 @@ Nothing on the page is estimated.
   chat tile shows the room's own handling time, and the client times the round trip itself.
 - **Requests served** is the Analytics Engine data point count (`env.METRICS.query`), one per request, for all visitors.
 - **Worker module and Static assets** are file sizes measured by `build-web.ts`
-  and written to `dist/build-info.json`. The binary's size is not shown live: it depends on the
+  and written to `site/build-info.json`. The binary's size is not shown live: it depends on the
   target and on `--release`, and `sproutboat build --standalone` prints it. The page links the
   measured figures in [docs/standalone.md](../../docs/standalone.md).
 - **Memory per app (about 200 KB on Cloud)** is a labelled fact from the density test, not a live reading. The runtime does not expose per-app memory to the app.
@@ -87,7 +87,7 @@ GET  /api/chat                        WebSocket upgrade to the ChatRoom object
 
 ```sh
 cd examples/kitchen-sink
-bun run build                         # public/ -> dist/ (the harnesses and serve.ts do this too)
+bun run build                         # public/ -> site/ (the harnesses and serve.ts do this too)
 bun run test                          # harness.ts, the broker backend
 bun run dev                           # serve.ts: stays up on http://127.0.0.1:8787, stub quote service included
 ```
@@ -95,7 +95,7 @@ bun run dev                           # serve.ts: stays up on http://127.0.0.1:8
 With the CLI from this repository:
 
 ```sh
-bun ../../src/main.ts dev --port 8787     # run from examples/kitchen-sink; QUOTES tile shows its error state
+bun ../../src/main.ts dev --port 8787     # run from examples/kitchen-sink; the quote tile shows its error state
 bun ../../src/main.ts build --standalone -c sproutboat.standalone.jsonc --target host
 ```
 
@@ -144,9 +144,10 @@ memory.
 
 ## Notes
 
-- The handlers use `fetch(request, env, ctx)`, `scheduled(event, env, ctx)` and
-  `queue(batch, env, ctx)`, so the same file deploys to Cloudflare Workers apart from
-  the Sproutboat-only pieces (the `/egress` and `/throttle` checks, `scryptVerify`).
+- The tile handlers take `env` as an argument and use only Workers APIs, so they run on
+  Cloudflare Workers as they are. The entry points (`fetch(request)`, `scheduled(event)`,
+  `queue(batch)`) read the global `env`, because the broker harness compiles without a
+  compatibility date and so is not handed `env` as an argument.
 - The KV counter lives under the `counter:` prefix; the cron job that prunes
   sessions skips that prefix.
 - The R2 tile sends the file as text. Large or binary files belong behind

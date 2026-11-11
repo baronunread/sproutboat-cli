@@ -22,7 +22,7 @@
   "ratelimiters": [{ "binding": "THROTTLE", "limit": 3, "period": 60 }],
   "triggers": { "crons": ["*/1 * * * *"] },
   "assets": {
-    "directory": "dist",
+    "directory": "site",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_sprout_first": true,
