@@ -27,7 +27,27 @@
   function fmtBytes(n) {
     if (n < 1024) return n + " B";
     if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + " KB";
-    return (n / 1048576).toFixed(2) + " MB";
+    // 25 MB, 3.19 MB: the zeros of a round number are left off.
+    return Number((n / 1048576).toFixed(n < 10485760 ? 2 : 1)) + " MB";
+  }
+
+  // A count that must fit in a tile: grouped up to ten million, then 1.2B style.
+  function fmtCount(n) {
+    n = Number(n);
+    if (!isFinite(n)) return "–";
+    if (Math.abs(n) < 1e7) return n.toLocaleString("en-US");
+    return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+  }
+
+  // Cut a long name in the middle, keeping the end (the extension), for places with no CSS ellipsis.
+  function splitName(name) {
+    var cut = Math.min(8, Math.floor(name.length / 2));
+    return [name.slice(0, name.length - cut), name.slice(name.length - cut)];
+  }
+
+  // A wait as a person says it: seconds under a minute and a half, minutes after.
+  function fmtWait(s) {
+    return s < 90 ? s + " s" : Math.ceil(s / 60) + " min";
   }
 
   function ago(iso) {
@@ -208,16 +228,17 @@
       init.headers["content-type"] = "application/json";
       init.body = JSON.stringify(opt.json);
     }
-    if (opt.text !== undefined) {
-      init.headers["content-type"] = "text/plain";
-      init.body = opt.text;
+    // A file (or any Blob), sent as its own bytes with its own content type.
+    if (opt.blob !== undefined) {
+      init.headers["content-type"] = opt.blob.type || "application/octet-stream";
+      init.body = opt.blob;
     }
     var res;
     try {
       res = await fetch(path, init);
     } catch {
       logLine(method, path, 0, null, opt.user);
-      throw e;
+      throw new Error("the app did not answer");
     }
     var data = null;
     try {
@@ -231,7 +252,60 @@
       if (samples.length > 60) samples.shift();
       renderMetrics();
     }
-    return { status: res.status, ok: res.ok, data: data, ms: ms };
+    return {
+      status: res.status,
+      ok: res.ok,
+      data: data,
+      ms: ms,
+      retryAfter: Number(res.headers.get("retry-after")) || (data && Number(data.retry_after)) || 0,
+    };
+  }
+
+  // Throw for a non-2xx reply. A 429 carries how long to wait, so a tile can say so.
+  function checked(res) {
+    if (res.ok) return;
+    var err = new Error((res.data && res.data.error) || "status " + res.status);
+    if (res.status === 429) err.retry = res.retryAfter || 5;
+    throw err;
+  }
+
+  // Re-enable a button unless it is cooling off after a 429.
+  function release(btn) {
+    if (btn && !(Number(btn.dataset.cool || 0) > Date.now())) btn.disabled = false;
+  }
+
+  // "Slow down, try again in Ns" on a tile, counting down, with its buttons paused until then.
+  function throttled(helpId, buttons, retry) {
+    var node = $(helpId);
+    var until = Date.now() + retry * 1000;
+    buttons = (buttons || []).filter(Boolean);
+    buttons.forEach(function (b) {
+      b.dataset.cool = String(until);
+      b.disabled = true;
+    });
+    if (node._cool) clearInterval(node._cool);
+    function tick() {
+      var left = Math.ceil((until - Date.now()) / 1000);
+      if (left <= 0) {
+        clearInterval(node._cool);
+        node._cool = null;
+        buttons.forEach(function (b) {
+          delete b.dataset.cool;
+          b.disabled = false;
+        });
+        setHelp(helpId, node.dataset.idle || "");
+        return;
+      }
+      setHelp(helpId, "Slow down: try again in " + fmtWait(left) + ".", "warn");
+    }
+    tick();
+    node._cool = setInterval(tick, 1000);
+  }
+
+  // The message under a tile after a failed call: a countdown for a 429, else the reason.
+  function fail(helpId, prefix, e, buttons) {
+    if (e && e.retry) throttled(helpId, buttons, e.retry);
+    else setHelp(helpId, prefix + ((e && e.message) || "failed"));
   }
 
   function lat(id, ms) {
@@ -242,10 +316,12 @@
     node.classList.add("flash");
   }
 
-  function setHelp(id, text, good) {
+  function setHelp(id, text, kind) {
     var node = $(id);
     node.textContent = text || "";
-    node.classList.toggle("ok", !!good);
+    node.title = text || "";
+    node.classList.toggle("ok", kind === true);
+    node.classList.toggle("warn", kind === "warn");
   }
 
   // A tile whose binding this build does not have.
@@ -427,10 +503,11 @@
       if (!res.ok) throw new Error("status " + res.status);
       info = res.data;
       badge($("#conn"), "ok", "Online", "live");
-      if (info.requests !== null && info.requests !== undefined)
-        $("#m-req").textContent = info.requests.toLocaleString("en-US");
+      if (info.requests !== null && info.requests !== undefined) $("#m-req").textContent = fmtCount(info.requests);
       else $("#m-req").textContent = "n/a";
-      $("#r2-cap").textContent = String(Math.floor(info.max_upload_bytes / 1024));
+      $("#r2-cap").textContent = fmtBytes(info.max_upload_bytes).replace(" ", "\u00a0");
+      $("#r2-max").textContent = fmtBytes(info.max_total_bytes);
+      $("#r2-n-max").textContent = String(info.max_files);
       var kinds = ["kv", "d1", "r2", "queue", "durable_object", "service"];
       var live = kinds.filter(function (k) {
         return info.bindings[k];
@@ -452,8 +529,9 @@
 
   // ---- KV --------------------------------------------------------------------------
   function renderKv(data, withOps) {
-    $("#kv-n").textContent = Number(data.n).toLocaleString("en-US");
-    $("#kv-keys").textContent = data.keys + (data.keys === 1 ? " key" : " keys");
+    $("#kv-n").textContent = fmtCount(data.n);
+    $("#kv-n").title = Number(data.n).toLocaleString("en-US");
+    $("#kv-keys").textContent = fmtCount(data.keys) + (data.keys === 1 ? " key" : " keys");
     if (!withOps) return;
     var ul = $("#kv-ops");
     clear(ul);
@@ -461,7 +539,7 @@
       var li = el("li");
       li.appendChild(el("span", "m", op.op));
       li.appendChild(el("span", "k", "counter:home"));
-      li.appendChild(el("span", "v", String(op.value)));
+      li.appendChild(el("span", "v", fmtCount(op.value)));
       li.appendChild(el("span", "p tnum", fmtMs(op.ms) + "ms"));
       ul.appendChild(li);
     });
@@ -470,12 +548,12 @@
   async function kvLoad(user) {
     try {
       var res = await api("/api/kv", { user: user });
-      if (!res.ok) throw new Error((res.data && res.data.error) || "status " + res.status);
+      checked(res);
       renderKv(res.data, false);
       lat("kv", res.ms);
       setHelp("#kv-help", "");
     } catch (e) {
-      setHelp("#kv-help", "Could not read the counter: " + e.message);
+      fail("#kv-help", "Could not read the counter: ", e);
     }
   }
 
@@ -487,14 +565,14 @@
     btn.disabled = true;
     try {
       var res = await api("/api/kv/incr", { method: "POST", user: true });
-      if (!res.ok) throw new Error((res.data && res.data.error) || "status " + res.status);
+      checked(res);
       renderKv(res.data, true);
       lat("kv", res.ms);
       setHelp("#kv-help", "");
     } catch (e) {
-      setHelp("#kv-help", "Could not increment: " + e.message);
+      fail("#kv-help", "Could not increment: ", e, [btn, $("#kv-get")]);
     } finally {
-      btn.disabled = false;
+      release(btn);
     }
   });
 
@@ -505,19 +583,28 @@
     clear(body);
     if (!data.rows.length) {
       var tr = el("tr");
-      tr.appendChild(el("td", "empty", "No entries yet. Sign the guestbook."));
+      var empty = el("td", "empty", "No entries yet. Sign the guestbook.");
+      empty.colSpan = 4;
+      tr.appendChild(empty);
       body.appendChild(tr);
     }
     data.rows.forEach(function (row) {
       var tr = el("tr", seenRows[row.id] ? "" : "new");
       seenRows[row.id] = true;
       tr.appendChild(el("td", "id", "#" + row.id));
-      tr.appendChild(el("td", "nm", row.name));
-      tr.appendChild(el("td", "t", row.msg));
+      // dir=auto: an Arabic or Hebrew entry reads right to left without flipping the table.
+      var nm = el("td", "nm", row.name);
+      nm.dir = "auto";
+      nm.title = row.name;
+      tr.appendChild(nm);
+      var msg = el("td", "t", row.msg);
+      msg.dir = "auto";
+      msg.title = row.msg;
+      tr.appendChild(msg);
       tr.appendChild(el("td", "et", ago(row.at)));
       body.appendChild(tr);
     });
-    $("#gb-n").textContent = Number(data.total).toLocaleString("en-US");
+    $("#gb-n").textContent = fmtCount(data.total);
     $("#gb-unit").textContent = data.total === 1 ? "row" : "rows";
     var box = $("#sql");
     clear(box);
@@ -538,6 +625,7 @@
         st.rows_read !== undefined ? ", " + st.rows_read + (st.rows_read === 1 ? " row read" : " rows read") : "";
       box.appendChild(el("span", "c muted", "-- " + binds + fmtMs(st.ms) + " ms" + extra));
     });
+    box.scrollTop = 0;
     var last = data.sql[data.sql.length - 1];
     $("#gb-q").textContent = last ? "query " + fmtMs(last.ms) + " ms" : "";
   }
@@ -559,11 +647,11 @@
   async function gbLoad(user) {
     try {
       var res = await api("/api/guestbook", { user: user });
-      if (!res.ok) throw new Error((res.data && res.data.error) || "status " + res.status);
+      checked(res);
       renderGuestbook(res.data);
       lat("d1", res.ms);
     } catch (e) {
-      setHelp("#gb-help", "Could not read the guestbook: " + e.message);
+      fail("#gb-help", "Could not read the guestbook: ", e);
     }
   }
 
@@ -580,34 +668,100 @@
     btn.disabled = true;
     try {
       var res = await api("/api/guestbook", { method: "POST", json: { name: name, msg: msg }, user: true });
-      if (!res.ok) throw new Error((res.data && res.data.error) || "status " + res.status);
+      checked(res);
       renderGuestbook(res.data);
       lat("d1", res.ms);
       $("#gb-msg").value = "";
     } catch (e) {
-      setHelp("#gb-help", "Could not sign: " + e.message);
+      fail("#gb-help", "Could not sign: ", e, [btn]);
     } finally {
-      btn.disabled = false;
+      release(btn);
     }
   });
 
   // ---- R2 ---------------------------------------------------------------------------
+  // The file as the server serves it. The etag in the URL lets the browser keep it for an hour and
+  // fetch it again only when the file changes.
+  function fileUrl(obj) {
+    return (
+      "/api/r2/file?name=" +
+      encodeURIComponent(obj.name) +
+      "&v=" +
+      encodeURIComponent(String(obj.etag || "").replace(/"/g, ""))
+    );
+  }
+
+  var THUMB_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"];
+
+  // A thumbnail for a small image, else an icon for the kind of file. A thumbnail that does not
+  // load (a cut-off image, a type that lied) falls back to the icon. Large images are not fetched
+  // just to draw twenty pixels.
+  function fileMark(obj) {
+    var icon =
+      obj.type.indexOf("image/") === 0
+        ? "i-image"
+        : obj.type === "application/pdf"
+          ? "i-doc"
+          : obj.type.indexOf("text/") === 0
+            ? "i-file"
+            : "i-bin";
+    function iconNode() {
+      var span = el("span", "mk");
+      span.insertAdjacentHTML("afterbegin", '<svg class="sb-icon"><use href="#' + icon + '"/></svg>');
+      return span;
+    }
+    if (THUMB_TYPES.indexOf(obj.type) < 0 || obj.size > 262144 || !obj.size) return iconNode();
+    var holder = el("span", "mk thumb");
+    var img = document.createElement("img");
+    img.alt = "";
+    img.width = 22;
+    img.height = 22;
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.src = fileUrl(obj);
+    img.addEventListener("error", function () {
+      holder.replaceWith(iconNode());
+    });
+    holder.appendChild(img);
+    return holder;
+  }
+
   function renderFiles(data) {
     var body = $("#r2-list");
     clear(body);
     if (!data.objects.length) {
       var tr = el("tr");
-      tr.appendChild(el("td", "empty", "The bucket is empty. Upload a text file."));
+      var empty = el("td", "empty", "The bucket is empty. Upload a file.");
+      empty.colSpan = 3;
+      tr.appendChild(empty);
       body.appendChild(tr);
     }
-    data.objects.slice(0, 5).forEach(function (obj) {
+    data.objects.forEach(function (obj) {
       var tr = el("tr");
       var t = el("td", "t");
-      t.insertAdjacentHTML("afterbegin", '<svg class="sb-icon"><use href="#i-file"/></svg>');
-      var a = el("a", "", obj.name);
-      a.href = "/api/r2/file?name=" + encodeURIComponent(obj.name);
-      a.title = "Download " + obj.name;
-      t.appendChild(a);
+      var wrap = el("div", "fn");
+      wrap.appendChild(fileMark(obj));
+      // The start of the name shrinks with an ellipsis; its end, the extension, stays.
+      var a = el("a");
+      var parts = splitName(obj.name);
+      a.appendChild(el("span", "a", parts[0]));
+      a.appendChild(el("span", "b", parts[1]));
+      a.href = fileUrl(obj);
+      a.title = obj.name + " · " + (obj.type || "unknown type");
+      var most = info && info.max_response_bytes ? info.max_response_bytes : 2097152;
+      if (obj.size > most) {
+        // Bigger than one response: the page reads it in Range windows and saves the pieces as one file.
+        a.title += " · downloaded in " + fmtBytes(most) + " windows";
+        a.addEventListener("click", function (event) {
+          event.preventDefault();
+          downloadBig(obj, most);
+        });
+      } else {
+        a.target = "_blank";
+        a.rel = "noopener";
+      }
+      wrap.appendChild(a);
+      t.appendChild(wrap);
       tr.appendChild(t);
       tr.appendChild(el("td", "", fmtBytes(obj.size)));
       var act = el("td", "act");
@@ -623,69 +777,247 @@
       body.appendChild(tr);
     });
     $("#r2-unit").textContent = data.objects.length === 1 ? "file" : "files";
-    $("#r2-n").textContent =
-      String(data.objects.length) + (data.truncated ? "+" : "") + (data.objects.length > 5 ? " (newest 5 shown)" : "");
+    $("#r2-n").textContent = String(data.objects.length) + (data.truncated ? "+" : "");
     $("#r2-sz").textContent = fmtBytes(data.bytes);
+    $("#r2-max").textContent = info ? fmtBytes(info.max_total_bytes) : "200 MB";
   }
 
   async function r2Load(user) {
     try {
       var res = await api("/api/r2", { user: user });
-      if (!res.ok) throw new Error((res.data && res.data.error) || "status " + res.status);
+      checked(res);
       renderFiles(res.data);
       lat("r2", res.ms);
     } catch (e) {
-      setHelp("#r2-help", "Could not list the bucket: " + e.message);
+      fail("#r2-help", "Could not list the bucket: ", e);
     }
   }
 
-  async function r2Upload(name, text) {
-    var cap = info ? info.max_upload_bytes : 65536;
-    if (text.length > cap) {
-      setHelp(
-        "#r2-help",
-        name + " is " + fmtBytes(text.length) + ". This build accepts " + fmtBytes(cap) + " per file.",
-      );
+  // Say no before sending: a dropped movie must not be read or uploaded to be refused.
+  function refuseBeforeUpload(name, size) {
+    var cap = info ? info.max_upload_bytes : 26214400;
+    if (name.length > 64) {
+      setHelp("#r2-help", "The file name is too long: 64 characters at most, this has " + name.length + ".");
+      return true;
+    }
+    if (size > cap) {
+      setHelp("#r2-help", "Too large: " + fmtBytes(size) + ". This build accepts " + fmtBytes(cap) + " per file.");
+      return true;
+    }
+    return false;
+  }
+
+  function randomId() {
+    var bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    return Array.prototype.map
+      .call(bytes, function (b) {
+        return (b + 256).toString(16).slice(1);
+      })
+      .join("");
+  }
+
+  // One chunk, with the bytes sent so far reported as they go (fetch cannot do that).
+  function putChunk(url, blob, onProgress, running) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      running.xhr = xhr;
+      xhr.open("PUT", url);
+      xhr.setRequestHeader("content-type", "application/octet-stream");
+      xhr.upload.onprogress = function (event) {
+        if (event.lengthComputable) onProgress(event.loaded);
+      };
+      xhr.onload = function () {
+        var data = null;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch {}
+        var ms = parseServerTiming(xhr.getResponseHeader("server-timing"));
+        resolve({
+          status: xhr.status,
+          ok: xhr.status >= 200 && xhr.status < 300,
+          data: data,
+          ms: ms === null && data ? Number(data.ms) : ms,
+          retryAfter: Number(xhr.getResponseHeader("retry-after")) || (data && Number(data.retry_after)) || 0,
+        });
+      };
+      xhr.onerror = function () {
+        reject(new Error("the app did not answer"));
+      };
+      xhr.onabort = function () {
+        var err = new Error("cancelled");
+        err.cancelled = true;
+        reject(err);
+      };
+      xhr.send(blob);
+    });
+  }
+
+  var running = null;
+
+  // A file bigger than one response, read window by window with Range requests (what a browser does
+  // for video) and saved from memory as one file, with the same progress bar as an upload.
+  async function downloadBig(obj, most) {
+    if (running) {
+      setHelp("#r2-help", "A transfer is already running.");
       return;
     }
-    if (text.indexOf("\u0000") !== -1 || text.indexOf("�") !== -1) {
-      setHelp("#r2-help", name + " is not a text file. This tile sends the file as text.");
-      return;
-    }
+    running = {};
     setHelp("#r2-help", "");
+    $("#r2-up").hidden = false;
+    $("#r2-up-cancel").hidden = true;
+    var parts = [];
+    var at = 0;
     try {
-      var res = await api("/api/r2?name=" + encodeURIComponent(name), { method: "PUT", text: text, user: true });
-      if (!res.ok) throw new Error((res.data && res.data.error) || "status " + res.status);
-      renderFiles(res.data);
-      lat("r2", res.ms);
-      setHelp("#r2-help", "Stored " + res.data.name + " in " + fmtMs(res.ms) + " ms (server).", true);
+      while (at < obj.size) {
+        showProgress("Downloading " + obj.name, at, obj.size);
+        var res = await fetch(fileUrl(obj), {
+          headers: { range: "bytes=" + at + "-" + (Math.min(obj.size, at + most) - 1) },
+        });
+        if (res.status === 429) {
+          var wait = Number(res.headers.get("retry-after")) || 5;
+          var data = await res.json().catch(function () {
+            return null;
+          });
+          var err = new Error((data && data.error) || "slow down");
+          err.retry = wait;
+          throw err;
+        }
+        if (res.status !== 206) throw new Error("the app answered " + res.status);
+        var buf = await res.arrayBuffer();
+        parts.push(buf);
+        at += buf.byteLength;
+        if (!buf.byteLength) throw new Error("the app sent no bytes");
+      }
+      var url = URL.createObjectURL(new Blob(parts, { type: obj.type }));
+      var link = document.createElement("a");
+      link.href = url;
+      link.download = obj.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () {
+        URL.revokeObjectURL(url);
+      }, 60000);
+      setHelp("#r2-help", "Downloaded " + fmtBytes(obj.size) + " as " + obj.name, true);
     } catch (e) {
-      setHelp("#r2-help", "Upload failed: " + e.message);
+      fail("#r2-help", "Download failed: ", e);
+    } finally {
+      running = null;
+      $("#r2-up").hidden = true;
+      $("#r2-up-cancel").hidden = false;
     }
   }
+
+  function showProgress(name, done, total) {
+    var pct = total ? Math.min(100, Math.floor((done / total) * 100)) : 100;
+    $("#r2-up-name").textContent = name;
+    $("#r2-up-pct").textContent = fmtBytes(done) + " of " + fmtBytes(total) + " · " + pct + "%";
+    $("#r2-up-fill").style.width = pct + "%";
+    $("#r2-up-bar").setAttribute("aria-valuenow", String(pct));
+  }
+
+  // blob is a File or any Blob. It goes up in chunk-sized requests of its own bytes, each with the
+  // progress shown, so a 25 MB file is 25 small requests and neither side holds the whole of it.
+  async function r2Upload(name, blob) {
+    if (refuseBeforeUpload(name, blob.size)) return;
+    if (running) {
+      setHelp("#r2-help", "An upload is already running.");
+      return;
+    }
+    var chunk = info && info.chunk_bytes ? info.chunk_bytes : 1048576;
+    var count = Math.max(1, Math.ceil(blob.size / chunk));
+    var id = randomId();
+    var type = blob.type || "application/octet-stream";
+    running = {};
+    setHelp("#r2-help", "");
+    $("#r2-up").hidden = false;
+    showProgress(name, 0, blob.size);
+    var started = performance.now();
+    var res = null;
+    try {
+      for (var n = 0; n < count; n++) {
+        var part = blob.slice(n * chunk, Math.min(blob.size, (n + 1) * chunk));
+        var url =
+          "/api/r2/chunk?name=" +
+          encodeURIComponent(name) +
+          "&id=" +
+          id +
+          "&n=" +
+          n +
+          "&count=" +
+          count +
+          "&total=" +
+          blob.size +
+          "&type=" +
+          encodeURIComponent(type);
+        var base = n * chunk;
+        for (var attempt = 0; ; attempt++) {
+          res = await putChunk(
+            url,
+            part,
+            function (sent) {
+              showProgress(name, base + sent, blob.size);
+            },
+            running,
+          );
+          // Over the per-minute budget: wait out the minute and send the chunk again.
+          if (res.status === 429 && res.data && res.data.code === "rate_limited" && attempt < 3) {
+            for (var left = res.retryAfter || 5; left > 0; left--) {
+              setHelp("#r2-help", "Slow down: continuing in " + left + " s.", "warn");
+              await new Promise(function (resolve) {
+                setTimeout(resolve, 1000);
+              });
+            }
+            setHelp("#r2-help", "");
+            continue;
+          }
+          break;
+        }
+        checked(res);
+        showProgress(name, base + part.size, blob.size);
+      }
+      renderFiles(res.data);
+      lat("r2", res.ms);
+      logLine("PUT", "/api/r2/chunk ×" + count, res.status, res.ms, true);
+      setHelp(
+        "#r2-help",
+        "Stored " +
+          fmtBytes(blob.size) +
+          " as " +
+          res.data.name +
+          " in " +
+          ((performance.now() - started) / 1000).toFixed(1) +
+          " s",
+        true,
+      );
+    } catch (e) {
+      if (e && e.cancelled) setHelp("#r2-help", "Upload cancelled.");
+      else fail("#r2-help", "Upload failed: ", e, [$("#r2-pick"), $("#r2-sample")]);
+    } finally {
+      running = null;
+      $("#r2-up").hidden = true;
+    }
+  }
+
+  $("#r2-up-cancel").addEventListener("click", function () {
+    if (running && running.xhr) running.xhr.abort();
+  });
 
   async function r2Delete(name) {
     try {
       var res = await api("/api/r2?name=" + encodeURIComponent(name), { method: "DELETE", user: true });
-      if (!res.ok) throw new Error((res.data && res.data.error) || "status " + res.status);
+      checked(res);
       renderFiles(res.data);
       lat("r2", res.ms);
       setHelp("#r2-help", "");
     } catch (e) {
-      setHelp("#r2-help", "Delete failed: " + e.message);
+      fail("#r2-help", "Delete failed: ", e);
     }
   }
 
-  async function handleFile(file) {
-    if (!file) return;
-    var text;
-    try {
-      text = await file.text();
-    } catch {
-      setHelp("#r2-help", "Could not read " + file.name + ".");
-      return;
-    }
-    r2Upload(file.name, text);
+  function handleFile(file) {
+    if (file) r2Upload(file.name, file);
   }
 
   $("#r2-pick").addEventListener("click", function () {
@@ -698,7 +1030,12 @@
   $("#r2-sample").addEventListener("click", function () {
     var now = new Date();
     var name = "note-" + now.toTimeString().slice(0, 8).replace(/:/g, "") + ".txt";
-    r2Upload(name, "Note written at " + now.toISOString() + " from the kitchen-sink dashboard.\n");
+    r2Upload(
+      name,
+      new Blob(["Note written at " + now.toISOString() + " from the kitchen-sink dashboard.\n"], {
+        type: "text/plain",
+      }),
+    );
   });
   var dz = $("#dz");
   ["dragenter", "dragover"].forEach(function (name) {
@@ -732,6 +1069,7 @@
   var ws = null;
   var chatBox = $("#chat");
   var chatCount = 0;
+  var lastText = ""; // the last message sent, put back in the box if the room refuses it
   var wsOpened = false;
 
   function chatState(kind, label, mark) {
@@ -748,22 +1086,32 @@
     chatCount++;
     var mine = msg.name === myName;
     var b = el("div", "bub" + (mine ? " me" : ""));
-    b.appendChild(el("small", "", mine ? "you" : msg.name));
-    b.appendChild(document.createTextNode(msg.text));
+    var who = el("small", "", mine ? "you" : msg.name);
+    who.dir = "auto";
+    b.appendChild(who);
+    var tx = el("span", "tx", msg.text);
+    tx.dir = "auto";
+    b.appendChild(tx);
     chatBox.appendChild(b);
+    // A flood must not grow the page: only the last 60 bubbles are kept.
+    while (chatBox.children.length > 60) chatBox.removeChild(chatBox.firstChild);
     chatBox.scrollTop = chatBox.scrollHeight;
   }
 
   function renderPresence(p) {
-    $("#who").textContent =
+    var text =
       p.n +
       (p.n === 1 ? " socket" : " sockets") +
       (p.names.length
         ? ": " + p.names.slice(0, 4).join(", ") + (p.names.length > 4 ? " +" + (p.names.length - 4) : "")
         : "");
+    $("#who").textContent = text;
+    $("#who").title = text;
   }
 
   function connectChat() {
+    clearInterval(chat429.timer);
+    $("#ws-reconnect").disabled = false;
     clear(chatBox);
     chatCount = 0;
     wsOpened = false;
@@ -800,6 +1148,19 @@
         if (!msg.messages.length) chatNote("No messages yet. Say something.");
       } else if (msg.type === "presence") {
         renderPresence(msg);
+      } else if (msg.type === "error") {
+        // The room refused a frame: too fast, too long. Say so on the tile.
+        var f = $("#frame");
+        f.textContent =
+          (msg.code === "rate_limited" ? "Slow down: " : "") + String(msg.error || "").replace(/^slow down: /, "");
+        f.title = f.textContent;
+        f.classList.add("warn");
+        if (lastText && !$("#chat-in").value) $("#chat-in").value = lastText;
+        lastText = "";
+        clearTimeout(connectChat.warnTimer);
+        connectChat.warnTimer = setTimeout(function () {
+          f.classList.remove("warn");
+        }, 4000);
       } else if (msg.type === "msg") {
         addBubble(msg);
         lat("do", msg.ms);
@@ -817,12 +1178,49 @@
       } else {
         chatState("bad", "Failed", "tri");
         clear(chatBox);
-        chatNote(
-          "The connection closed before it opened. Check that whatever serves this page forwards WebSocket upgrades to the app.",
-          "bad",
-        );
+        chatNote("The connection closed before it opened.", "bad");
+        explainRefusal();
       }
     });
+  }
+
+  // A browser does not say why a WebSocket upgrade failed, so ask the route once over plain HTTP:
+  // a 429 means this address is over its limit and says for how long.
+  async function explainRefusal() {
+    var reconnect = $("#ws-reconnect");
+    try {
+      var res = await api("/api/chat");
+      if (res.status === 429) {
+        chat429(res.retryAfter || 5);
+        return;
+      }
+    } catch {}
+    clear(chatBox);
+    chatNote(
+      "The connection closed before it opened. Five connections per address and a connect rate limit apply. If neither fits, check that whatever serves this page forwards WebSocket upgrades to the app.",
+      "bad",
+    );
+    reconnect.hidden = false;
+  }
+
+  function chat429(retry) {
+    var reconnect = $("#ws-reconnect");
+    var until = Date.now() + retry * 1000;
+    reconnect.disabled = true;
+    clearInterval(chat429.timer);
+    function tick() {
+      var left = Math.ceil((until - Date.now()) / 1000);
+      clear(chatBox);
+      if (left <= 0) {
+        clearInterval(chat429.timer);
+        reconnect.disabled = false;
+        chatNote("You can reconnect now.");
+        return;
+      }
+      chatNote("Slow down: try again in " + fmtWait(left) + ".", "warn");
+    }
+    tick();
+    chat429.timer = setInterval(tick, 1000);
   }
 
   $("#ws-reconnect").addEventListener("click", connectChat);
@@ -837,6 +1235,7 @@
     }
     // `sent` is echoed back by the room so this page can time the round trip.
     ws.send(JSON.stringify({ type: "msg", text: text, sent: Date.now() }));
+    lastText = text;
     input.value = "";
   });
 
@@ -853,9 +1252,9 @@
     var c = data.counts || {};
     var queued = Number(c.queued || 0);
     var processed = Number(c.processed || 0);
-    $("#qd").textContent = String(Math.max(0, queued - processed));
-    $("#qp").textContent = processed.toLocaleString("en-US");
-    $("#qc").textContent = Number(c.crons || 0).toLocaleString("en-US");
+    $("#qd").textContent = fmtCount(Math.max(0, queued - processed));
+    $("#qp").textContent = fmtCount(processed);
+    $("#qc").textContent = fmtCount(c.crons || 0);
     var ul = $("#jobs");
     clear(ul);
     if (!data.recent.length) ul.appendChild(el("li", "empty", "Nothing yet. Enqueue a job or wait for the cron run."));
@@ -869,7 +1268,10 @@
       b.appendChild(el("span", "shape " + (cron ? "square" : "circle")));
       b.appendChild(document.createTextNode(cron ? "Cron" : "Done"));
       li.appendChild(b);
-      li.appendChild(el("span", "jt", (cron ? "cron " : "job ") + ev.label));
+      var jt = el("span", "jt", (cron ? "cron " : "job ") + ev.label);
+      jt.title = (cron ? "cron " : "job ") + ev.label;
+      jt.dir = "auto";
+      li.appendChild(jt);
       li.appendChild(el("span", "jm", fmtMs(ev.ms) + " ms · " + ago(ev.at)));
       ul.appendChild(li);
     });
@@ -905,7 +1307,8 @@
     btn.disabled = true;
     try {
       var res = await api("/api/queue/enqueue", { method: "POST", json: { label: $("#q-label").value }, user: true });
-      if (!res.ok) throw new Error((res.data && res.data.error) || "status " + res.status);
+      checked(res);
+      setHelp("#q-help", "");
       renderQueue(res.data);
       lat("q", res.ms);
       // The consumer runs after the response: poll until it has delivered the job.
@@ -917,9 +1320,9 @@
         if (tries >= 12 || waiting <= 0) clearInterval(timer);
       }, 700);
     } catch (e) {
-      $("#jobs").insertBefore(el("li", "empty", "Could not enqueue: " + e.message), $("#jobs").firstChild);
+      fail("#q-help", "Could not enqueue: ", e, [btn]);
     } finally {
-      btn.disabled = false;
+      release(btn);
     }
   });
 
@@ -930,7 +1333,7 @@
     // The request count moves with every visitor, so refresh it now and then.
     if (++polls % 3 === 0)
       api("/api/info").then(function (res) {
-        if (res.ok && res.data.requests !== null) $("#m-req").textContent = res.data.requests.toLocaleString("en-US");
+        if (res.ok && res.data.requests !== null) $("#m-req").textContent = fmtCount(res.data.requests);
       });
   }, 5000);
 
@@ -971,6 +1374,20 @@
     var res$ = $("#qres");
     try {
       var res = await api("/api/quote", { user: true });
+      if (res.status === 429) {
+        qt.className = "quoteb";
+        qt.textContent = "";
+        var slow = el("div", "state slow");
+        slow.appendChild(el("b", "", "Slow down"));
+        slow.appendChild(
+          el("span", "", "Too many calls from your address. Try again in " + (res.retryAfter || 5) + " s."),
+        );
+        qt.appendChild(slow);
+        clear(res$);
+        res$.appendChild(el("span", "muted", "429 · rate limited"));
+        throttled("#svc-wait", [btn], res.retryAfter || 5);
+        return;
+      }
       calls++;
       $("#qm").textContent = calls + (calls === 1 ? " call" : " calls");
       lat("svc", res.ms);
@@ -978,6 +1395,7 @@
       qt.className = "quoteb";
       if (res.data && res.data.ok) {
         qt.textContent = "“" + res.data.quote.content + "”";
+        qt.title = res.data.quote.content;
         res$.appendChild(el("span", "by", res.data.quote.author));
         res$.appendChild(el("span", "muted", "200 · " + fmtMs(res.ms) + " ms"));
         badge($("#svc-state"), "ok", "Answered", "circle");
@@ -1004,7 +1422,7 @@
       qt.textContent = "The request to this app failed: " + e.message;
       badge($("#svc-state"), "bad", "Unreachable", "tri");
     } finally {
-      btn.disabled = false;
+      release(btn);
     }
   });
 
@@ -1042,7 +1460,13 @@
     try {
       var res = await api("/api/secrets/check", { method: "POST", json: { token: token }, user: true });
       lat("sec", res.ms);
-      if (res.status === 429) note.textContent = "Too many checks. env.THROTTLE allows 3 a minute per visitor.";
+      if (res.status === 429) {
+        throttled("#revnote", [$("#sec-b")], res.retryAfter || 20);
+        $("#sec-val").value = "";
+        return;
+      }
+      if (res.status >= 400)
+        note.textContent = (res.data && res.data.error) || "The check failed: status " + res.status;
       else if (res.data && res.data.ok)
         note.textContent = "Match: the value equals env.ADMIN_TOKEN. It was compared in the worker and not returned.";
       else note.textContent = "No match. The value does not equal env.ADMIN_TOKEN.";
