@@ -7,7 +7,7 @@ import { bold, dim, leaf } from "./style";
 
 export const CLI_NAME = "sproutboat";
 export const TAGLINE = "Deploy JavaScript handlers as tiny native binaries on your own VPS.";
-export const DOCS_URL = "https://docs.sproutboat.com";
+export const DOCS_URL = "https://sproutboat.com/docs";
 
 export type Group = "Develop" | "Ship" | "Storage" | "Configure" | "Account";
 
