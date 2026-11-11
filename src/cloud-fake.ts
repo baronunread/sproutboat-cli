@@ -29,6 +29,8 @@ export type FakeOptions = {
   d1?: string[];
   /** Every data route (D1 query, R2 object) answers this instead of working: the status, the JSON body, extra headers. */
   dataFailure?: { status: number; body?: JsonObject; headers?: Record<string, string> };
+  /** R2 buckets the app's host holds (binding names): /v1/apps/<p>/r2/<BUCKET>/objects/<key> stores objects in memory. */
+  r2?: string[];
   /** How POST /v1/apps/<project>/builds behaves. */
   build?: FakeBuildOptions;
 };
@@ -116,6 +118,8 @@ export function startFakeCloud(options: FakeOptions = {}) {
 
   const databases = new Map<string, Database>((options.d1 ?? []).map((name) => [name, new Database(":memory:")]));
   const d1Requests: JsonObject[] = [];
+  const buckets = new Set(options.r2 ?? []);
+  const objects = new Map<string, { bytes: Uint8Array<ArrayBuffer>; headers: Record<string, string> }>();
   const sources = new Map<string, Uint8Array>();
   const buildRequests: JsonObject[] = [];
   const eventRequests: string[] = [];
@@ -458,6 +462,38 @@ export function startFakeCloud(options: FakeOptions = {}) {
         }
         return Response.json({ results });
       }
+      m = /^\/v1\/apps\/([^/]+)\/r2\/([^/]+)\/objects\/(.+)$/.exec(path);
+      if (m) {
+        if (!appExists) return Response.json({ error: "no such app" }, { status: 404 });
+        if (!buckets.has(m[2]!))
+          return Response.json({ error: "no such bucket", reason: "no-bucket" }, { status: 404 });
+        const key = decodeURIComponent(m[3]!);
+        if (request.method !== "GET" && denied.has("app:write"))
+          return Response.json({ error: "forbidden", need: "app:write" }, { status: 403 });
+        if (request.method === "PUT") {
+          const headers: Record<string, string> = {};
+          for (const name of [
+            "content-type",
+            "x-object-cache-control",
+            "content-disposition",
+            "content-encoding",
+            "content-language",
+            "expires",
+          ]) {
+            const value = request.headers.get(name);
+            if (value !== null) headers[name] = value;
+          }
+          objects.set(`${m[2]}/${key}`, { bytes: raw, headers });
+          return Response.json({ key, size: raw.byteLength });
+        }
+        if (request.method === "DELETE") {
+          objects.delete(`${m[2]}/${key}`);
+          return Response.json({ key, deleted: true });
+        }
+        const found = objects.get(`${m[2]}/${key}`);
+        if (!found) return Response.json({ error: "no such object", reason: "no-object" }, { status: 404 });
+        return new Response(found.bytes, { headers: found.headers });
+      }
       m = /^\/v1\/apps\/([^/]+)\/secrets$/.exec(path);
       if (m && request.method === "PATCH") {
         if (denied.has("secret:write")) return permissionDenied("secret:write");
@@ -529,6 +565,8 @@ export function startFakeCloud(options: FakeOptions = {}) {
     buildRequests,
     /** Bodies of POST /v1/apps/<app>/d1/<BINDING>/query. */
     d1Requests,
+    /** Objects in the fake host's buckets, by `<BUCKET>/<key>`. */
+    objects,
     /** The fake host's databases, to look at what a command left behind. */
     databases,
     eventRequests,
