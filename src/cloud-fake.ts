@@ -162,6 +162,11 @@ export function startFakeCloud(options: FakeOptions = {}) {
     record_generation: b.generation,
     hosts: jsonObject(b.body.spec ?? null)?.hosts ?? [],
     input_hash: "1".repeat(64),
+    queued_at: `2026-11-11T10:00:0${b.id.slice(-1)}.000Z`,
+    finished_at:
+      b.state === "ready" || b.state === "failed" || b.state === "canceled"
+        ? `2026-11-11T10:00:1${b.id.slice(-1)}.000Z`
+        : null,
     stats: (b.state === "ready" && !b.cached) || b.state === "failed" ? stats() : null,
   });
   /** The Cloud writes the app when a build is ready: a new record generation. */
@@ -285,6 +290,10 @@ export function startFakeCloud(options: FakeOptions = {}) {
         return Response.json({ sha256: m[1], size: raw.byteLength, stored: true });
       }
       m = /^\/v1\/apps\/([^/]+)\/builds$/.exec(path);
+      if (m && request.method === "GET") {
+        const limit = Number(url.searchParams.get("limit") ?? 20);
+        return Response.json({ builds: [...builds.values()].reverse().slice(0, limit).map(view) });
+      }
       if (m && request.method === "POST") {
         const sent = JSON.parse(body);
         if (mode === "disabled")

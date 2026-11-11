@@ -506,7 +506,7 @@ const TERMINAL = new Set(["ready", "failed", "canceled"]);
  * then plain polling of GET /v1/builds/<id>. Returns the final view.
  */
 async function followBuild(
-  plan: BuildPlan,
+  plan: Pick<BuildPlan, "apiUrl" | "token" | "tokenFromEnv" | "retryMs" | "maxReconnects" | "pollMs">,
   call: CallFn,
   first: BuildView,
   io: CloudIo,
@@ -580,6 +580,35 @@ async function followBuild(
     if (TERMINAL.has(view.state)) return view;
     await io.sleep(plan.pollMs ?? 2000);
   }
+}
+
+/**
+ * Follow a build that is already running (or finished) by id, from its first log line: what `deployments tail <id>`
+ * does, so a deploy that was detached with Ctrl-C can be picked up again. The build is never cancelled here; an abort
+ * only stops following (it throws Interrupted).
+ */
+export async function tailBuild(
+  credentials: CloudCredentials,
+  id: string,
+  io: CloudIo,
+  signal?: AbortSignal,
+  tune: Pick<BuildPlan, "retryMs" | "maxReconnects" | "pollMs"> = {},
+): Promise<BuildView> {
+  const call = makeCall(credentials);
+  const reply = await call({ method: "GET", path: `/v1/builds/${encodeURIComponent(id)}`, ok: [404] });
+  if (reply.status === 404)
+    throw new CloudError(`no deployment "${id}" in this team; \`sproutboat deployments list\` shows the ids`);
+  const first = parseBuildView(reply.body);
+  let shown = "";
+  const onState = (state: string, position: number | null, waiting: string | null) => {
+    if (state === "") return;
+    const line = `  Building   ${formatBuildState(state, position, waiting)}`;
+    if (line === shown || TERMINAL.has(state)) return;
+    shown = line;
+    io.log(line);
+  };
+  onState(first.state, first.position, first.waiting);
+  return followBuild({ ...credentials, ...tune }, call, first, io, onState, signal);
 }
 
 /**

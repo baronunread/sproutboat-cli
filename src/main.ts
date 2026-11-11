@@ -55,6 +55,7 @@ import {
   hostFor,
   Interrupted,
   makeCall,
+  tailBuild,
   waitForApply,
 } from "./cloud-deploy";
 import {
@@ -84,6 +85,21 @@ import {
   readSecretsFile,
 } from "./cloud-secrets";
 import { parseBulkSecrets, type BulkPlan } from "./secrets-bulk";
+import {
+  COMMUNITY_TAIL,
+  DeploymentsUsageError,
+  fetchDeployments,
+  fetchLive,
+  formatCommunityVersion,
+  formatDeployment,
+  formatStatus,
+  LIST_USAGE as DEPLOYMENTS_LIST_USAGE,
+  parseCommunityVersions,
+  parseDeploymentsArgs,
+  STATUS_USAGE as DEPLOYMENTS_STATUS_USAGE,
+  TAIL_USAGE as DEPLOYMENTS_TAIL_USAGE,
+  tailSummary,
+} from "./deployments-cli";
 import { hostname as osHostname, platform as osPlatform, arch as osArch } from "node:os";
 import {
   CLI_NAME,
@@ -1369,6 +1385,102 @@ async function apiCredentials(explicitApiUrl?: string) {
   return { apiUrl, token, source };
 }
 
+/**
+ * `deployments list | status | tail <id>`. A Cloud deployment is a build; a Community one is a version. `tail` follows a
+ * build server-side and never cancels it, which is what a deploy detached with Ctrl-C needs.
+ */
+async function deployments(args: string[]) {
+  const sub = args.shift();
+  if (sub !== "list" && sub !== "status" && sub !== "tail")
+    usageError(
+      sub ? `deployments: unknown subcommand "${sub}"` : "deployments: missing subcommand",
+      "deployments <list | status | tail <id>>",
+    );
+  const usage =
+    sub === "list" ? DEPLOYMENTS_LIST_USAGE : sub === "status" ? DEPLOYMENTS_STATUS_USAGE : DEPLOYMENTS_TAIL_USAGE;
+  let parsed: ReturnType<typeof parseDeploymentsArgs>;
+  try {
+    parsed = parseDeploymentsArgs(args, usage);
+  } catch (error) {
+    if (error instanceof DeploymentsUsageError) return usageError(error.message, error.usage);
+    throw error;
+  }
+  const { positional, flags } = parsed;
+  const id = positional[0];
+  if (sub === "tail" && !id) usageError("deployments tail: missing <id>", usage);
+  if (positional.length > (sub === "tail" ? 1 : 0)) usageError(`unexpected argument "${positional.at(-1)}"`, usage);
+  const project = await readProjectConfig();
+  const app = project.config.name;
+  const { apiUrl: targetUrl } = await resolveApiUrl();
+  const kind = await deployKind(targetUrl, false);
+
+  if (kind !== "cloud") {
+    if (sub === "tail") return fail(COMMUNITY_TAIL);
+    const { apiUrl, token } = await apiCredentials();
+    const body = await responseText(
+      await fetch(`${apiUrl}/api/projects/${app}/deployments`, { headers: { "x-api-key": token } }),
+      "could not list deployments",
+    );
+    const list = parseJsonValue(body);
+    const versions = parseCommunityVersions(
+      Array.isArray(list)
+        ? list.flatMap((entry) => {
+            const item = jsonObject(entry);
+            return item ? [item] : [];
+          })
+        : [],
+    );
+    if (sub === "status") {
+      const active = versions.find((version) => version.active);
+      if (flags.json) console.log(JSON.stringify(active ?? null, null, 2));
+      else console.log(active ? formatCommunityVersion(active) : `${app} has no active deployment`);
+      return;
+    }
+    const shown = versions.slice(0, flags.limit);
+    if (flags.json) console.log(JSON.stringify(shown, null, 2));
+    else console.log(shown.length ? shown.map(formatCommunityVersion).join("\n\n") : "no deployments");
+    return;
+  }
+
+  await guard(async () => {
+    const credentials = await cloudCredentials(targetUrl, flags.account ?? project.account);
+    if (sub === "tail") {
+      // Ctrl-C only stops following: the build keeps going, and tail can be run again.
+      const controller = new AbortController();
+      let detached = false;
+      process.once("SIGINT", () => {
+        detached = true;
+        controller.abort();
+      });
+      let view;
+      try {
+        view = await tailBuild(credentials, id!, terminalIo(), controller.signal);
+      } catch (error) {
+        if (detached || error instanceof Interrupted) {
+          console.error(
+            `detached: the deployment keeps running; \`sproutboat deployments tail ${id}\` follows it again`,
+          );
+          process.exit(130);
+        }
+        throw error;
+      }
+      console.log(tailSummary(view));
+      if (view.state !== "ready") process.exitCode = 1;
+      return;
+    }
+    if (sub === "status") {
+      const live = await fetchLive(credentials, app);
+      const { deployments: recent } = live ? await fetchDeployments(credentials, app, 1) : { deployments: [] };
+      if (flags.json) console.log(JSON.stringify({ application: app, live, latest: recent[0] ?? null }, null, 2));
+      else console.log(formatStatus(app, live, recent[0]));
+      return;
+    }
+    const { deployments: recent } = await fetchDeployments(credentials, app, flags.limit);
+    if (flags.json) console.log(JSON.stringify(recent, null, 2));
+    else console.log(recent.length ? recent.map(formatDeployment).join("\n\n") : `no deployments of ${app} yet`);
+  });
+}
+
 async function versions(args: string[]) {
   const sub = args[0];
   if (sub !== "list" && sub !== "view") {
@@ -2404,6 +2516,9 @@ switch (resolveCommand(command)) {
     break;
   case "deploy":
     await deploy(args);
+    break;
+  case "deployments":
+    await deployments(args);
     break;
   case "versions":
     await versions(args);

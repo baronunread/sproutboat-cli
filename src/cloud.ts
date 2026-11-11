@@ -186,6 +186,12 @@ export function explainApiFailure(status: number, text: string, fromEnv: boolean
     return `${detail}${need}: this key's role cannot do that; ask a team Owner or Admin, or use another team with --account`;
   }
   if (status === 413) return `${detail}: too large for the Cloud`;
+  if (status === 429 && body?.reason === "rate") {
+    const seconds = isSafeInteger(body.retry_after) ? ` in ${body.retry_after} s` : " shortly";
+    return `too many requests for this team; try again${seconds}`;
+  }
+  if (status === 503 && body?.reason === "audit-unavailable")
+    return "the Cloud could not record this request in its audit log, so it was not served; try again shortly";
   return `${detail} (HTTP ${status})`;
 }
 

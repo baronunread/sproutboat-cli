@@ -43,6 +43,13 @@ export const COMMAND_OPTIONS = {
     flag: ["--dry-run", "--no-wait", "--no-provision"],
   },
   versions: {},
+  deployments: {
+    sub: {
+      list: { value: ["--account"], flag: ["--json"] },
+      status: { value: ["--account"], flag: ["--json"] },
+      tail: { value: ["--account"] },
+    },
+  },
   rollback: {},
   tail: {
     value: ["--format", "--status", "--method", "--sampling-rate", "--search", "--outcome", "--file", "--lines"],
@@ -80,6 +87,7 @@ export const COMMAND_OPTIONS = {
 export const ENDPOINT_COMMANDS: ReadonlySet<string> = new Set([
   "deploy",
   "versions",
+  "deployments",
   "rollback",
   "tail",
   "delete",
