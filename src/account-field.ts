@@ -1,5 +1,5 @@
 import { parseConfig, type ConfigValidation } from "./config";
-import { isString, jsonObject, parseJsonValue, type JsonObject } from "./json";
+import { isString, jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "./json";
 
 /** Blank out comments and trailing commas the way parseConfig does, then parse. Undefined when it is not a JSON object. */
 function parseLoose(source: string): JsonObject | undefined {
@@ -36,13 +36,34 @@ export function configAccount(source: string): string | undefined {
   return isString(account) && account !== "" ? account : undefined;
 }
 
-/** parseConfig for a file that may carry `account`: the field is validated here and removed before the shared schema sees it. */
+/**
+ * `migrations_dir` (like Wrangler's, but top level: a Sproutboat app has its D1 databases by binding name only): the
+ * directory `d1 migrations` keeps its .sql files in, relative to the project. Defaults to `migrations`. Undefined when
+ * absent; an invalid value is reported by parseProjectConfig.
+ */
+export function configMigrationsDir(source: string): string | undefined {
+  const dir = parseLoose(source)?.migrations_dir;
+  return isString(dir) && dir !== "" ? dir : undefined;
+}
+
+const MIGRATIONS_DIR_ERROR = 'migrations_dir must be a relative folder inside the project (for example "migrations")';
+const validMigrationsDir = (dir: JsonValue | undefined): boolean =>
+  isString(dir) && dir !== "" && !dir.startsWith("/") && !/^[A-Za-z]:/.test(dir) && !dir.split(/[\\/]/).includes("..");
+
+/**
+ * parseConfig for a file that may carry the CLI-owned fields `account` and `migrations_dir`: they are validated here and
+ * removed before the shared schema sees them.
+ */
 export function parseProjectConfig(source: string): ConfigValidation {
   const loose = parseLoose(source);
-  if (loose === undefined || !("account" in loose)) return parseConfig(source);
-  const account = loose.account;
-  if (!isString(account) || !ACCOUNT_RE.test(account))
-    return { ok: false, errors: ["account must be the URL name of a team (lowercase letters, digits and dashes)"] };
-  const rest = Object.fromEntries(Object.entries(loose).filter(([key]) => key !== "account"));
+  if (loose === undefined || !("account" in loose || "migrations_dir" in loose)) return parseConfig(source);
+  const errors: string[] = [];
+  if ("account" in loose && (!isString(loose.account) || !ACCOUNT_RE.test(loose.account)))
+    errors.push("account must be the URL name of a team (lowercase letters, digits and dashes)");
+  if ("migrations_dir" in loose && !validMigrationsDir(loose.migrations_dir)) errors.push(MIGRATIONS_DIR_ERROR);
+  if (errors.length > 0) return { ok: false, errors };
+  const rest = Object.fromEntries(
+    Object.entries(loose).filter(([key]) => key !== "account" && key !== "migrations_dir"),
+  );
   return parseConfig(JSON.stringify(rest));
 }

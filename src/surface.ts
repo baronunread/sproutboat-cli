@@ -58,7 +58,7 @@ const STORAGE_ARGS = "<list | create <name> | info <name> | rename <name> <new> 
 /** What each storage command offers, in the words the grouped help uses. */
 const STORAGE_SHORT = {
   kv: "Manage KV namespaces, keys, bulk data and exports",
-  d1: "Manage D1 databases",
+  d1: "Manage D1 databases, run SQL, apply migrations",
   r2: "Manage R2 buckets",
   queues: "Manage queues",
 } satisfies Record<StorageProduct["name"], string>;
@@ -68,9 +68,14 @@ const storageCommands: readonly Command[] = STORAGE_PRODUCTS.map((product) => ({
   group: "Storage" as const,
   emoji: product.emoji,
   short: STORAGE_SHORT[product.name],
-  args: product.name === "kv" ? `${STORAGE_ARGS} | <key | bulk | export> ...` : STORAGE_ARGS,
+  args:
+    product.name === "kv"
+      ? `${STORAGE_ARGS} | <key | bulk | export> ...`
+      : product.name === "d1"
+        ? `${STORAGE_ARGS} | execute <database> (--command <sql> | --file <path>) [--json] [--local | --remote] | migrations <create | list | apply> <database> ...`
+        : STORAGE_ARGS,
   brief: "<command>",
-  summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "kv" ? "; key and bulk operations manage contents, and export writes a restorable JSON dump" : ""}${product.name === "queues" ? "; consumers deliver in batches with retries, and stop after 5 attempts" : ""}.`,
+  summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "kv" ? "; key and bulk operations manage contents, and export writes a restorable JSON dump" : ""}${product.name === "d1" ? `; \`execute\` runs SQL against the local dev database (.sproutboat/dev/d1/<BINDING>.sqlite) unless --remote, as in Wrangler, and prints JSON when stdout is not a terminal; \`migrations create <database> <name>\` writes migrations/NNNN_<name>.sql (migrations_dir in sproutboat.jsonc changes the folder), \`migrations list\` shows the ones not applied, and \`migrations apply\` applies them in order, each with its row in the d1_migrations table in one transaction, after a confirmation in a terminal. <database> is the binding name from d1_databases. --remote needs a Sproutboat Cloud endpoint (app:write to change data, app:read for SELECT only); self-hosted Community has no remote D1 route yet and says so` : ""}${product.name === "queues" ? "; consumers deliver in batches with retries, and stop after 5 attempts" : ""}.`,
 }));
 
 export const COMMANDS: readonly Command[] = [

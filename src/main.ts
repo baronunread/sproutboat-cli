@@ -29,12 +29,13 @@ import {
 import { extractGlobalFlags, globalFlags, locateProject, setGlobalFlags } from "./global-flags";
 import { checkOptions, ENDPOINT_COMMANDS } from "./options";
 import { chooseTarget, TargetError, type Target } from "./target";
-import { configAccount, parseProjectConfig } from "./account-field";
+import { configAccount, configMigrationsDir, parseProjectConfig } from "./account-field";
 import {
   cloudLogout,
   CloudError,
   DEFAULT_API_URL,
   detectKind,
+  parseBody,
   envToken,
   fetchWhoami,
   loginAndStore,
@@ -52,7 +53,27 @@ import {
   formatKiB,
   hostFor,
   Interrupted,
+  makeCall,
 } from "./cloud-deploy";
+import {
+  APPLY_USAGE,
+  applyMigrations,
+  CREATE_USAGE,
+  createMigration,
+  D1UsageError,
+  DEFAULT_MIGRATIONS_DIR,
+  EXECUTE_USAGE,
+  executeSql,
+  LIST_USAGE,
+  listMigrations,
+  localDatabasePath,
+  localRunner,
+  parseD1Flags,
+  pickBinding,
+  remoteRunner,
+  type D1Io,
+  type Runner,
+} from "./d1-cli";
 import { deleteCloudSecret, listCloudSecrets, putCloudSecret, readSecretsFile } from "./cloud-secrets";
 import { hostname as osHostname, platform as osPlatform, arch as osArch } from "node:os";
 import { CLI_NAME, COMMANDS, helpText, STORAGE_PRODUCTS, STORAGE_VERBS, type StorageProduct } from "./surface";
@@ -305,7 +326,12 @@ async function readProjectConfig(directory?: string) {
   const parsed = parseProjectConfig(configSource);
   if (!parsed.ok) fail(parsed.errors.join("\n"));
   for (const warning of parsed.warnings) console.warn(amber(`! ${warning}`));
-  return { directory: projectDirectory, config: parsed.value, account: configAccount(configSource) };
+  return {
+    directory: projectDirectory,
+    config: parsed.value,
+    account: configAccount(configSource),
+    migrationsDir: configMigrationsDir(configSource),
+  };
 }
 
 /** Full build input: configuration plus entry point, resolved imports and checks. */
@@ -1588,6 +1614,19 @@ async function secrets(args: string[]) {
   console.log(ok(`set ${name} — applies on the next deploy or sprout restart`));
 }
 
+/** The signed-in session for a Cloud endpoint as the credentials every Cloud call takes; logs in first when it can. */
+async function cloudCredentials(apiUrl: string, account: string | undefined) {
+  const io = terminalIo();
+  const session = await resolveSession({
+    apiUrl,
+    io,
+    account,
+    login: (hint) =>
+      loginAndStore({ apiUrl, io, hostname: osHostname(), os: `${osPlatform()} ${osArch()}`, account: hint }),
+  });
+  return { apiUrl, token: session.token, tokenFromEnv: session.source !== "stored login" };
+}
+
 /** `secrets` against a Sproutboat Cloud app: by name, apart from deploys, which never wipe them (Wrangler's model). */
 async function cloudSecrets(
   sub: string,
@@ -1599,15 +1638,7 @@ async function cloudSecrets(
 ) {
   const project = await readProjectConfig(directory);
   const app = project.config.name;
-  const io = terminalIo();
-  const session = await resolveSession({
-    apiUrl,
-    io,
-    account: accountFlag ?? project.account,
-    login: (hint) =>
-      loginAndStore({ apiUrl, io, hostname: osHostname(), os: `${osPlatform()} ${osArch()}`, account: hint }),
-  });
-  const credentials = { apiUrl, token: session.token, tokenFromEnv: session.source !== "stored login" };
+  const credentials = await cloudCredentials(apiUrl, accountFlag ?? project.account);
   if (sub === "list") {
     const names = await listCloudSecrets(credentials, app);
     console.log(names.length ? names.join("\n") : "no secrets");
@@ -1622,6 +1653,117 @@ async function cloudSecrets(
   if (!value) fail("no value: pipe it on stdin, or pass --value <value>");
   await putCloudSecret(credentials, app, name!, value);
   console.log(ok(`set ${name} on ${app}; applies when a host picks up the new record`));
+}
+
+async function confirmOnTerminal(question: string): Promise<boolean> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return !/^n/i.test((await rl.question(`${question} [Y/n] `)).trim());
+  } finally {
+    rl.close();
+  }
+}
+
+/** `d1 execute` and `d1 migrations create | list | apply`: the local dev database unless --remote, as in Wrangler. */
+async function d1Contents(args: string[]) {
+  const area = args.shift()!;
+  let sub = "execute";
+  if (area === "migrations") {
+    const word = args.shift();
+    if (word !== "create" && word !== "list" && word !== "apply")
+      usageError(
+        word ? `d1 migrations: unknown subcommand "${word}"` : "d1 migrations: missing subcommand",
+        "d1 migrations <create | list | apply> <database> ...",
+      );
+    sub = word;
+  }
+  const usage =
+    sub === "execute" ? EXECUTE_USAGE : sub === "create" ? CREATE_USAGE : sub === "list" ? LIST_USAGE : APPLY_USAGE;
+  let parsed: ReturnType<typeof parseD1Flags>;
+  try {
+    parsed = parseD1Flags(args, usage);
+  } catch (error) {
+    if (error instanceof D1UsageError) return usageError(error.message, error.usage);
+    throw error;
+  }
+  const { positional, flags } = parsed;
+  const [database, message] = positional;
+  if (!database) usageError(`${sub === "execute" ? "d1 execute" : `d1 migrations ${sub}`}: missing <database>`, usage);
+  if (sub === "create" && (!message || positional.length > 2))
+    usageError("d1 migrations create: missing <name>", usage);
+  if (sub !== "create" && positional.length > 1) usageError(`unexpected argument "${positional[1]}"`, usage);
+  if (sub === "create" && (flags.local || flags.remote))
+    usageError("d1 migrations create works on files only; drop --local and --remote", usage);
+
+  const project = await readProjectConfig();
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const io: D1Io = {
+    log: (line) => console.log(line),
+    note: (line) => console.error(line),
+    interactive,
+    confirm: confirmOnTerminal,
+  };
+  try {
+    await guard(() => d1Run());
+  } catch (error) {
+    if (error instanceof D1UsageError) usageError(error.message, error.usage);
+    throw error;
+  }
+
+  async function d1Run() {
+    const binding = pickBinding(project.config, database!);
+    const dir = resolve(project.directory, project.migrationsDir ?? DEFAULT_MIGRATIONS_DIR);
+    if (sub === "create") {
+      await createMigration(dir, message!, io);
+      return;
+    }
+    let runner: Runner;
+    if (flags.remote) {
+      const { apiUrl: targetUrl } = await resolveApiUrl(flags.apiUrl);
+      const app = project.config.name;
+      if ((await deployKind(targetUrl, false)) === "cloud") {
+        const credentials = await cloudCredentials(targetUrl, flags.account ?? project.account);
+        const call = makeCall(credentials);
+        runner = remoteRunner({
+          label: `${app} database ${binding.binding}`,
+          project: app,
+          binding: binding.binding,
+          community: false,
+          send: async (body) => {
+            const reply = await call({
+              method: "POST",
+              path: `/v1/apps/${app}/d1/${binding.binding}/query`,
+              json: body,
+              ok: [400, 403, 404, 413, 501, 503, 504],
+            });
+            return { status: reply.status, body: reply.body };
+          },
+        });
+      } else {
+        const { apiUrl, token } = await apiCredentials(flags.apiUrl);
+        runner = remoteRunner({
+          label: `${app} database ${binding.binding}`,
+          project: app,
+          binding: binding.binding,
+          community: true,
+          send: async (body) => {
+            const response = await fetch(`${apiUrl}/api/projects/${app}/d1/${binding.binding}/query`, {
+              method: "POST",
+              headers: { "x-api-key": token, "content-type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            return { status: response.status, body: parseBody(await response.text().catch(() => "")) };
+          },
+        });
+      }
+    } else {
+      runner = localRunner(localDatabasePath(project.directory, binding, flags.persistTo));
+    }
+    if (sub === "execute") await executeSql({ flags, runner, remote: flags.remote, io, cwd: process.cwd() });
+    else if (sub === "list") await listMigrations(runner, dir, io);
+    else await applyMigrations(runner, dir, io);
+  }
 }
 
 /**
@@ -2165,6 +2307,9 @@ switch (command) {
     else await storage(command, args);
     break;
   case "d1":
+    if (["execute", "migrations"].includes(args[0] ?? "")) await d1Contents(args);
+    else await storage(command, args);
+    break;
   case "r2":
   case "queues":
     await storage(command, args);
