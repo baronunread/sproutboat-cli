@@ -30,6 +30,7 @@ import { extractGlobalFlags, globalFlags, locateProject, setGlobalFlags } from "
 import { checkOptions, ENDPOINT_COMMANDS } from "./options";
 import { chooseTarget, TargetError, type Target } from "./target";
 import { configAccount, configMigrationsDir, parseProjectConfig } from "./account-field";
+import { DATA_ERROR_STATUSES } from "./data-errors";
 import {
   cloudLogout,
   CloudError,
@@ -1735,9 +1736,9 @@ async function d1Contents(args: string[]) {
               method: "POST",
               path: `/v1/apps/${app}/d1/${binding.binding}/query`,
               json: body,
-              ok: [400, 403, 404, 413, 501, 503, 504],
+              ok: DATA_ERROR_STATUSES,
             });
-            return { status: reply.status, body: reply.body };
+            return { status: reply.status, body: reply.body, headers: reply.headers };
           },
         });
       } else {

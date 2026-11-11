@@ -11,6 +11,7 @@ import { resolve } from "node:path";
 import type { SproutboatConfig } from "./config";
 import { CloudError } from "./cloud";
 import { isBoolean, isSafeInteger, isString, jsonObject, type JsonObject, type JsonValue } from "./json";
+import { dataErrorMessage } from "./data-errors";
 import { splitSql } from "./sql-split";
 import { bold, dim, ok, rose } from "./style";
 
@@ -210,7 +211,7 @@ export function localRunner(path: string): Runner {
   };
 }
 
-export type Reply = { status: number; body?: JsonObject };
+export type Reply = { status: number; body?: JsonObject; headers?: Headers };
 
 /**
  * A remote database through `send`, which posts the request body and returns the status and JSON. `endpoint` names it in
@@ -243,20 +244,18 @@ export function remoteRunner(options: {
           `${project} is not deployed yet, so it has no database: run \`sproutboat deploy\` first, or use --local`,
         );
       }
-      if (reply.status === 403)
-        throw new CloudError(
-          `this key may not change data: it needs the app:write permission (see \`sproutboat whoami\` for this key's access)`,
-        );
       if (reply.status === 400 && body?.reason === "sql-error")
         throw new D1QueryError(message, isSafeInteger(body.statement) ? body.statement : undefined);
-      if (reply.status === 501)
-        throw new CloudError(
-          `the host that runs ${project} does not support D1 queries yet; ask the operator to update its agent`,
-        );
-      if (reply.status === 413)
-        throw new CloudError(`${message} (a request may carry at most 4 MiB of SQL and return at most 8 MiB)`);
-      if (reply.status === 504) throw new CloudError(`the query took longer than the 30 s limit and was rolled back`);
-      if (reply.status !== 200) throw new CloudError(message);
+      if (reply.status !== 200) {
+        const explained = dataErrorMessage(reply, {
+          project,
+          product: "D1",
+          noun: "database",
+          name: binding,
+          write: true,
+        });
+        throw new CloudError(explained ?? message);
+      }
       const list = Array.isArray(body?.results) ? body.results : [];
       return list.map((entry) => {
         const item = jsonObject(entry);

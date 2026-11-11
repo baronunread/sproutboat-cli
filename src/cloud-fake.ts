@@ -21,12 +21,14 @@ export type FakeOptions = {
   teamKey?: boolean;
   /** The team's other Cloud apps, by project name, for GET /v1/apps and service binding callees. Ids are `<project>_<owner suffix>`. */
   otherApps?: string[];
-  /** Permissions the key lacks: `secret:write` and `secret:list` answer 403. */
+  /** Permissions the key lacks: `secret:write`, `secret:list`, `data:read` and `data:write` answer 403. */
   denyPermissions?: string[];
   /** Secrets the app already holds (the app must exist). */
   existingSecrets?: Record<string, string>;
   /** D1 databases the app's host holds (binding names): POST /v1/apps/<p>/d1/<BINDING>/query runs on a real SQLite. */
   d1?: string[];
+  /** Every data route (D1 query, R2 object) answers this instead of working: the status, the JSON body, extra headers. */
+  dataFailure?: { status: number; body?: JsonObject; headers?: Record<string, string> };
   /** How POST /v1/apps/<project>/builds behaves. */
   build?: FakeBuildOptions;
 };
@@ -71,6 +73,10 @@ export function startFakeCloud(options: FakeOptions = {}) {
   const written: JsonObject[] = [];
   const patches: JsonObject[] = [];
   const denied = new Set(options.denyPermissions ?? []);
+  const dataFailureReply = (failure: NonNullable<FakeOptions["dataFailure"]>) =>
+    Response.json(failure.body ?? {}, { status: failure.status, headers: failure.headers });
+  const dataDenied = (need: string) =>
+    Response.json({ error: "forbidden", reason: "forbidden", need }, { status: 403 });
   const permissionDenied = (need: string) => Response.json({ error: "forbidden", need }, { status: 403 });
   /** The Cloud's spec rules for service bindings and secrets, then the merge. Returns an error reply or null. */
   const checkAndStore = (sent: JsonObject, project: string): Response | null => {
@@ -396,6 +402,7 @@ export function startFakeCloud(options: FakeOptions = {}) {
       }
       m = /^\/v1\/apps\/([^/]+)\/d1\/([^/]+)\/query$/.exec(path);
       if (m && request.method === "POST") {
+        if (options.dataFailure) return dataFailureReply(options.dataFailure);
         if (!appExists) return Response.json({ error: "no such app" }, { status: 404 });
         const db = databases.get(m[2]!);
         if (!db) return Response.json({ error: "no such database", reason: "no-database" }, { status: 404 });
@@ -407,14 +414,12 @@ export function startFakeCloud(options: FakeOptions = {}) {
           const params = Array.isArray(entry?.params) ? (entry.params as (string | number | null)[]) : undefined;
           return entry && isString(entry.sql) ? [{ sql: entry.sql, params }] : [];
         });
+        if (denied.has("data:read")) return dataDenied("data:read");
         if (
-          denied.has("app:write") &&
+          denied.has("data:write") &&
           statements.some((entry) => splitSql(entry.sql).some((sql) => !/^\s*(select|pragma)\b/i.test(sql)))
         )
-          return Response.json(
-            { error: "this key may only read", reason: "forbidden", need: "app:write" },
-            { status: 403 },
-          );
+          return dataDenied("data:write");
         const results: JsonObject[] = [];
         let index = 0;
         try {

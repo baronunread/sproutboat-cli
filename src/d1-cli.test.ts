@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configMigrationsDir, parseProjectConfig } from "./account-field";
+import type { JsonObject } from "./json";
 import { FAKE_KEY, startFakeCloud, type FakeOptions } from "./cloud-fake";
 import {
   nextMigrationNumber,
@@ -330,14 +331,101 @@ describe("remote database on a Cloud endpoint", () => {
     });
   });
 
-  test("a read-only key may SELECT but is told it needs app:write to change data", async () => {
-    await withCloud({ denyPermissions: ["app:write"] }, async (_cloud, env) => {
+  test("a key without data:write may SELECT but is told which grant it lacks and how to get it", async () => {
+    await withCloud({ denyPermissions: ["data:write"] }, async (_cloud, env) => {
       const dir = project();
       expect((await cli(dir, ["d1", "execute", "DB", "--remote", "--command", "SELECT 1 AS one"], env)).code).toBe(0);
       const write = await cli(dir, ["d1", "execute", "DB", "--remote", "--command", "CREATE TABLE t (x)"], env);
       expect(write.code).toBe(1);
-      expect(write.stderr).toContain("app:write");
+      expect(write.stderr).toContain("lacks the data:write grant");
+      expect(write.stderr).toContain("Deploy and data");
     });
+    await withCloud({ denyPermissions: ["data:read"] }, async (_cloud, env) => {
+      const read = await cli(project(), ["d1", "execute", "DB", "--remote", "--command", "SELECT 1"], env);
+      expect(read.code).toBe(1);
+      expect(read.stderr).toContain("lacks the data:read grant");
+      expect(read.stderr).toContain("Read data");
+    });
+  });
+
+  const failures: [string, number, JsonObject, string, Record<string, string>?][] = [
+    [
+      "a rate limit says when to retry",
+      429,
+      { error: "too many requests", reason: "rate", retry_after: 3 },
+      "try again in 3 s",
+    ],
+    [
+      "a busy host reads retry-after from the header",
+      503,
+      { error: "busy", reason: "busy" },
+      "try again in 7 s",
+      { "retry-after": "7" },
+    ],
+    [
+      "an unavailable host says remote D1 isn't there yet",
+      503,
+      { error: "x", reason: "host-unavailable" },
+      "remote D1/R2 isn't available on this Cloud host yet",
+    ],
+    [
+      "a failed audit says the request was not served",
+      503,
+      { error: "x", reason: "audit-unavailable" },
+      "read before retrying",
+    ],
+    [
+      "an agent error says remote D1 isn't there yet",
+      502,
+      { error: "x", reason: "agent-error" },
+      "remote D1/R2 isn't available on this Cloud host yet",
+    ],
+    ["a bare 503 says remote D1 isn't there yet", 503, {}, "remote D1/R2 isn't available on this Cloud host yet"],
+    [
+      "a backup capture says writes are paused",
+      409,
+      { error: "x", reason: "capture-active" },
+      "writes are paused while a backup capture is active",
+    ],
+    ["a damaged database file says so", 409, { error: "x", reason: "bad-database" }, "not a valid database"],
+    [
+      "a query over the memory limit says so",
+      422,
+      { error: "x", reason: "memory-limit" },
+      "more memory than the host allows",
+    ],
+    ["a full quota says so", 507, { error: "x", reason: "quota-exceeded" }, "quota exceeded"],
+    ["a timeout says the query was rolled back", 504, { error: "x", reason: "timeout" }, "rolled back"],
+    [
+      "refused SQL shows the Cloud's reason",
+      400,
+      { error: "ATTACH is not allowed", reason: "refused" },
+      "the Cloud refused this SQL: ATTACH is not allowed",
+    ],
+  ];
+  for (const [title, status, body, expected, headers] of failures)
+    test(title, async () => {
+      await withCloud({ dataFailure: { status, body, headers } }, async (_cloud, env) => {
+        const run = await cli(project(), ["d1", "execute", "DB", "--remote", "--command", "SELECT 1"], env);
+        expect(run.code).toBe(1);
+        expect(run.stderr).toContain(expected);
+        expect(run.stderr).not.toContain("HTTP");
+      });
+    });
+
+  test("a SQL error names the failing statement", async () => {
+    await withCloud(
+      { dataFailure: { status: 400, body: { error: "no such table: nope", reason: "sql-error", statement: 1 } } },
+      async (_cloud, env) => {
+        const run = await cli(
+          project(),
+          ["d1", "execute", "DB", "--remote", "--command", "SELECT 1; SELECT * FROM nope"],
+          env,
+        );
+        expect(run.code).toBe(1);
+        expect(run.stderr).toContain("no such table: nope");
+      },
+    );
   });
 
   test("an app that is not deployed, and a database it does not have, each say so", async () => {
@@ -386,5 +474,73 @@ describe("migrations create", () => {
     const dir = project();
     await cli(dir, ["d1", "migrations", "create", "DB", "x"]);
     expect(readdirSync(dir)).not.toContain(".sproutboat");
+  });
+});
+
+describe("global flags", () => {
+  test("--profile picks the stored login, and -c and --cwd find the project", async () => {
+    const cloud = startFakeCloud({ appExists: true, d1: ["DB"] });
+    const dir = project();
+    const config = mkdtempSync(join(tmpdir(), "sb-d1-profiles-"));
+    roots.push(config);
+    mkdirSync(join(config, "sproutboat"), { recursive: true });
+    const elsewhere = mkdtempSync(join(tmpdir(), "sb-d1-elsewhere-"));
+    roots.push(elsewhere);
+    // The default login is a place nothing listens on; the named profile is the fake Cloud.
+    writeFileSync(
+      join(config, "sproutboat", "credentials.json"),
+      JSON.stringify({
+        version: 1,
+        activeApiUrl: "http://127.0.0.1:9",
+        profiles: {
+          "http://127.0.0.1:9": { token: "nobody", kind: "community" },
+          [cloud.url]: { token: FAKE_KEY, kind: "cloud" },
+        },
+      }),
+    );
+    const env = { SPROUTBOAT_CONFIG_DIR: config, SPROUTBOAT_API_URL: "", SPROUTBOAT_PROFILE: "" };
+    const name = `127.0.0.1-${new URL(cloud.url).port}`;
+    try {
+      const query = ["--remote", "--command", "SELECT 1 AS one"];
+      for (const args of [
+        ["d1", "execute", "DB", ...query, "--profile", name],
+        ["--profile", name, "d1", "execute", "DB", ...query],
+        ["d1", "execute", "DB", ...query, `--profile=${name}`],
+      ]) {
+        const run = await cli(dir, args, env);
+        expect(run.stderr).not.toContain("--profile");
+        expect(run.code, run.stderr).toBe(0);
+      }
+      // The project is found by -c and by --cwd from anywhere, and the command works on it.
+      const byConfig = await cli(
+        elsewhere,
+        [
+          "d1",
+          "execute",
+          "DB",
+          "-c",
+          join(dir, "sproutboat.jsonc"),
+          "--remote",
+          "--command",
+          "SELECT 1",
+          "--profile",
+          name,
+        ],
+        env,
+      );
+      expect(byConfig.code, byConfig.stderr).toBe(0);
+      const byCwd = await cli(elsewhere, ["--cwd", dir, "d1", "migrations", "list", "DB", "--profile", name], env);
+      expect(byCwd.stderr).not.toContain("no sproutboat.jsonc");
+      // An unknown profile is refused before anything runs.
+      const unknown = await cli(
+        dir,
+        ["d1", "execute", "DB", "--remote", "--command", "SELECT 1", "--profile", "nope"],
+        env,
+      );
+      expect(unknown.code).toBe(1);
+      expect(unknown.stderr).toContain('no profile named "nope"');
+    } finally {
+      cloud.stop();
+    }
   });
 });
