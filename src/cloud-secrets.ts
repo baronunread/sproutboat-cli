@@ -62,6 +62,26 @@ export async function putCloudSecret(
   return isSafeInteger(generation) ? generation : undefined;
 }
 
+type SecretsPatchBody = { set?: Record<string, string>; delete?: string[] };
+
+/** One PATCH that sets and deletes many secrets at once; returns the record generation it produced. */
+export async function patchCloudSecrets(
+  credentials: CloudCredentials,
+  project: string,
+  patch: { set: Record<string, string>; delete: string[] },
+): Promise<number | undefined> {
+  const body: SecretsPatchBody = {};
+  if (Object.keys(patch.set).length > 0) body.set = patch.set;
+  if (patch.delete.length > 0) body.delete = patch.delete;
+  const result = await secretCall(credentials, project, "write", {
+    method: "PATCH",
+    path: `/v1/apps/${project}/secrets`,
+    json: body,
+  });
+  const generation = result.body?.record_generation;
+  return isSafeInteger(generation) ? generation : undefined;
+}
+
 export async function deleteCloudSecret(
   credentials: CloudCredentials,
   project: string,

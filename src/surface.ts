@@ -13,6 +13,8 @@ export type Group = "Develop" | "Ship" | "Storage" | "Configure" | "Account";
 
 export type Command = {
   name: string;
+  /** Other names that run the same command (`secret` for `secrets`, as in Wrangler). */
+  aliases?: readonly string[];
   /** Full argument grammar — used by SURFACE.md and the one-line usage string. */
   args: string;
   /** Short argument hint shown in the grouped help list (falls back to `args`). */
@@ -77,6 +79,10 @@ const storageCommands: readonly Command[] = STORAGE_PRODUCTS.map((product) => ({
   brief: "<command>",
   summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "kv" ? "; key and bulk operations manage contents, and export writes a restorable JSON dump" : ""}${product.name === "d1" ? `; \`execute\` runs SQL against the local dev database (.sproutboat/dev/d1/<BINDING>.sqlite) unless --remote, as in Wrangler, and prints JSON when stdout is not a terminal; \`migrations create <database> <name>\` writes migrations/NNNN_<name>.sql (migrations_dir in sproutboat.jsonc changes the folder), \`migrations list\` shows the ones not applied, and \`migrations apply\` applies them in order, each with its row in the d1_migrations table in one transaction, after a confirmation in a terminal. <database> is the binding name from d1_databases. --remote needs a Sproutboat Cloud endpoint (the key needs data:read for SELECT, data:write to change data; the error says which it lacks); self-hosted Community has no remote D1 route yet and says so` : ""}${product.name === "queues" ? "; consumers deliver in batches with retries, and stop after 5 attempts" : ""}.`,
 }));
+
+/** The command a typed name runs: an alias maps to its command, anything else is returned as typed. */
+export const resolveCommand = (name: string): string =>
+  COMMANDS.find((c) => c.name === name || c.aliases?.includes(name))?.name ?? name;
 
 export const COMMANDS: readonly Command[] = [
   {
@@ -211,13 +217,14 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: "secrets",
+    aliases: ["secret"],
     group: "Configure",
     emoji: "🔑",
     short: "Manage encrypted secrets",
-    args: "<list | put <NAME> [--value <value>] | delete <NAME>> [project-dir] [--api-url <url>] [--account <team>]",
-    brief: "<list | put | delete>",
+    args: "<list | put <NAME> [--value <value>] | delete <NAME> | bulk [file.json | file.env]> [project-dir] [--no-deploy] [--api-url <url>] [--account <team>]",
+    brief: "<list | put | delete | bulk>",
     summary:
-      "Manage encrypted project secrets (read as env.NAME). `put` reads the value from stdin unless --value is given, so it stays out of shell history; applies on next deploy. On a Cloud endpoint secrets are per app and independent of deploys (like wrangler secret): put, list and delete act on the deployed app at once (permissions secret:write and secret:list), and an app that is not deployed yet says to deploy first or pass --secrets-file on the first deploy.",
+      'Manage encrypted project secrets (read as env.NAME); `secret` is the same command, as in Wrangler. `put` reads the value from stdin unless --value is given, so it stays out of shell history. `bulk` takes the file of `wrangler secret bulk`: JSON {"NAME": "value", "OLD": null} (null deletes) or a .env file, from the file or stdin, at most 100 entries. On a Cloud endpoint secrets are per app and independent of deploys: put, delete and bulk act on the deployed app, and by default wait for a host to apply them as a new version of the running module (like wrangler secret, which deploys at once); --no-deploy returns as soon as the change is stored. Permissions secret:write and secret:list; an app that is not deployed yet says to deploy first or pass --secrets-file on the first deploy. Self-hosted Community applies secrets on the next deploy or restart of the app and has no redeploy route yet, so --no-deploy changes nothing there.',
   },
   {
     name: "login",
