@@ -10,6 +10,10 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.54.0] - 2026-11-11
+
+Built on `@sproutboat/runtime` 0.44.0, `@sproutboat/wire` 0.22.4 and `@sproutboat/toolchain` 0.24.2 (runtime and wire from 0.43.0 and 0.22.3). Runtime 0.44.0 adds service bindings between Cloud apps from compatibility date 2026-11-18; every app is recompiled on its next build, since the runtime prelude changed. The Cloud-only features below need a Cloud control plane with sproutboat-cloud#42, #45 and #49; remote D1 and R2 also need a host whose agent serves the data routes (sproutd#93).
+
 ### Added
 
 - **Profiles: `--profile <name>` and `SPROUTBOAT_PROFILE`.** A profile is an endpoint, its stored credential and a default team, so one machine can hold a Community login and a Cloud login side by side and say which one a command uses. `login --profile <name>` makes one (it fixes the endpoint, so `--api-url` must match when the profile exists), `logout` and `whoami` act on the profile in use, `profile list` shows them and `profile use <name>` changes the default. `whoami` and `deploy` now start with two lines, `profile` and `endpoint`, so a deploy never goes somewhere unannounced. A profile and an endpoint that name different places (`--profile cloud --api-url <community>`, or the same pair in the environment) are an error. Precedence: `--api-url` and `--profile`, then `SPROUTBOAT_API_URL` and `SPROUTBOAT_PROFILE`, then the default profile, then `https://dash.sproutboat.com`; `--profile` beats `SPROUTBOAT_API_URL` and `--api-url` beats `SPROUTBOAT_PROFILE`.
@@ -1808,7 +1812,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.54.0...HEAD
+[0.54.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.53.1...v0.54.0
 [0.32.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.30.0...v0.31.0
 [0.24.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.23.0...v0.24.0
