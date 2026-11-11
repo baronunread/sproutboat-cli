@@ -27,6 +27,7 @@ import {
   useProfile,
 } from "./credentials";
 import { extractGlobalFlags, globalFlags, locateProject, setGlobalFlags } from "./global-flags";
+import { checkOptions, ENDPOINT_COMMANDS } from "./options";
 import { chooseTarget, TargetError, type Target } from "./target";
 import { configAccount, parseProjectConfig } from "./account-field";
 import {
@@ -98,7 +99,7 @@ async function resolveApiUrl(
   let target: Target;
   try {
     target = chooseTarget({
-      flagUrl: explicitApiUrl,
+      flagUrl: explicitApiUrl ?? globalFlags().apiUrl,
       flagProfile: globalFlags().profile,
       envUrl: process.env.SPROUTBOAT_API_URL || undefined,
       envProfile: process.env.SPROUTBOAT_PROFILE || undefined,
@@ -925,13 +926,12 @@ async function waitForHealthy(url: string, timeoutMs: number): Promise<boolean> 
 }
 
 async function parseLoginArgs(args: string[], options: { allowNewProfile?: boolean } = {}) {
-  let explicitApiUrl: string | undefined;
   let token: string | undefined;
   let account: string | undefined;
+  // --api-url is a global flag (global-flags.ts); resolveApiUrl reads it.
   for (let index = 0; index < args.length; index += 2) {
     const value = args[index + 1];
-    if (args[index] === "--api-url" && value) explicitApiUrl = value;
-    else if (args[index] === "--token" && value) token = value;
+    if (args[index] === "--token" && value) token = value;
     else if (args[index] === "--account" && value) account = value;
     else
       usageError(
@@ -939,7 +939,7 @@ async function parseLoginArgs(args: string[], options: { allowNewProfile?: boole
         "login [--api-url <url>] [--token <token>] [--account <team>]",
       );
   }
-  const { apiUrl, source, target } = await resolveApiUrl(explicitApiUrl, options);
+  const { apiUrl, source, target } = await resolveApiUrl(undefined, options);
   return { apiUrl, source, target, token, account };
 }
 
@@ -1653,6 +1653,9 @@ function idForName(rows: JsonObject[], name: string, product: StorageProduct): s
 async function storage(key: string, args: string[]) {
   const product = STORAGE_PRODUCTS.find((entry) => entry.name === key)!;
   const sub = args[0] && STORAGE_VERBS.some((verb) => verb === args[0]) ? args.shift()! : "list";
+  // The five verbs take names, never options (the contents commands and `checkOptions` handle the others).
+  const stray = args.find((arg) => arg.startsWith("-") && arg !== "-");
+  if (stray) usageError(`${key}: unknown option ${stray.split("=")[0]}`, usageOf(key));
   const { apiUrl, token } = await apiCredentials();
   const base = `${apiUrl}/api/${product.name}`;
   const auth = { "x-api-key": token };
@@ -1997,6 +2000,12 @@ async function toolchain(args: string[]): Promise<void> {
 }
 
 /** `sproutboat <command> --help`: that command's full usage line + summary, exit 0. */
+/** The grammar line of a command, for usage errors. */
+function usageOf(name: string): string {
+  const found = COMMANDS.find((c) => c.name === name);
+  return found?.args ? `${name} ${found.args}` : name;
+}
+
 function commandHelp(name: string): never {
   const found = COMMANDS.find((c) => c.name === name);
   if (!found) usage();
@@ -2020,7 +2029,7 @@ function complete(shell?: string): void {
 }
 
 const GLOBAL_USAGE =
-  "<command> [-c, --config <file>] [--cwd <dir>] [-e, --env <name>] [--env-file <file>]... [--profile <name>] [-v, --version]";
+  "<command> [-c, --config <file>] [--cwd <dir>] [-e, --env <name>] [--env-file <file>]... [--profile <name>] [--api-url <url>] [-v, --version]";
 const parsedArgv = extractGlobalFlags(process.argv.slice(2));
 if ("error" in parsedArgv) usageError(parsedArgv.error, GLOBAL_USAGE);
 const globals = parsedArgv.flags;
@@ -2050,6 +2059,23 @@ if (globals.envFiles.length > 0 && command !== "dev" && command !== "run")
   usageError(`${command} does not read env files; --env-file is for \`dev\` and \`run\``, GLOBAL_USAGE);
 if (globals.profile !== undefined && !PROFILE_NAME.test(globals.profile))
   usageError(`"${globals.profile}" is not a profile name (letters, digits, . _ -; at most 64)`, GLOBAL_USAGE);
+if (globals.apiUrl !== undefined) {
+  if (!ENDPOINT_COMMANDS.has(command))
+    usageError(
+      `${command} does not talk to a control plane, so --api-url means nothing here; to choose where the other commands go use --profile <name> or SPROUTBOAT_API_URL`,
+      GLOBAL_USAGE,
+    );
+  if (!/^https?:\/\/[^\s/]+/i.test(globals.apiUrl))
+    usageError(
+      `--api-url "${globals.apiUrl}" is not an http(s) URL, such as https://dash.sproutboat.com`,
+      GLOBAL_USAGE,
+    );
+}
+// What each command accepts: an unknown flag is an error, `--flag=value` becomes `--flag value`, and a URL is never
+// read as a project directory (options.ts).
+const checked = checkOptions(command, args);
+if ("error" in checked) usageError(`${command}: ${checked.error}`, usageOf(command));
+args.splice(0, args.length, ...checked.args);
 
 // A local log needs no network: skip the version check for it (#268).
 if (!(command === "tail" && args.some((arg) => arg === "--file" || arg.startsWith("--file="))))

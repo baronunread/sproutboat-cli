@@ -90,3 +90,19 @@ test("without --config the project is the directory given, or the current one", 
   });
   expect(locateProject(undefined, undefined, "/work").configPath).toBe("/work/sproutboat.jsonc");
 });
+
+test("--api-url is a global flag in both forms, so every command that talks to a control plane honours it", () => {
+  for (const argv of [
+    ["deploy", "--api-url", "https://a.test", "--dry-run"],
+    ["--api-url=https://a.test", "deploy", "--dry-run"],
+    ["deploy", "--dry-run", "--api-url=https://a.test"],
+  ]) {
+    const { flags, rest } = parse(...argv);
+    expect(flags.apiUrl).toBe("https://a.test");
+    expect(rest).toEqual(["deploy", "--dry-run"]);
+  }
+  expect(extractGlobalFlags(["deploy", "--api-url"])).toEqual({ error: "--api-url needs a value" });
+  expect(parse("deploy", "--api-url", "https://a.test", "--api-url=https://b.test").flags.apiUrl).toBe(
+    "https://b.test",
+  );
+});
