@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { CloudIo } from "./cloud";
 import { buildAndDeploy } from "./cloud-deploy";
 import { FAKE_KEY, startFakeCloud, type FakeOptions } from "./cloud-fake";
+import { fakeLogin } from "./fake-login";
 
 const MAIN = join(import.meta.dir, "main.ts");
 const roots: string[] = [];
@@ -232,6 +233,56 @@ describe("deployments on self-hosted Community", () => {
       const tail = await cli(dir, ["deployments", "tail", "d2"], community(url));
       expect(tail.code).toBe(1);
       expect(tail.stderr).toContain("not supported on self-hosted Community");
+    });
+  });
+});
+
+describe("global flags and unknown options", () => {
+  test("--profile, --api-url=<url>, -c and --cwd all reach the right app and endpoint", async () => {
+    await withCloud({}, async (cloud, dir) => {
+      await deploy(dir, cloud, 1);
+      const login = fakeLogin(cloud.url);
+      roots.push(login.dir);
+      const elsewhere = mkdtempSync(join(tmpdir(), "sb-deployments-elsewhere-"));
+      roots.push(elsewhere);
+      const token = { SPROUTBOAT_API_TOKEN: "" };
+      for (const args of [
+        ["deployments", "list", "--profile", login.profile],
+        ["--profile", login.profile, "deployments", "status"],
+        ["deployments", "status", `--profile=${login.profile}`],
+      ]) {
+        const run = await cli(dir, args, { ...login.env, ...token });
+        expect(run.code, run.stderr).toBe(0);
+        expect(run.stdout).toContain("bld_1");
+      }
+      // --api-url in both forms, with no profile and no variable naming the Cloud.
+      for (const flag of [["--api-url", cloud.url], [`--api-url=${cloud.url}`]]) {
+        const run = await cli(dir, ["deployments", "list", ...flag], { ...login.env, SPROUTBOAT_API_TOKEN: FAKE_KEY });
+        expect(run.code, run.stderr).toBe(0);
+        expect(run.stdout).toContain("bld_1");
+      }
+      for (const args of [
+        ["deployments", "list", "-c", join(dir, "sproutboat.jsonc"), "--profile", login.profile],
+        ["--cwd", dir, "deployments", "list", "--profile", login.profile],
+      ]) {
+        const run = await cli(elsewhere, args, { ...login.env, ...token });
+        expect(run.code, run.stderr).toBe(0);
+        expect(run.stdout).toContain("bld_1");
+      }
+    });
+  });
+
+  test("an unknown option is refused with exit 2", async () => {
+    await withCloud({}, async (cloud, dir) => {
+      for (const args of [
+        ["deployments", "list", "--limt", "5"],
+        ["deployments", "status", "--jsno"],
+        ["deployments", "tail", "bld_1", "--follow"],
+      ]) {
+        const run = await cli(dir, args, env(cloud.url));
+        expect(run.code, args.join(" ")).toBe(2);
+        expect(run.stderr).toContain("unknown option");
+      }
     });
   });
 });

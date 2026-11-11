@@ -169,8 +169,9 @@ export const COMMANDS: readonly Command[] = [
     name: "deployments",
     group: "Ship",
     emoji: "🚢",
+    short: "List deployments, show what is live, follow a build",
     args: "<list | status | tail <id>> [--json] [--api-url <url>] [--account <team>]",
-    brief: "<list | status | tail <id>>",
+    brief: "<list | status | tail>",
     summary:
       "The deployments of the project in this directory. `list` shows the 10 most recent, newest first, with the live one marked; `status` shows what is live and whether a host applied it; both take --json. On a Cloud endpoint a deployment is a build: `tail <id>` follows it server-side (its log, then its end state), from its first line, so a deploy that was detached with Ctrl-C can be picked up again; Ctrl-C stops following and never cancels the build. On self-hosted Community a deployment is a version (as in `versions list`), `status` shows the active one, and `tail` says there is nothing to follow, since a deploy there is finished when `deploy` returns.",
   },

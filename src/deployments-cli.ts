@@ -30,11 +30,16 @@ export function parseDeploymentsArgs(args: readonly string[], usage: string) {
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
-    if (arg === "--json") flags.json = true;
-    else if (arg === "--api-url" || arg === "--account") {
-      const value = args[(index += 1)];
-      if (value === undefined || value.startsWith("--")) throw new DeploymentsUsageError(`${arg} needs a value`, usage);
-      if (arg === "--api-url") flags.apiUrl = value;
+    const equals = arg.startsWith("--") ? arg.indexOf("=") : -1;
+    const name = equals > 0 ? arg.slice(0, equals) : arg;
+    if (name === "--json") {
+      if (equals > 0) throw new DeploymentsUsageError("--json takes no value", usage);
+      flags.json = true;
+    } else if (name === "--api-url" || name === "--account") {
+      const value = equals > 0 ? arg.slice(equals + 1) : args[(index += 1)];
+      if (!value || (equals < 0 && value.startsWith("--")))
+        throw new DeploymentsUsageError(`${name} needs a value`, usage);
+      if (name === "--api-url") flags.apiUrl = value;
       else flags.account = value;
     } else if (arg.startsWith("-")) throw new DeploymentsUsageError(`unknown option ${arg}`, usage);
     else positional.push(arg);

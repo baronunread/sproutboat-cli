@@ -10,6 +10,7 @@ import {
   LIST_USAGE,
 } from "./deployments-cli";
 import { parseBuildView } from "./cloud-deploy";
+import { explainApiFailure } from "./cloud";
 import type { JsonObject } from "./json";
 
 const build = (over: JsonObject = {}): JsonObject => ({
@@ -133,4 +134,13 @@ test("tail summaries for each end state", () => {
   expect(
     tailSummary(parseBuildView({ id: "b", state: "canceled", error: { message: "superseded", code: "superseded" } })),
   ).toContain("superseded");
+});
+
+test("the Cloud's rate limit and failed audit are explained", () => {
+  expect(explainApiFailure(429, JSON.stringify({ error: "x", reason: "rate", retry_after: 4 }), false)).toContain(
+    "try again in 4 s",
+  );
+  expect(explainApiFailure(503, JSON.stringify({ error: "x", reason: "audit-unavailable" }), false)).toContain(
+    "audit log",
+  );
 });
