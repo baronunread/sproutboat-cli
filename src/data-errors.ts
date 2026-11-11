@@ -6,7 +6,7 @@
 import { isSafeInteger, isString, type JsonObject } from "./json";
 
 /** Every status a data route can answer with besides success, so `makeCall` hands them back instead of throwing. */
-export const DATA_ERROR_STATUSES = [400, 403, 404, 409, 411, 413, 422, 429, 502, 503, 504, 507];
+export const DATA_ERROR_STATUSES = [400, 403, 404, 409, 411, 413, 422, 429, 501, 502, 503, 504, 507];
 
 /** What the caller was doing, for the messages. */
 export type DataContext = {
@@ -21,6 +21,10 @@ export type DataContext = {
 };
 
 export type DataReply = { status: number; body?: JsonObject; headers?: Headers };
+
+/** Not temporary: the host refuses remote writes to any database with backup capture on. */
+export const CAPTURE_ACTIVE =
+  "remote writes are not available for a database with backup capture on; write through your app";
 
 const NOT_YET = "remote D1/R2 isn't available on this Cloud host yet";
 
@@ -70,7 +74,11 @@ export function dataErrorMessage(reply: DataReply, context: DataContext): string
       if (reason === "refused") return `the Cloud refused this SQL${text ? `: ${text}` : ""}`;
       if (reason === "invalid") {
         const path = isString(body?.path) ? body.path : undefined;
-        return `the Cloud rejected the request${path ? ` (${path})` : ""}${text ? `: ${text}` : ""}`;
+        const detail = text ? `: ${text}` : "";
+        // The Cloud names the field: the object's "key", or the "database" or "bucket" (the binding name).
+        if (path === "key") return `the Cloud rejected the object key${detail}`;
+        if (path === "database" || path === "bucket") return `the Cloud rejected the ${path} name "${name}"${detail}`;
+        return `the Cloud rejected the request${path ? ` (${path})` : ""}${detail}`;
       }
       return undefined;
     case 403:
@@ -84,7 +92,7 @@ export function dataErrorMessage(reply: DataReply, context: DataContext): string
       if (reason === "no-object") return "The specified key does not exist.";
       return `${project} is not deployed yet, so it has no ${noun}: run \`sproutboat deploy\` first`;
     case 409:
-      if (reason === "capture-active") return `writes are paused while a backup capture is active; ${wait(reply)}`;
+      if (reason === "capture-active") return CAPTURE_ACTIVE;
       if (reason === "bad-database") return `the ${noun} file on the host is not a valid database; ask the operator`;
       return undefined;
     case 411:
@@ -98,8 +106,14 @@ export function dataErrorMessage(reply: DataReply, context: DataContext): string
       return undefined;
     case 429:
       return `too many data requests for this team; ${wait(reply)}`;
-    case 502:
-      return `${NOT_YET} (the host's agent answered something unexpected: ask the operator to update it)`;
+    case 501:
+      return `${NOT_YET} (this Cloud has no data routes)`;
+    case 502: {
+      // Only an answer with no reason (an older Cloud, a proxy) means the routes are missing. A Cloud that has them says what failed.
+      if (reason === undefined)
+        return `${NOT_YET} (the host's agent answered something unexpected: ask the operator to update it)`;
+      return `the host's agent failed (${reason})${text ? `: ${text}` : ""}. Nothing here says the request was applied; ${wait(reply)}, and ask the operator if it keeps happening`;
+    }
     case 503:
       if (reason === "busy") return `the host is busy with other data requests; ${wait(reply)}`;
       if (reason === "audit-unavailable")
@@ -107,10 +121,16 @@ export function dataErrorMessage(reply: DataReply, context: DataContext): string
       if (reason === "host-unavailable")
         return `${NOT_YET}: the host that runs ${project} is down, unreachable or has no D1/R2 service; ${wait(reply)}`;
       return NOT_YET;
-    case 504:
-      return product === "D1"
-        ? "the query took longer than the 25 s limit and was rolled back"
-        : "the host did not answer in time (the Cloud waits 35 s)";
+    case 504: {
+      // `committed` is the Cloud's own word: "no" is the agent's 25 s deadline (rolled back), "unknown" is the Cloud's 35 s
+      // timeout, after which the host may have applied the request. No `committed` (an older Cloud) is treated as unknown.
+      if (body?.committed === "no")
+        return product === "D1"
+          ? "the query took longer than the 25 s limit and was rolled back: nothing was committed"
+          : "the host took longer than 25 s: nothing was changed";
+      if (!context.write) return "the host did not answer in time (the Cloud waits 35 s); try again shortly";
+      return "the host did not answer in time (the Cloud waits 35 s); the write may or may not have been applied: read the data before you retry";
+    }
     case 507:
       return `the host has no room left for this app's data (quota exceeded)`;
     default:

@@ -363,6 +363,7 @@ export function communityTarget(apiUrl: string, token: string, app: string, buck
         method,
         headers: { "x-api-key": token, ...init.headers },
         body: init.body === undefined ? undefined : init.body,
+        decompress: false,
       }),
   };
 }

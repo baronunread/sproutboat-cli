@@ -260,6 +260,38 @@ describe("a Cloud app's bucket", () => {
   });
 });
 
+describe("bytes as stored: a stored content-encoding is never undone", () => {
+  const real = Bun.gzipSync(new Uint8Array(50_000).fill(7));
+  const encoded = Bun.serve({
+    port: 0,
+    fetch(request) {
+      const key = decodeURIComponent(new URL(request.url).pathname.split("/objects/")[1] ?? "");
+      const bytes = key === "real.gz" ? real : new TextEncoder().encode("plain text that claims to be gzip");
+      return new Response(bytes, { headers: { "content-encoding": "gzip", "content-length": String(bytes.length) } });
+    },
+  });
+  afterAll(() => encoded.stop(true));
+  const gzUrl = `http://127.0.0.1:${encoded.port}`;
+  const targets = [
+    ["a Cloud app's bucket", () => cloudTarget(gzUrl, "sbk_token", "hello", "FILES")],
+    ["Community", () => communityTarget(gzUrl, "sbk_token", "hello", "FILES", "r2_000000000000000000000000")],
+  ] as const;
+  for (const [name, target] of targets) {
+    test(`${name}: a real gzip object is written compressed, exactly as received`, async () => {
+      const dir = temp();
+      notes = [];
+      await getObject(target(), "real.gz", { pipe: false, file: "out.gz" }, io, dir);
+      expect(Buffer.from(readFileSync(join(dir, "out.gz"))).equals(Buffer.from(real))).toBe(true);
+    });
+    test(`${name}: bytes that only claim to be gzip are written as they are, not an error`, async () => {
+      const dir = temp();
+      notes = [];
+      await getObject(target(), "bogus.gz", { pipe: false, file: "out.txt" }, io, dir);
+      expect(readFileSync(join(dir, "out.txt"), "utf8")).toBe("plain text that claims to be gzip");
+    });
+  }
+});
+
 describe("self-hosted Community", () => {
   const community = communityTarget(url, "tok", "hello", "uploads", "r2_0123456789abcdef01234567");
 
