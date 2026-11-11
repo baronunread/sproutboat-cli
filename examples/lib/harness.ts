@@ -266,7 +266,17 @@ export class Harness {
     timedOut.catch(() => {});
     const exit = options.watchChildren === false ? undefined : this.childExit();
     try {
-      const job = work(controller.signal);
+      let job = work(controller.signal);
+      if (exit) {
+        // A child that dies mid-request can break the connection before its exit
+        // is observed: give the exit a moment to arrive, so the failure names the
+        // child (with its stderr) instead of a bare connection error.
+        job = job.catch(async (error) => {
+          const grace = new Promise<never>((_, reject) => setTimeout(() => reject(error), 1000));
+          grace.catch(() => {});
+          return Promise.race([exit.promise, grace]);
+        });
+      }
       job.catch(() => {});
       return await Promise.race([job, timedOut, ...(exit ? [exit.promise] : [])]);
     } finally {
