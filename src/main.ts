@@ -59,6 +59,12 @@ import {
   waitForApply,
 } from "./cloud-deploy";
 import {
+  checkDurableObjectExports,
+  describeCloudBindings,
+  mapCloudBindings,
+  type CloudBindings,
+} from "./cloud-bindings";
+import {
   APPLY_USAGE,
   applyMigrations,
   CREATE_USAGE,
@@ -1247,25 +1253,14 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
   const hosts = [hostFor(name, team)];
 
   const cfg = project.config;
-  const unsent = Object.entries({
-    kv_namespaces: cfg.kv_namespaces?.length,
-    d1_databases: cfg.d1_databases?.length,
-    r2_buckets: cfg.r2_buckets?.length,
-    queues: cfg.queues?.length,
-    analytics_engine_datasets: cfg.analytics_engine_datasets?.length,
-    durable_objects: Object.keys(cfg.durable_objects ?? {}).length,
-    ratelimiters: cfg.ratelimiters?.length,
-    "triggers.crons": cfg.triggers?.crons?.length,
-  })
-    .filter(([, count]) => (count ?? 0) > 0)
-    .map(([key]) => key);
-  if (unsent.length > 0)
-    io.warn(
-      `! ${unsent.join(", ")} in sproutboat.jsonc are not sent to the Cloud by the CLI yet; the app runs without them`,
-    );
-
   const services = cfg.services ?? [];
   guardSync(() => checkServiceBindings(name, services, cfg.compatibility_date));
+  let cloudBindings!: CloudBindings;
+  guardSync(() => {
+    cloudBindings = mapCloudBindings(cfg, services.length);
+    checkDurableObjectExports(cfg, project.directory);
+  });
+  for (const warning of cloudBindings.warnings) io.warn(`! ${warning}`);
   let secretValues: Record<string, string> | undefined;
   const secretsFile = flags["--secrets-file"];
   if (secretsFile !== undefined) {
@@ -1299,6 +1294,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
   console.log(`endpoint  ${apiUrl}`);
   console.log(`route     https://${hosts[0]}`);
   if (assets) console.log(`assets    ${assets.files} files`);
+  for (const line of describeCloudBindings(cloudBindings)) console.log(`binding   ${line}`);
   if (services.length > 0)
     console.log(`services  ${services.map((entry) => `${entry.binding} -> ${entry.service}`).join(", ")}`);
   if (secretValues) console.log(`secrets   ${Object.keys(secretValues).length} from ${secretsFile} (set, others kept)`);
@@ -1348,6 +1344,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
           tokenFromEnv,
           project: name,
           services,
+          cloudBindings,
           compatibilityDate: cfg.compatibility_date,
           secrets: secretValues,
           hosts,
@@ -1383,6 +1380,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
         assets,
         noWait,
         services,
+        cloudBindings,
         compatibilityDate: cfg.compatibility_date,
         secrets: secretValues,
       },
