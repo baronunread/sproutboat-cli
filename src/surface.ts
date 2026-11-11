@@ -61,7 +61,7 @@ const STORAGE_ARGS = "<list | create <name> | info <name> | rename <name> <new> 
 const STORAGE_SHORT = {
   kv: "Manage KV namespaces, keys, bulk data and exports",
   d1: "Manage D1 databases, run SQL, apply migrations",
-  r2: "Manage R2 buckets",
+  r2: "Manage R2 buckets, and get, put or delete objects",
   queues: "Manage queues",
 } satisfies Record<StorageProduct["name"], string>;
 
@@ -75,9 +75,11 @@ const storageCommands: readonly Command[] = STORAGE_PRODUCTS.map((product) => ({
       ? `${STORAGE_ARGS} | <key | bulk | export> ...`
       : product.name === "d1"
         ? `${STORAGE_ARGS} | execute <database> (--command <sql> | --file <path>) [--json] [--local | --remote] | migrations <create | list | apply> <database> ...`
-        : STORAGE_ARGS,
+        : product.name === "r2"
+          ? `${STORAGE_ARGS} | object <get <bucket>/<key> [--file <path> | --pipe] | put <bucket>/<key> (--file <path> | --pipe) [--content-type <t>] [--cache-control <v>] ... | delete <bucket>/<key>>`
+          : STORAGE_ARGS,
   brief: "<command>",
-  summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "kv" ? "; key and bulk operations manage contents, and export writes a restorable JSON dump" : ""}${product.name === "d1" ? `; \`execute\` runs SQL against the local dev database (.sproutboat/dev/d1/<BINDING>.sqlite) unless --remote, as in Wrangler, and prints JSON when stdout is not a terminal; \`migrations create <database> <name>\` writes migrations/NNNN_<name>.sql (migrations_dir in sproutboat.jsonc changes the folder), \`migrations list\` shows the ones not applied, and \`migrations apply\` applies them in order, each with its row in the d1_migrations table in one transaction, after a confirmation in a terminal. <database> is the binding name from d1_databases. --remote needs a Sproutboat Cloud endpoint (the key needs data:read for SELECT, data:write to change data; the error says which it lacks); self-hosted Community has no remote D1 route yet and says so` : ""}${product.name === "queues" ? "; consumers deliver in batches with retries, and stop after 5 attempts" : ""}.`,
+  summary: `${product.plural[0].toUpperCase()}${product.plural.slice(1)}. \`create\` prints the id to bind from sproutboat.jsonc${product.name === "kv" ? "; key and bulk operations manage contents, and export writes a restorable JSON dump" : ""}${product.name === "d1" ? `; \`execute\` runs SQL against the local dev database (.sproutboat/dev/d1/<BINDING>.sqlite) unless --remote, as in Wrangler, and prints JSON when stdout is not a terminal; \`migrations create <database> <name>\` writes migrations/NNNN_<name>.sql (migrations_dir in sproutboat.jsonc changes the folder), \`migrations list\` shows the ones not applied, and \`migrations apply\` applies them in order, each with its row in the d1_migrations table in one transaction, after a confirmation in a terminal. <database> is the binding name from d1_databases. --remote needs a Sproutboat Cloud endpoint (app:write to change data, app:read for SELECT only); self-hosted Community has no remote D1 route yet and says so` : ""}${product.name === "r2" ? "; `object get | put | delete <bucket>/<key>` read and write the objects of a Cloud app's bucket (<bucket> is the binding name from r2_buckets) with Wrangler's flags (--file, --pipe, --content-type, --content-disposition, --content-encoding, --content-language, --cache-control, --expires; `get` without --file writes ./<key>), 64 MiB per object, remote only (--local is refused). A key is 1 to 1024 bytes with no control character, backslash, or empty, . or .. segment, checked before anything is sent. The key needs the data:read grant to get and data:write to put or delete (the error says which it lacks and how to get it). On self-hosted Community `get` reads through the existing route by bucket name, and `put` and `delete` say they are not supported yet" : ""}${product.name === "queues" ? "; consumers deliver in batches with retries, and stop after 5 attempts" : ""}.`,
 }));
 
 /** The command a typed name runs: an alias maps to its command, anything else is returned as typed. */

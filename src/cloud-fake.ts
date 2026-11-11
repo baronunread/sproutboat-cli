@@ -29,6 +29,8 @@ export type FakeOptions = {
   d1?: string[];
   /** Every data route (D1 query, R2 object) answers this instead of working: the status, the JSON body, extra headers. */
   dataFailure?: { status: number; body?: JsonObject; headers?: Record<string, string> };
+  /** R2 buckets the app's host holds (binding names): /v1/apps/<p>/r2/<BUCKET>/objects/<key> stores objects in memory. */
+  r2?: string[];
   /** How POST /v1/apps/<project>/builds behaves. */
   build?: FakeBuildOptions;
 };
@@ -116,6 +118,9 @@ export function startFakeCloud(options: FakeOptions = {}) {
 
   const databases = new Map<string, Database>((options.d1 ?? []).map((name) => [name, new Database(":memory:")]));
   const d1Requests: JsonObject[] = [];
+  const buckets = new Set(options.r2 ?? []);
+  const objects = new Map<string, { bytes: Uint8Array<ArrayBuffer>; headers: Record<string, string>; etag: string }>();
+  const putRequests: { key: string; headers: Record<string, string> }[] = [];
   const sources = new Map<string, Uint8Array>();
   const buildRequests: JsonObject[] = [];
   const eventRequests: string[] = [];
@@ -458,6 +463,76 @@ export function startFakeCloud(options: FakeOptions = {}) {
         }
         return Response.json({ results });
       }
+      m = /^\/v1\/apps\/([^/]+)\/r2\/([^/]+)\/objects\/(.+)$/.exec(path);
+      if (m) {
+        const method = request.method;
+        const invalid = (message: string, field = "key") =>
+          Response.json({ error: message, reason: "invalid", path: field }, { status: 400 });
+        const need = method === "GET" ? "data:read" : "data:write";
+        if (denied.has(need)) return dataDenied(need);
+        // The Cloud refuses an encoded dot, slash or backslash before decoding, and then the decoded key's own rules.
+        if (/%(2e|2f|5c)/i.test(m[3]!)) return invalid("the key has an encoded dot, slash or backslash");
+        let key: string;
+        try {
+          key = decodeURIComponent(m[3]!);
+        } catch {
+          return invalid("the key is not valid UTF-8");
+        }
+        const bytesLong = new TextEncoder().encode(key).length;
+        if (bytesLong < 1 || bytesLong > 1024) return invalid("the key must be 1 to 1024 bytes");
+        if (/[\u0000-\u001f\u007f-\u009f\\]/.test(key))
+          return invalid("the key has a control character or a backslash");
+        if (key.split("/").some((part) => part === "" || part === "." || part === ".."))
+          return invalid("the key has an empty, . or .. segment");
+        if (options.dataFailure) return dataFailureReply(options.dataFailure);
+        if (!appExists) return Response.json({ error: "no such app" }, { status: 404 });
+        if (!buckets.has(m[2]!))
+          return Response.json({ error: "no such bucket", reason: "no-bucket" }, { status: 404 });
+        if (method === "PUT") {
+          const declared = request.headers.get("content-length") ?? request.headers.get("x-declared-length");
+          putRequests.push({ key, headers: Object.fromEntries(request.headers.entries()) });
+          if (declared === null)
+            return Response.json({ error: "length required", reason: "length-required" }, { status: 411 });
+          if (!/^\d+$/.test(declared)) return invalid("the declared length is not a number", "body");
+          if (Number(declared) > 64 * 1024 * 1024)
+            return Response.json({ error: "too large", reason: "too-large" }, { status: 413 });
+          if (Number(declared) !== raw.byteLength)
+            return invalid("the body does not match its declared length", "body");
+          const headers: Record<string, string> = {};
+          for (const name of [
+            "content-type",
+            "content-disposition",
+            "content-encoding",
+            "content-language",
+            "expires",
+          ]) {
+            const value = request.headers.get(name);
+            if (value !== null) headers[name] = value;
+          }
+          const cacheControl = request.headers.get("x-object-cache-control");
+          if (cacheControl !== null) headers["cache-control"] = cacheControl;
+          const etag = new Bun.CryptoHasher("sha256").update(raw).digest("hex").slice(0, 32);
+          objects.set(`${m[2]}/${key}`, { bytes: raw, headers, etag });
+          return Response.json({ key, size: raw.byteLength, etag: `"${etag}"` });
+        }
+        if (method === "DELETE") {
+          objects.delete(`${m[2]}/${key}`);
+          return Response.json({ key, deleted: true });
+        }
+        const found = objects.get(`${m[2]}/${key}`);
+        if (!found) return Response.json({ error: "no such object", reason: "no-object" }, { status: 404 });
+        // A GET never lets the browser interpret the object; its own metadata is only reported, as x-object-* headers.
+        const reply = new Headers({
+          "content-type": "application/octet-stream",
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "sandbox",
+          "content-disposition": "attachment",
+          "cache-control": "no-store",
+          etag: `"${found.etag}"`,
+        });
+        for (const [name, value] of Object.entries(found.headers)) reply.set(`x-object-${name}`, value);
+        return new Response(found.bytes, { headers: reply });
+      }
       m = /^\/v1\/apps\/([^/]+)\/secrets$/.exec(path);
       if (m && request.method === "PATCH") {
         if (denied.has("secret:write")) return permissionDenied("secret:write");
@@ -529,6 +604,10 @@ export function startFakeCloud(options: FakeOptions = {}) {
     buildRequests,
     /** Bodies of POST /v1/apps/<app>/d1/<BINDING>/query. */
     d1Requests,
+    /** Objects in the fake host's buckets, by `<BUCKET>/<key>`; `headers` are the stored metadata (content-type, cache-control, ...). */
+    objects,
+    /** Every PUT to an object route: the decoded key and the request headers. */
+    putRequests,
     /** The fake host's databases, to look at what a command left behind. */
     databases,
     eventRequests,

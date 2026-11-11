@@ -86,6 +86,22 @@ import {
 } from "./cloud-secrets";
 import { parseBulkSecrets, type BulkPlan } from "./secrets-bulk";
 import {
+  cloudTarget,
+  communityTarget,
+  DELETE_USAGE as R2_DELETE_USAGE,
+  deleteObject,
+  GET_USAGE as R2_GET_USAGE,
+  getObject,
+  OBJECT_MAX_BYTES,
+  readCapped,
+  parseObjectArgs,
+  parseObjectPath,
+  PUT_USAGE as R2_PUT_USAGE,
+  putObject,
+  R2UsageError,
+  type ObjectTarget,
+} from "./r2-objects";
+import {
   COMMUNITY_TAIL,
   DeploymentsUsageError,
   fetchDeployments,
@@ -1993,6 +2009,65 @@ async function d1Contents(args: string[]) {
   }
 }
 
+/** `r2 object get | put | delete <bucket>/<key>`: remote only; on the Cloud the bucket is a binding of the project. */
+async function r2Object(args: string[]) {
+  args.shift(); // "object"
+  const sub = args.shift();
+  if (sub !== "get" && sub !== "put" && sub !== "delete")
+    usageError(
+      sub ? `r2 object: unknown subcommand "${sub}"` : "r2 object: missing subcommand",
+      "r2 object <get | put | delete> <bucket>/<key>",
+    );
+  const usage = sub === "get" ? R2_GET_USAGE : sub === "put" ? R2_PUT_USAGE : R2_DELETE_USAGE;
+  try {
+    const { positional, flags } = parseObjectArgs(args, usage);
+    if (positional.length > 1) usageError(`unexpected argument "${positional[1]}"`, usage);
+    const { bucket, key } = parseObjectPath(positional[0], usage);
+    const project = await readProjectConfig();
+    const app = project.config.name;
+    const { apiUrl: targetUrl } = await resolveApiUrl();
+    let target: ObjectTarget;
+    if ((await deployKind(targetUrl, false)) === "cloud") {
+      const bindings = (project.config.r2_buckets ?? []).map((entry) => (isString(entry) ? entry : entry.binding));
+      if (!bindings.includes(bucket))
+        fail(
+          bindings.length === 0
+            ? `sproutboat.jsonc has no r2_buckets, so there is no bucket "${bucket}" (add "r2_buckets": ["${bucket}"])`
+            : `no R2 binding "${bucket}" in sproutboat.jsonc (it has: ${bindings.join(", ")})`,
+        );
+      const credentials = await guard(() => cloudCredentials(targetUrl, flags.account ?? project.account));
+      target = cloudTarget(credentials.apiUrl, credentials.token, app, bucket);
+    } else {
+      const { apiUrl, token } = await apiCredentials();
+      const rows = await storageRows(`${apiUrl}/api/r2`, { "x-api-key": token }, STORAGE_PRODUCTS[2]);
+      target = communityTarget(apiUrl, token, app, bucket, idForName(rows, bucket, STORAGE_PRODUCTS[2]));
+    }
+    const io = {
+      log: (line: string) => console.log(line),
+      note: (line: string) => console.error(line),
+      stdout: { write: (bytes: Uint8Array) => void process.stdout.write(bytes) },
+    };
+    await guard(async () => {
+      if (sub === "get") await getObject(target, key, flags, io, process.cwd());
+      else if (sub === "delete") await deleteObject(target, key, io);
+      else
+        await putObject(target, key, flags, io, process.cwd(), () =>
+          readCapped(
+            Bun.stdin.stream(),
+            OBJECT_MAX_BYTES,
+            () =>
+              new CloudError(
+                `the piped object is larger than ${OBJECT_MAX_BYTES / 1024 / 1024} MiB, the most the Cloud takes`,
+              ),
+          ),
+        );
+    });
+  } catch (error) {
+    if (error instanceof R2UsageError) usageError(error.message, error.usage);
+    throw error;
+  }
+}
+
 /**
  * #79 — one command per storage product (`kv`, `d1`, `r2`, `queues`), each with
  * the same five verbs, over that product's own `/api/<product>` collection.
@@ -2541,6 +2616,9 @@ switch (resolveCommand(command)) {
     else await storage(command, args);
     break;
   case "r2":
+    if (args[0] === "object") await r2Object(args);
+    else await storage(command, args);
+    break;
   case "queues":
     await storage(command, args);
     break;

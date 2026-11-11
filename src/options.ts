@@ -74,7 +74,44 @@ export const COMMAND_OPTIONS = {
       "migrations apply": { value: ["--persist-to", "--account"], flag: ["--local", "--remote"] },
     },
   },
-  r2: { own: true },
+  // The Wrangler flags that are not supported yet (--local, --jurisdiction, -J, --storage-class, -s, --persist-to) are
+  // listed so the command answers with its own reason instead of "unknown option".
+  r2: {
+    sub: {
+      "object get": {
+        value: ["--file", "-f", "--account", "--jurisdiction", "-J", "--storage-class", "-s", "--persist-to"],
+        flag: ["--pipe", "-p", "--remote", "--local"],
+      },
+      "object put": {
+        value: [
+          "--file",
+          "-f",
+          "--content-type",
+          "--ct",
+          "--content-disposition",
+          "--cd",
+          "--content-encoding",
+          "--ce",
+          "--content-language",
+          "--cl",
+          "--cache-control",
+          "--cc",
+          "--expires",
+          "--account",
+          "--jurisdiction",
+          "-J",
+          "--storage-class",
+          "-s",
+          "--persist-to",
+        ],
+        flag: ["--pipe", "-p", "--remote", "--local"],
+      },
+      "object delete": {
+        value: ["--account", "--jurisdiction", "-J", "--storage-class", "-s", "--persist-to"],
+        flag: ["--remote", "--local"],
+      },
+    },
+  },
   queues: {},
   login: { value: ["--token", "--account"] },
   logout: { value: ["--account"] },
