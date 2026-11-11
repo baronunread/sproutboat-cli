@@ -38,7 +38,7 @@ the page, so opening one never changes a row's height.
 
 Nothing on the page is estimated.
 
-- **Server time** is `performance.now()` around the whole `fetch` handler, returned in a
+- **Server time** is `Date.now()` (whole milliseconds) around the whole `fetch` handler, returned in a
   `Server-Timing: app;dur=...` header and as `ms` in the JSON. The tile latencies, the p50 and
   p99 cards and the chart are built from those values for the requests this tab has made. The
   chat tile shows the room's own handling time, and the client times the round trip itself.
