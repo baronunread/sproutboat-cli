@@ -11,6 +11,12 @@
 //   fetch     api.quotable.local   any public host; private addresses refused
 //   cron      */1 * * * *          -> scheduled(): prune sessions + heartbeat
 //   assets    ASSETS (public/)     UI served via env.ASSETS.fetch(request)
+//   service   PEER -> quote-service  the dashboard's quote tile
+//   DO        ROOM (ChatRoom)      WebSocket chat on the hibernation API
+//
+// The routes under /api/ feed the dashboard in public/. Each tile's handler sits
+// between `#region` markers: build-web.ts copies those excerpts into the page's
+// Code panels, so the code on screen is the code that runs.
 
 export class ViewCounter {
   constructor(state, env) {
@@ -43,6 +49,84 @@ export class ViewCounter {
       .run();
   }
 }
+
+// #region chat
+// One room, one object. The sockets use the hibernation API: the object does not
+// hold the connections itself, it accepts them with state.acceptWebSocket and gets
+// webSocketMessage / webSocketClose calls, so an idle room can be unloaded.
+export class ChatRoom {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch(request) {
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return new Response("expected a WebSocket upgrade", { status: 426 });
+    }
+    const pair = new WebSocketPair();
+    this.state.acceptWebSocket(pair[1]);
+    const history = (await this.state.storage.get("history")) || [];
+    pair[1].send(JSON.stringify({ type: "history", messages: history }));
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  presence() {
+    const names = [];
+    for (const ws of this.state.getWebSockets()) {
+      const who = ws.deserializeAttachment();
+      if (who && who.name) names.push(who.name);
+    }
+    return { type: "presence", n: this.state.getWebSockets().length, names };
+  }
+
+  broadcast(payload) {
+    const text = JSON.stringify(payload);
+    for (const ws of this.state.getWebSockets()) ws.send(text);
+  }
+
+  async webSocketMessage(ws, message) {
+    const started = clock();
+    let frame = null;
+    try {
+      frame = JSON.parse(String(message));
+    } catch {
+      return;
+    }
+    if (frame.type === "hello") {
+      ws.serializeAttachment({ name: String(frame.name || "guest").slice(0, 20) });
+      this.broadcast(this.presence());
+      return;
+    }
+    const text = String(frame.text || "")
+      .trim()
+      .slice(0, 120);
+    if (frame.type !== "msg" || !text) return;
+    const who = ws.deserializeAttachment();
+    const entry = { name: who && who.name ? who.name : "guest", text, at: Date.now() };
+    const history = (await this.state.storage.get("history")) || [];
+    history.push(entry);
+    while (history.length > 30) history.shift();
+    await this.state.storage.put("history", history);
+    // `sent` is the client's own clock value, echoed so it can time the round trip.
+    this.broadcast({
+      type: "msg",
+      name: entry.name,
+      text,
+      at: entry.at,
+      sent: frame.sent,
+      ms: clock() - started,
+    });
+  }
+
+  async webSocketClose(ws, code) {
+    try {
+      ws.close(code === 1005 || code === 1006 ? 1000 : code, "bye");
+    } catch {}
+    this.broadcast(this.presence());
+  }
+}
+// #endregion
 
 function json(data, status) {
   return new Response(JSON.stringify(data), { status: status || 200, headers: { "content-type": "application/json" } });
@@ -99,7 +183,9 @@ async function ensureSchema(env) {
     "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, body TEXT, attachment TEXT, created TEXT);" +
       "CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, sent_at TEXT);" +
       "CREATE TABLE IF NOT EXISTS heartbeat (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, cron TEXT);" +
-      "CREATE TABLE IF NOT EXISTS view_rollup (id INTEGER PRIMARY KEY AUTOINCREMENT, views INTEGER, at TEXT)",
+      "CREATE TABLE IF NOT EXISTS view_rollup (id INTEGER PRIMARY KEY AUTOINCREMENT, views INTEGER, at TEXT);" +
+      "CREATE TABLE IF NOT EXISTS guestbook (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, msg TEXT, at TEXT);" +
+      "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, label TEXT, ms REAL, at TEXT)",
   );
 }
 
@@ -110,14 +196,337 @@ async function sessionNames(env) {
   return (listed.keys || []).map((k) => k.name);
 }
 
+// ---------------------------------------------------------------------------
+// Dashboard API (/api/*). Every reply carries how long the handler ran, measured
+// here with clock(), in the body (`ms`) and in a Server-Timing header.
+// ---------------------------------------------------------------------------
+
+// #region timing
+// Sub-millisecond clock. Date.now() is only the fallback for a runtime without performance.
+function clock() {
+  try {
+    return performance.now();
+  } catch {
+    return Date.now();
+  }
+}
+
+const ms2 = (t0) => Math.round((clock() - t0) * 100) / 100;
+// #endregion
+
+function timed(data, status, t0) {
+  const ms = ms2(t0);
+  data.ms = ms;
+  return new Response(JSON.stringify(data), {
+    status: status || 200,
+    headers: { "content-type": "application/json", "server-timing": "app;dur=" + ms, "cache-control": "no-store" },
+  });
+}
+
+// KV values are strings. A counter written like this is not atomic: two requests
+// can read the same number. Use a Durable Object when the count has to be exact.
+// #region kv
+async function kvIncrement(env) {
+  const ops = [];
+  let t = clock();
+  const before = Number((await env.SESSIONS.get("counter:home")) || 0);
+  ops.push({ op: "GET", value: before, ms: ms2(t) });
+  t = clock();
+  await env.SESSIONS.put("counter:home", String(before + 1));
+  ops.push({ op: "PUT", value: before + 1, ms: ms2(t) });
+  return { n: before + 1, ops };
+}
+// #endregion
+
+// #region d1
+async function guestbookSign(env, name, msg) {
+  const statements = [];
+  const at = new Date().toISOString();
+  const insert = "INSERT INTO guestbook (name, msg, at) VALUES (?, ?, ?)";
+  let t = clock();
+  await env.DB.prepare(insert).bind(name, msg, at).run();
+  statements.push({ sql: insert, binds: [name, msg, at], ms: ms2(t) });
+  // The demo keeps the newest 200 rows.
+  const trim = "DELETE FROM guestbook WHERE id <= (SELECT max(id) FROM guestbook) - 200";
+  t = clock();
+  await env.DB.prepare(trim).run();
+  statements.push({ sql: trim, binds: [], ms: ms2(t) });
+  return statements;
+}
+
+async function guestbookList(env) {
+  const sql = "SELECT id, name, msg, at FROM guestbook ORDER BY id DESC LIMIT 5";
+  const t = clock();
+  const res = await env.DB.prepare(sql).all();
+  return { rows: res.results, statement: { sql, binds: [], ms: ms2(t), rows_read: res.meta.rows_read } };
+}
+// #endregion
+
+// #region r2
+async function filesList(env) {
+  const listed = await env.UPLOADS.list({ prefix: "files/", limit: 100 });
+  let bytes = 0;
+  const objects = [];
+  for (const o of listed.objects) {
+    bytes += o.size;
+    objects.push({ name: o.key.slice(6), size: o.size, uploaded: o.uploaded, etag: o.httpEtag });
+  }
+  return { objects, bytes, truncated: listed.truncated };
+}
+
+async function filePut(env, name, text) {
+  await env.UPLOADS.put("files/" + name, text, { httpMetadata: { contentType: "text/plain" } });
+}
+// #endregion
+
+// #region queue
+// The producer side. The consumer is the queue() handler at the bottom of this file.
+async function jobEnqueue(env, label) {
+  const at = new Date().toISOString();
+  await env.DB.prepare("INSERT INTO events (kind, label, ms, at) VALUES ('queued', ?, 0, ?)").bind(label, at).run();
+  await env.EMAILS.send({ kind: "job", label, sent: Date.now() });
+}
+
+async function feed(env) {
+  const counts = await env.DB.prepare(
+    "SELECT sum(kind = 'queued') AS queued, sum(kind = 'processed') AS processed, sum(kind = 'cron') AS crons FROM events",
+  ).first();
+  const recent = await env.DB.prepare(
+    "SELECT kind, label, ms, at FROM events WHERE kind IN ('processed', 'cron') ORDER BY id DESC LIMIT 6",
+  ).all();
+  return { counts, recent: recent.results };
+}
+// #endregion
+
+// #region service
+async function quote(env) {
+  const res = await env.PEER.fetch(new Request("https://peer/random"));
+  if (res.status !== 200) throw new Error("quote-service answered " + res.status);
+  return JSON.parse(await res.text());
+}
+// #endregion
+
+// #region secrets
+// Report whether each declared secret has a value. Reading a missing secret can
+// throw, so that counts as unset. The value itself never leaves this function.
+function secretStatus(env, names) {
+  const out = [];
+  for (const name of names) {
+    let set = false;
+    try {
+      const value = env[name];
+      set = !!value && String(value).length > 0;
+    } catch {}
+    out.push({ name, set });
+  }
+  return out;
+}
+// #endregion
+
+const DECLARED_SECRETS = ["ADMIN_TOKEN"];
+
+function cleanFileName(raw) {
+  let out = "";
+  const text = String(raw || "").trim();
+  for (let i = 0; i < text.length && out.length < 64; i++) {
+    const code = text.charCodeAt(i);
+    // a-z, A-Z, 0-9, dot, dash, underscore; anything else becomes an underscore
+    const ok =
+      (code >= 97 && code <= 122) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 48 && code <= 57) ||
+      code === 46 ||
+      code === 45 ||
+      code === 95;
+    out += ok ? text[i] : "_";
+  }
+  return out;
+}
+
+async function trimEvents(env) {
+  await env.DB.prepare("DELETE FROM events WHERE id <= (SELECT max(id) FROM events) - 200").run();
+}
+
+async function api(request, env, url, path, t0) {
+  const method = request.method;
+
+  if (path === "/api/info" && method === "GET") {
+    let requests = null;
+    try {
+      requests = (await env.METRICS.query({ limit: 1 })).count;
+    } catch {}
+    return timed(
+      {
+        site: env.SITE_NAME,
+        requests,
+        // What this build has. A standalone binary has no edge, so no service binding.
+        bindings: {
+          kv: !!env.SESSIONS,
+          d1: !!env.DB,
+          r2: !!env.UPLOADS,
+          queue: !!env.EMAILS,
+          durable_object: !!env.ROOM,
+          service: !!env.PEER,
+        },
+        max_upload_bytes: Number(env.MAX_UPLOAD_BYTES) || 65536,
+      },
+      200,
+      t0,
+    );
+  }
+
+  if (path === "/api/kv") {
+    const n = Number((await env.SESSIONS.get("counter:home")) || 0);
+    return timed({ n, keys: (await sessionNames(env)).length }, 200, t0);
+  }
+  if (path === "/api/kv/incr" && method === "POST") {
+    const res = await kvIncrement(env);
+    res.keys = (await sessionNames(env)).length;
+    return timed(res, 200, t0);
+  }
+
+  if (path === "/api/guestbook" && method === "GET") {
+    const list = await guestbookList(env);
+    const total = await env.DB.prepare("SELECT count(*) AS n FROM guestbook").first("n");
+    return timed({ rows: list.rows, total, sql: [list.statement] }, 200, t0);
+  }
+  if (path === "/api/guestbook" && method === "POST") {
+    let input = {};
+    try {
+      input = request.body ? await request.json() : {};
+    } catch {}
+    const name = String(input.name || "")
+      .trim()
+      .slice(0, 20);
+    const msg = String(input.msg || "")
+      .trim()
+      .slice(0, 60);
+    if (!name || !msg) return timed({ error: "name and message are both required" }, 400, t0);
+    const sql = await guestbookSign(env, name, msg);
+    const list = await guestbookList(env);
+    const total = await env.DB.prepare("SELECT count(*) AS n FROM guestbook").first("n");
+    sql.push(list.statement);
+    return timed({ rows: list.rows, total, sql }, 201, t0);
+  }
+
+  if (path === "/api/r2" && method === "GET") {
+    return timed(await filesList(env), 200, t0);
+  }
+  if (path === "/api/r2" && method === "PUT") {
+    const name = cleanFileName(url.searchParams.get("name"));
+    if (!name) return timed({ error: "a file name is required" }, 400, t0);
+    const text = await request.text();
+    const cap = Number(env.MAX_UPLOAD_BYTES) || 65536;
+    if (text.length > cap) {
+      return timed({ error: "too large: this build accepts " + Math.floor(cap / 1024) + " KB per file" }, 413, t0);
+    }
+    const before = await env.UPLOADS.list({ prefix: "files/", limit: 100 });
+    if (before.objects.length >= 50) {
+      return timed({ error: "the demo bucket holds 50 files; delete one first" }, 409, t0);
+    }
+    await filePut(env, name, text);
+    const out = await filesList(env);
+    out.name = name;
+    return timed(out, 201, t0);
+  }
+  if (path === "/api/r2" && method === "DELETE") {
+    const name = cleanFileName(url.searchParams.get("name"));
+    if (name) await env.UPLOADS.delete("files/" + name);
+    return timed(await filesList(env), 200, t0);
+  }
+  if (path === "/api/r2/file" && method === "GET") {
+    const name = cleanFileName(url.searchParams.get("name"));
+    const obj = name ? await env.UPLOADS.get("files/" + name) : null;
+    if (!obj) return timed({ error: "not found" }, 404, t0);
+    return new Response(await obj.text(), {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "content-disposition": 'attachment; filename="' + name + '"',
+        "x-content-type-options": "nosniff",
+        "server-timing": "app;dur=" + ms2(t0),
+      },
+    });
+  }
+
+  if (path === "/api/queue" && method === "GET") {
+    const out = await feed(env);
+    out.now = Date.now();
+    return timed(out, 200, t0);
+  }
+  if (path === "/api/queue/enqueue" && method === "POST") {
+    let input = {};
+    try {
+      input = request.body ? await request.json() : {};
+    } catch {}
+    const label =
+      String(input.label || "hello")
+        .trim()
+        .slice(0, 40) || "hello";
+    await jobEnqueue(env, label);
+    const out = await feed(env);
+    out.now = Date.now();
+    return timed(out, 202, t0);
+  }
+
+  if (path === "/api/quote" && method === "GET") {
+    if (!env.PEER) {
+      return timed({ ok: false, reason: "no-binding", error: "this build has no service binding" }, 200, t0);
+    }
+    try {
+      return timed({ ok: true, quote: await quote(env) }, 200, t0);
+    } catch (e) {
+      return timed({ ok: false, reason: "unreachable", error: String((e && e.message) || e) }, 200, t0);
+    }
+  }
+
+  if (path === "/api/secrets" && method === "GET") {
+    return timed({ secrets: secretStatus(env, DECLARED_SECRETS) }, 200, t0);
+  }
+  // Compare a typed value with env.ADMIN_TOKEN inside the worker. The answer is
+  // yes or no; the secret is never sent back. env.THROTTLE (3 a minute) slows guessing.
+  if (path === "/api/secrets/check" && method === "POST") {
+    const who = (request.cf && request.cf.clientIp) || "anonymous";
+    const gate = await env.THROTTLE.limit({ key: "secret-check:" + who });
+    if (!gate.success) return timed({ ok: false, error: "rate limited" }, 429, t0);
+    let input = {};
+    try {
+      input = request.body ? await request.json() : {};
+    } catch {}
+    let ok = false;
+    try {
+      ok = !!env.ADMIN_TOKEN && String(input.token || "") === String(env.ADMIN_TOKEN);
+    } catch {}
+    return timed({ ok }, 200, t0);
+  }
+
+  // The chat socket: hand the upgrade to the one room object.
+  if (path === "/api/chat") {
+    if (request.headers.get("Upgrade") !== "websocket")
+      return timed({ error: "expected a WebSocket upgrade" }, 426, t0);
+    return env.ROOM.get(env.ROOM.idFromName("main")).fetch(request);
+  }
+
+  return timed({ error: "not found", path }, 404, t0);
+}
+
 export default {
   async fetch(request) {
+    const t0 = clock();
     const url = new URL(request.url);
     const path = url.pathname;
     await ensureSchema(env);
 
     // analytics: one point per request
     await env.METRICS.writeDataPoint({ blobs: [request.method, path], indexes: [path], doubles: [1] });
+
+    // The dashboard's JSON API, handled in api() above.
+    if (path.indexOf("/api/") === 0) {
+      try {
+        return await api(request, env, url, path, t0);
+      } catch (e) {
+        return timed({ error: String((e && e.message) || e) }, 500, t0);
+      }
+    }
 
     // POST /login -> a session token in KV, value carries its own expiry
     if (path === "/login" && request.method === "POST") {
@@ -291,10 +700,13 @@ export default {
 
   // cron */1: prune expired sessions, record a heartbeat
   async scheduled(event) {
+    const started = clock();
     await ensureSchema(env);
     const now = Date.now();
     const keys = await sessionNames(env);
     for (let i = 0; i < keys.length; i++) {
+      // The dashboard's KV counter lives in this namespace; only sessions expire.
+      if (keys[i].indexOf("counter:") === 0) continue;
       const raw = await env.SESSIONS.get(keys[i]);
       if (raw) {
         const s = JSON.parse(raw);
@@ -304,6 +716,11 @@ export default {
     await env.DB.prepare("INSERT INTO heartbeat (at, cron) VALUES (?, ?)")
       .bind(new Date(event.scheduledTime).toISOString(), event.cron)
       .run();
+    // The dashboard's feed reads this row: how long the run took.
+    await env.DB.prepare("INSERT INTO events (kind, label, ms, at) VALUES ('cron', ?, ?, ?)")
+      .bind(event.cron, ms2(started), new Date().toISOString())
+      .run();
+    await trimEvents(env);
   },
 
   // queue consumer for EMAILS: pretend to send, log to D1
@@ -311,9 +728,19 @@ export default {
     await ensureSchema(env);
     for (let i = 0; i < batch.messages.length; i++) {
       const m = batch.messages[i];
+      const started = clock();
       await env.DB.prepare("INSERT INTO email_log (note_id, sent_at) VALUES (?, ?)")
         .bind(Number(m.body && m.body.noteId) || 0, new Date().toISOString())
         .run();
+      // A job from the dashboard: record how long it waited in the queue (ms
+      // between send and delivery) next to the work itself.
+      if (m.body && m.body.kind === "job") {
+        const waited = Math.max(0, Date.now() - Number(m.body.sent || 0));
+        await env.DB.prepare("INSERT INTO events (kind, label, ms, at) VALUES ('processed', ?, ?, ?)")
+          .bind(String(m.body.label || "job"), waited + ms2(started), new Date().toISOString())
+          .run();
+        await trimEvents(env);
+      }
       m.ack();
     }
   },

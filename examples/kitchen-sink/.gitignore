@@ -1,4 +1,3 @@
-web/dist/
-web/node_modules/
+site/
 node_modules/
-web/.astro/
+.dev.vars

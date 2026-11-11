@@ -20,7 +20,7 @@
     ".windsurf/**",
     "tools/oxlint/anti-slop/**",
     "vendor/**",
-    "examples/kitchen-sink/web/dist/**",
+    "examples/kitchen-sink/site/**",
     "**/*.md",
     "**/*.yml",
     "**/*.yaml",

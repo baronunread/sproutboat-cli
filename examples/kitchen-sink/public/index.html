@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Sproutboat Notes · kitchen-sink</title>
+    <meta
+      name="description"
+      content="One Workers module that uses KV, D1, R2, Durable Objects, Queues, cron, a service binding and secrets. Every tile calls the real binding."
+    />
+    <link rel="preload" href="/fonts/figtree-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/app.css" />
+    <script>
+      // Set the theme before first paint so a light-mode visitor does not see a dark flash.
+      try {
+        var t = localStorage.getItem("sb-theme");
+        if (t === "light") document.documentElement.classList.remove("dark");
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+      <symbol id="ikada" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          fill-rule="evenodd"
+          d="M2 6L2.05 5.19L2.18 4.74L2.41 4.41L2.74 4.18L3.19 4.05L3.63 4.02L5.06 8L3.19 7.95L2.74 7.82L2.41 7.59L2.18 7.26L2.05 6.81ZM2 18L2.05 17.19L2.18 16.74L2.41 16.41L2.74 16.18L3.19 16.05L4 16L7.94 16L9.38 20L3.19 19.95L2.74 19.82L2.41 19.59L2.18 19.26L2.05 18.81ZM3 12L3.05 11.19L3.18 10.74L3.41 10.41L3.74 10.18L4.19 10.05L5.78 10L7.22 14L5 14L4.19 13.95L3.74 13.82L3.41 13.59L3.18 13.26L3.05 12.81ZM4.44 3.5L6.44 3.5L12.56 20.5L10.56 20.5ZM7.62 4L10.62 4L12.06 8L9.06 8ZM9.78 10L12.78 10L14.22 14L11.22 14ZM11.44 3.5L13.44 3.5L19.56 20.5L17.56 20.5ZM11.94 16L14.94 16L16.38 20L13.38 20ZM14.62 4L19 4L19.81 4.05L20.26 4.18L20.59 4.41L20.82 4.74L20.95 5.19L21 6L20.95 6.81L20.82 7.26L20.59 7.59L20.26 7.82L19.81 7.95L16.06 8ZM16.78 10L20 10L20.81 10.05L21.26 10.18L21.59 10.41L21.82 10.74L21.95 11.19L22 12L21.95 12.81L21.82 13.26L21.59 13.59L21.26 13.82L20.81 13.95L18.22 14ZM18.95 16.03L19.31 16.05L19.76 16.18L20.09 16.41L20.32 16.74L20.45 17.19L20.5 18L20.45 18.81L20.32 19.26L20.18 19.45Z"
+        />
+      </symbol>
+      <symbol id="i-gauge" viewBox="0 0 24 24">
+        <path d="M4 18a9 9 0 1 1 16 0" />
+        <path d="m12 14 4-5" />
+      </symbol>
+      <symbol id="i-size" viewBox="0 0 24 24">
+        <path d="M21 8 12 3 3 8v8l9 5 9-5z" />
+        <path d="m3 8 9 5 9-5M12 13v8" />
+      </symbol>
+      <symbol id="i-mem" viewBox="0 0 24 24">
+        <rect x="4" y="7" width="16" height="10" rx="2" />
+        <path d="M8 7v-3M12 7v-3M16 7v-3M8 20v-3M12 20v-3M16 20v-3" />
+      </symbol>
+      <symbol id="i-act" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4" /></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <path d="M14 3v5h5" />
+      </symbol>
+      <symbol id="i-kv" viewBox="0 0 24 24">
+        <circle cx="8" cy="12" r="3.5" />
+        <path d="M11.5 12H21M18 12v3M15 12v2" />
+      </symbol>
+      <symbol id="i-db" viewBox="0 0 24 24">
+        <ellipse cx="12" cy="6" rx="8" ry="3" />
+        <path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
+      </symbol>
+      <symbol id="i-r2" viewBox="0 0 24 24">
+        <path d="M3 8h18l-1.5 11a2 2 0 0 1-2 1.7H6.5a2 2 0 0 1-2-1.7z" />
+        <path d="M2.5 4.5h19V8h-19zM10 12.5h4" />
+      </symbol>
+      <symbol id="i-queue" viewBox="0 0 24 24">
+        <path d="M4 6h12M4 12h16M4 18h9" />
+        <circle cx="19" cy="6" r="1.5" />
+      </symbol>
+      <symbol id="i-do" viewBox="0 0 24 24">
+        <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" />
+        <path d="M12 12 4.5 7.8M12 12l7.5-4.2M12 12v9" />
+      </symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24">
+        <rect x="5" y="11" width="14" height="9" rx="2" />
+        <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+      </symbol>
+      <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14" /></symbol>
+      <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 16V5m0 0-4 4m4-4 4 4M5 20h14" /></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" /></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="9" y="9" width="11" height="11" rx="2" />
+        <path d="M5 15V6a2 2 0 0 1 2-2h8" />
+      </symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3 10 14M21 3l-7 18-4-7-7-4z" /></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+      </symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></symbol>
+      <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+      <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 8-5 4 5 4M16 8l5 4-5 4M14 5l-4 14" /></symbol>
+      <symbol id="i-svc" viewBox="0 0 24 24">
+        <rect x="3" y="4" width="7" height="7" rx="1.5" />
+        <rect x="14" y="13" width="7" height="7" rx="1.5" />
+        <path d="M10 7.5h3.5a2 2 0 0 1 2 2V13" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></symbol>
+      <symbol id="i-ext" viewBox="0 0 24 24">
+        <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+      </symbol>
+    </svg>
+
+    <a class="skip" href="#bindings">Skip to the bindings</a>
+
+    <header class="bar-top">
+      <div class="bar-in">
+        <a class="brandmark" href="/" aria-label="sproutboat"
+          ><svg aria-hidden="true"><use href="#ikada" /></svg><span class="hide-m">sproutboat</span></a
+        >
+        <span class="sep hide-m"></span>
+        <div class="app">
+          <span class="nm">kitchen-sink</span
+          ><span class="badge" id="conn"><span class="shape ring"></span>Connecting</span>
+        </div>
+        <span class="sp"></span>
+        <span class="chip hide-m"
+          ><svg class="sb-icon"><use href="#i-clock" /></svg>Compat <b class="mono" id="compat">…</b></span
+        >
+        <a class="btn sm primary hide-m" href="#download"
+          ><svg class="sb-icon"><use href="#i-dl" /></svg>Standalone binary</a
+        >
+        <button class="ibtn" type="button" data-theme-toggle aria-label="Switch theme">
+          <svg class="sb-icon"><use href="#i-sun" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="page" id="main">
+      <div class="title">
+        <div>
+          <h1>Sproutboat Notes</h1>
+          <p>
+            kitchen-sink is one Workers module that uses every binding. Each tile below calls the real binding in this
+            deployment.
+          </p>
+          <div class="meta">
+            <span class="chip">Entry <b class="mono">fetch · queue · scheduled</b></span>
+            <span class="chip"><b id="n-bindings">…</b> bindings</span>
+            <span class="chip">Built <b class="mono" id="built">…</b></span>
+          </div>
+        </div>
+        <div class="acts">
+          <a
+            class="btn"
+            href="https://github.com/baronunread/sproutboat-cli/tree/main/examples/kitchen-sink"
+            rel="noopener"
+            ><svg class="sb-icon"><use href="#i-code" /></svg>View source</a
+          >
+          <a class="btn primary" href="#download"
+            ><svg class="sb-icon"><use href="#i-dl" /></svg>Build a binary</a
+          >
+        </div>
+      </div>
+
+      <section aria-label="Metrics" class="metrics">
+        <div class="card mt">
+          <div class="l">
+            <svg class="sb-icon"><use href="#i-gauge" /></svg>Server time p50
+          </div>
+          <div class="v"><span id="m-p50">–</span><small>ms</small></div>
+          <div class="d" id="m-p50-d">Make a request</div>
+          <svg class="spark" id="sp-p50" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </div>
+        <div class="card mt">
+          <div class="l">
+            <svg class="sb-icon"><use href="#i-gauge" /></svg>Server time p99
+          </div>
+          <div class="v"><span id="m-p99">–</span><small>ms</small></div>
+          <div class="d" id="m-p99-d">Make a request</div>
+          <svg class="spark" id="sp-p99" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </div>
+        <div class="card mt">
+          <div class="l">
+            <svg class="sb-icon"><use href="#i-act" /></svg>Requests served
+          </div>
+          <div class="v"><span id="m-req">–</span></div>
+          <div class="d">Analytics Engine data points, all visitors</div>
+        </div>
+        <div class="card mt">
+          <div class="l">
+            <svg class="sb-icon"><use href="#i-code" /></svg>Worker module
+          </div>
+          <div class="v"><span id="m-mod">–</span><small id="m-mod-u">KB</small></div>
+          <div class="d">src/index.js as built</div>
+        </div>
+        <div class="card mt">
+          <div class="l">
+            <svg class="sb-icon"><use href="#i-size" /></svg>Static assets
+          </div>
+          <div class="v"><span id="m-ast">–</span><small id="m-ast-u">KB</small></div>
+          <div class="d" id="m-ast-d">This page and its fonts</div>
+        </div>
+        <div class="card mt fact">
+          <div class="l">
+            <svg class="sb-icon"><use href="#i-mem" /></svg>Memory per app
+          </div>
+          <div class="v">~200<small>KB</small></div>
+          <div class="d">
+            Measured on Cloud in a density test, not live. <a href="https://sproutboat.com/docs" rel="noopener">Docs</a>
+          </div>
+        </div>
+      </section>
+
+      <div class="row r-a">
+        <div class="card">
+          <div class="card-h">
+            <h3>Server time per request</h3>
+            <div class="legend" style="margin-inline-start: auto">
+              <span><i style="background: var(--sb-chart-requests)"></i>Each request from this tab</span
+              ><span><i style="background: var(--sb-chart-series)"></i>p50</span>
+            </div>
+          </div>
+          <div class="card-b">
+            <div class="chart-wrap">
+              <svg
+                viewBox="0 0 600 200"
+                preserveAspectRatio="none"
+                id="chart"
+                aria-label="Server time of the last requests from this tab"
+                role="img"
+              ></svg>
+              <div class="chart-empty" id="chart-empty">No requests yet. Use a tile below.</div>
+              <span class="chart-max" id="chart-max"></span>
+            </div>
+            <div class="axis"><span id="ax-l">oldest</span><span id="ax-c"></span><span>latest</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h">
+            <h3>Size of this build</h3>
+            <span class="chip-n" style="margin-inline-start: auto" id="size-total">–</span>
+          </div>
+          <div class="card-b">
+            <div class="seg" id="seg" role="img" aria-label="Build size breakdown"></div>
+            <div class="sz" id="sz"></div>
+            <div class="hello">
+              <svg class="sb-icon"><use href="#i-size" /></svg
+              ><span id="size-note">Sizes are measured by the build script.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sect" id="bindings">
+        <h2>Bindings</h2>
+        <span class="rule"></span><span class="chip-n" id="live-count">–</span>
+      </div>
+      <div class="hint">
+        <span class="badge info"><span class="shape ring"></span>Try it</span
+        ><span
+          >Every button calls this app's own <span class="mono">/api</span> routes and the binding behind them.
+          <b style="color: var(--sb-fg)">Code</b> on a tile shows the handler that runs.</span
+        >
+      </div>
+
+      <section class="tiles live" aria-label="Bindings">
+        <!-- KV -->
+        <div class="card tile t4" id="t-kv">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-kv" /></svg
+            ></span>
+            <h3>KV counter</h3>
+            <button class="btn sm ghost ctog" type="button" aria-expanded="false" aria-controls="code-kv">
+              <svg class="sb-icon"><use href="#i-code" /></svg>Code<svg class="sb-icon chev">
+                <use href="#i-chev" />
+              </svg>
+            </button>
+          </div>
+          <div class="codepop" id="code-kv" data-code="kv" hidden role="region" aria-label="KV counter code"></div>
+          <div class="card-b">
+            <div class="tsub">
+              <span class="chip">env.SESSIONS · KV</span
+              ><span class="lat" id="lat-kv" title="Server time of the last request">last <b>–</b> ms</span>
+            </div>
+            <div class="row2">
+              <div class="big" id="kv"><span id="kv-n">–</span><small>hits</small></div>
+              <div style="display: flex; gap: 8px">
+                <button class="btn sm" id="kv-get" type="button">Read</button
+                ><button class="btn sm primary" id="kv-b" type="button">
+                  <svg class="sb-icon"><use href="#i-plus" /></svg>Increment
+                </button>
+              </div>
+            </div>
+            <ul class="ops" id="kv-ops" aria-label="KV operations of the last request">
+              <li class="k">No operation yet</li>
+            </ul>
+            <div class="help" id="kv-help" role="status"></div>
+            <div class="foot">
+              <span
+                >key <span class="mono" style="color: var(--sb-fg)">counter:home</span> ·
+                <span id="kv-keys">–</span></span
+              ><span class="tnum">not atomic</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- D1 -->
+        <div class="card tile t4" id="t-d1">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-db" /></svg
+            ></span>
+            <h3>D1 guestbook</h3>
+            <button class="btn sm ghost ctog" type="button" aria-expanded="false" aria-controls="code-d1">
+              <svg class="sb-icon"><use href="#i-code" /></svg>Code<svg class="sb-icon chev">
+                <use href="#i-chev" />
+              </svg>
+            </button>
+          </div>
+          <div class="codepop" id="code-d1" data-code="d1" hidden role="region" aria-label="D1 guestbook code"></div>
+          <div class="card-b">
+            <div class="tsub">
+              <span class="chip">env.DB · D1</span
+              ><span class="lat" id="lat-d1" title="Server time of the last request">last <b>–</b> ms</span>
+            </div>
+            <form class="fl" id="gb-form" autocomplete="off">
+              <input class="input nm" id="gb-name" aria-label="Your name" placeholder="Name" maxlength="20" /><input
+                class="input grow"
+                id="gb-msg"
+                aria-label="Message"
+                placeholder="Say something"
+                maxlength="60"
+              /><button class="btn sm primary" type="submit">Sign</button>
+            </form>
+            <div class="help" id="gb-help" role="status"></div>
+            <table class="mini" style="margin-top: -8px">
+              <tbody id="gb"></tbody>
+            </table>
+            <pre class="code sqlbox" id="sql" aria-label="SQL that ran" aria-live="polite">No query yet</pre>
+            <div class="foot">
+              <span class="tnum"><span id="gb-n">–</span> <span id="gb-unit">rows</span></span
+              ><span class="tnum" id="gb-q"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- R2 -->
+        <div class="card tile t4" id="t-r2">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-r2" /></svg
+            ></span>
+            <h3>R2 upload</h3>
+            <button class="btn sm ghost ctog" type="button" aria-expanded="false" aria-controls="code-r2">
+              <svg class="sb-icon"><use href="#i-code" /></svg>Code<svg class="sb-icon chev">
+                <use href="#i-chev" />
+              </svg>
+            </button>
+          </div>
+          <div class="codepop" id="code-r2" data-code="r2" hidden role="region" aria-label="R2 upload code"></div>
+          <div class="card-b">
+            <div class="tsub">
+              <span class="chip">env.UPLOADS · R2</span
+              ><span class="lat" id="lat-r2" title="Server time of the last request">last <b>–</b> ms</span>
+            </div>
+            <div class="dz" id="dz">
+              <input
+                type="file"
+                id="r2-file"
+                class="sr"
+                tabindex="-1"
+                aria-hidden="true"
+                accept="text/*,.json,.md,.csv,.log,.js,.ts,.jsonc,.yml,.yaml,.toml"
+              /><button class="btn sm primary" id="r2-pick" type="button">
+                <svg class="sb-icon"><use href="#i-up" /></svg>Choose file</button
+              ><button class="btn sm" id="r2-sample" type="button">Upload note</button
+              ><span class="note">or drop a text file, up to <span id="r2-cap">64</span> KB</span>
+            </div>
+            <div class="help" id="r2-help" role="status"></div>
+            <table class="mini">
+              <tbody id="r2-list"></tbody>
+            </table>
+            <div class="foot">
+              <span class="tnum"><span id="r2-n">–</span> <span id="r2-unit">files</span></span
+              ><span class="tnum"><span id="r2-sz">–</span> stored</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- DO -->
+        <div class="card tile t6" id="t-do">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-do" /></svg
+            ></span>
+            <h3>Chat room</h3>
+            <button class="btn sm ghost ctog" type="button" aria-expanded="false" aria-controls="code-do">
+              <svg class="sb-icon"><use href="#i-code" /></svg>Code<svg class="sb-icon chev">
+                <use href="#i-chev" />
+              </svg>
+            </button>
+          </div>
+          <div class="codepop" id="code-do" data-code="chat" hidden role="region" aria-label="Chat room code"></div>
+          <div class="card-b">
+            <div class="tsub">
+              <span class="chip">env.ROOM · Durable Object</span
+              ><span class="lat" id="lat-do" title="Time the room took to handle the last message"
+                >last <b>–</b> ms</span
+              >
+            </div>
+            <div class="row2">
+              <span class="note" id="who">Not connected</span
+              ><span style="display: flex; gap: 8px; align-items: center"
+                ><button class="btn sm ghost" id="ws-reconnect" type="button" hidden>Reconnect</button
+                ><span class="badge" id="ws-state"><span class="shape ring"></span>Connecting</span></span
+              >
+            </div>
+            <div class="chat" id="chat" role="log" aria-live="polite" aria-label="Room main"></div>
+            <form class="fl" id="chat-form" autocomplete="off">
+              <input
+                class="input grow"
+                id="chat-in"
+                aria-label="Message to the room"
+                placeholder="Message the room"
+                maxlength="120"
+              /><button class="btn sm primary" type="submit" id="chat-send">
+                <svg class="sb-icon"><use href="#i-send" /></svg>Send
+              </button>
+            </form>
+            <div class="frame" id="frame">No message yet</div>
+            <div class="foot">
+              <span>room “main” · one object per room</span><span class="tnum">last 30 messages kept</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Queue + cron -->
+        <div class="card tile t6" id="t-q">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-queue" /></svg
+            ></span>
+            <h3>Queue and cron feed</h3>
+            <button class="btn sm ghost ctog" type="button" aria-expanded="false" aria-controls="code-q">
+              <svg class="sb-icon"><use href="#i-code" /></svg>Code<svg class="sb-icon chev">
+                <use href="#i-chev" />
+              </svg>
+            </button>
+          </div>
+          <div
+            class="codepop"
+            id="code-q"
+            data-code="queue"
+            hidden
+            role="region"
+            aria-label="Queue and cron code"
+          ></div>
+          <div class="card-b">
+            <div class="tsub">
+              <span class="chip">env.EMAILS · Queue + cron</span
+              ><span class="lat" id="lat-q" title="Server time of the last request">last <b>–</b> ms</span>
+            </div>
+            <div class="split">
+              <div style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
+                <form class="fl" id="q-form" autocomplete="off">
+                  <input
+                    class="input grow"
+                    id="q-label"
+                    aria-label="Job message"
+                    placeholder="Job message"
+                    maxlength="40"
+                    value="hello"
+                  /><button class="btn sm primary" id="q-b" type="submit">
+                    <svg class="sb-icon"><use href="#i-plus" /></svg>Enqueue job
+                  </button>
+                </form>
+                <ul class="jobs" id="jobs" aria-live="polite" aria-label="Job and cron feed"></ul>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
+                <div class="stat3">
+                  <div><span class="v" id="qd">–</span><span class="l">waiting</span></div>
+                  <div><span class="v" id="qp">–</span><span class="l">processed</span></div>
+                  <div><span class="v" id="qc">–</span><span class="l">cron runs</span></div>
+                </div>
+                <div class="cdwrap">
+                  <div class="top">
+                    <span class="mono" id="cron-expr">…</span><span class="muted">next run in</span>
+                  </div>
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+                    <span class="cdv" id="cd">–</span>
+                  </div>
+                  <div
+                    class="bar"
+                    role="progressbar"
+                    aria-label="Time to next cron run"
+                    aria-valuemin="0"
+                    aria-valuemax="60"
+                    id="cdbar"
+                  >
+                    <i class="fill" id="cdfill" style="width: 0%"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="foot">
+              <span>Times are queue wait plus handler</span><span class="tnum" id="cron-last"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Service binding -->
+        <div class="card tile t4" id="t-svc">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-svc" /></svg
+            ></span>
+            <h3>Service binding</h3>
+            <button class="btn sm ghost ctog" type="button" aria-expanded="false" aria-controls="code-svc">
+              <svg class="sb-icon"><use href="#i-code" /></svg>Code<svg class="sb-icon chev">
+                <use href="#i-chev" />
+              </svg>
+            </button>
+          </div>
+          <div
+            class="codepop"
+            id="code-svc"
+            data-code="service"
+            hidden
+            role="region"
+            aria-label="Service binding code"
+          ></div>
+          <div class="card-b">
+            <div class="tsub">
+              <span class="chip">env.PEER · Service</span
+              ><span
+                class="lat"
+                id="lat-svc"
+                title="Server time of the last request, including the call to quote-service"
+                >last <b>–</b> ms</span
+              >
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center">
+              <button class="btn sm primary" id="qb" type="button">
+                <svg class="sb-icon"><use href="#i-svc" /></svg>Call quote-service</button
+              ><span class="note tnum" id="qm">0 calls</span>
+            </div>
+            <div class="svc-out" id="svc-out" aria-live="polite">
+              <div class="req">env.PEER.fetch("https://peer/random")</div>
+              <div class="quoteb muted" id="qt">Press the button to call another deployment.</div>
+              <div class="res" id="qres"><span class="muted">no request yet</span></div>
+            </div>
+            <div class="foot">
+              <span>quote-service</span
+              ><span class="badge" id="svc-state"><span class="shape ring"></span>Not called</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Secrets -->
+        <div class="card tile t4" id="t-sec">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-lock" /></svg
+            ></span>
+            <h3>Secrets</h3>
+            <button class="btn sm ghost ctog" type="button" aria-expanded="false" aria-controls="code-sec">
+              <svg class="sb-icon"><use href="#i-code" /></svg>Code<svg class="sb-icon chev">
+                <use href="#i-chev" />
+              </svg>
+            </button>
+          </div>
+          <div class="codepop" id="code-sec" data-code="secrets" hidden role="region" aria-label="Secrets code"></div>
+          <div class="card-b">
+            <div class="tsub">
+              <span class="chip">env.* · Secrets</span
+              ><span class="lat" id="lat-sec" title="Server time of the last request">last <b>–</b> ms</span>
+            </div>
+            <div id="secs"></div>
+            <div class="revnote" id="revnote" aria-live="polite">
+              Only names and whether each has a value are returned. The value never leaves the worker.
+            </div>
+            <form class="fl" id="sec-form" autocomplete="off">
+              <input
+                class="input grow"
+                id="sec-val"
+                type="password"
+                aria-label="Token to check against ADMIN_TOKEN"
+                placeholder="Token to check"
+                autocomplete="new-password"
+              /><button class="btn sm" type="submit">Check</button>
+            </form>
+            <div class="foot">
+              <span class="tnum"><span id="sec-n">–</span> declared</span
+              ><span>set with <span class="mono">sproutboat secrets put</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Request log -->
+        <div class="card tile t4">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-act" /></svg
+            ></span>
+            <h3>Request log</h3>
+            <span class="badge" style="margin-inline-start: auto" id="log-count">0 requests</span>
+          </div>
+          <div class="card-b">
+            <ul class="log live" id="log" aria-label="Requests made from this tab">
+              <li class="k">No request yet</li>
+            </ul>
+            <div class="foot"><span>This tab only</span><span class="tnum">server time</span></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="sect">
+        <h2>Code and binary</h2>
+        <span class="rule"></span>
+      </div>
+      <section class="r-d" style="margin-top: 0">
+        <div class="card" id="snippet">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-code" /></svg
+            ></span>
+            <h3>Same code as Workers</h3>
+            <span class="badge ok" style="margin-inline-start: auto"
+              ><span class="shape circle"></span>Workers APIs only</span
+            >
+          </div>
+          <div class="card-b">
+            <pre
+              class="code"
+              id="snippet-code"
+              style="font-size: 12px; line-height: 19px"
+              aria-label="Excerpt of src/index.js"
+            >
+Loading…</pre>
+            <div class="lbl-row">
+              <span
+                >This is the KV tile's handler, copied from src/index.js at build time. It uses only Workers APIs.</span
+              >
+            </div>
+            <div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap">
+              <span class="badge"><span class="shape square"></span>wrangler deploy</span
+              ><span class="badge ok"><span class="shape circle"></span>sproutboat deploy</span>
+            </div>
+          </div>
+        </div>
+        <div class="card dl-tile" id="download">
+          <div class="card-h">
+            <span class="icon-chip"
+              ><svg class="sb-icon"><use href="#i-dl" /></svg
+            ></span>
+            <h3>Standalone binary</h3>
+          </div>
+          <div class="card-b">
+            <div class="dl-hero">
+              <span class="icon-chip" style="width: 36px; height: 36px"
+                ><svg class="sb-icon" style="width: 20px; height: 20px"><use href="#i-size" /></svg
+              ></span>
+              <div class="nm">
+                <b>One executable, no runtime</b
+                ><span
+                  >Bindings, assets and your code in one file. About 6.4 MB for this app (measured, no LTO, macOS arm64;
+                  <a href="https://github.com/baronunread/sproutboat-cli/blob/main/docs/standalone.md" rel="noopener"
+                    >build sizes</a
+                  >).</span
+                >
+              </div>
+            </div>
+            <div class="plats">
+              <button
+                class="btn"
+                type="button"
+                data-copy="sproutboat build --standalone -c sproutboat.standalone.jsonc"
+              >
+                Linux x64<small>default target</small>
+              </button>
+              <button
+                class="btn"
+                type="button"
+                data-copy="sproutboat build --standalone -c sproutboat.standalone.jsonc --target linux-arm64"
+              >
+                Linux arm64<small>Raspberry Pi, Graviton</small>
+              </button>
+              <button
+                class="btn"
+                type="button"
+                data-copy="sproutboat build --standalone -c sproutboat.standalone.jsonc --target host"
+              >
+                This machine<small>--target host</small>
+              </button>
+              <button
+                class="btn"
+                type="button"
+                data-copy="sproutboat build --standalone -c sproutboat.standalone.jsonc --release"
+              >
+                Release build<small>LTO, slower to build</small>
+              </button>
+            </div>
+            <div class="cmd">
+              <code><span class="p">$</span> sproutboat build --standalone -c sproutboat.standalone.jsonc</code
+              ><button
+                class="btn sm ghost"
+                type="button"
+                aria-label="Copy command"
+                data-copy="sproutboat build --standalone -c sproutboat.standalone.jsonc"
+              >
+                <svg class="sb-icon"><use href="#i-copy" /></svg>
+              </button>
+            </div>
+            <p class="note">
+              Pick a platform to copy its command. The standalone config leaves out the service binding: a binary has no
+              edge to route it through, so that tile says so.
+            </p>
+          </div>
+        </div>
+      </section>
+      <div class="footer">
+        <span>Built with ikada tokens · Figtree and JetBrains Mono (SIL OFL 1.1)</span
+        ><span
+          >Numbers are measured by this app or its build, except the two labelled facts (memory, binary size).</span
+        >
+      </div>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

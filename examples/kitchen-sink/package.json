@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "cd web && bun run build",
+    "build": "bun build-web.ts",
     "deploy": "bun run build && bunx sproutboat deploy",
     "dev": "bun serve.ts",
     "test": "bun harness.ts"

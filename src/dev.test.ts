@@ -473,3 +473,67 @@ test("dev: reload timing separates edit-to-ready latency from route-switch downt
     await rm(projectDir, { recursive: true, force: true });
   }
 });
+
+test("dev: the stable port relays a WebSocket to the sprout, frames both ways", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "sproutboat-dev-ws-"));
+  const publicPort = freePort();
+  await mkdir(join(projectDir, "src"));
+  await writeFile(join(projectDir, "src/index.js"), "ws");
+  const factory: NonNullable<DevInput["candidateFactory"]> = async (_input, port) => {
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port,
+      fetch(request, serving) {
+        if (serving.upgrade(request)) return undefined;
+        return new Response("plain");
+      },
+      websocket: {
+        open(socket) {
+          socket.send("hello from the sprout");
+        },
+        message(socket, message) {
+          socket.send(`echo:${String(message)}`);
+        },
+      },
+    });
+    const never = new Promise<number>(() => undefined);
+    return {
+      // SAFETY: this coordinator fixture only observes kill and exited.
+      sprout: { kill() {}, exited: never } as Bun.Subprocess,
+      sproutPath: join(projectDir, "fake"),
+      artifactDir: join(projectDir, "candidate"),
+      // SAFETY: the fixture never calls broker methods.
+      broker: {} as Running["broker"],
+      stopBroker: () => server.stop(),
+      expected: false,
+      port,
+      enableDispatch() {},
+      disableDispatch() {},
+    };
+  };
+  const task = runDev({
+    projectDir,
+    config,
+    sourcePath: join(projectDir, "src/index.js"),
+    source: "ws",
+    port: publicPort,
+    watch: true,
+    candidateFactory: factory,
+    exitOnShutdown: false,
+    rebuild: async () => ({ config, sourcePath: join(projectDir, "src/index.js"), source: "ws" }),
+  });
+  try {
+    await eventually(async () => expect(await (await fetch(`http://127.0.0.1:${publicPort}/`)).text()).toBe("plain"));
+    const frames: string[] = [];
+    const socket = new WebSocket(`ws://127.0.0.1:${publicPort}/`);
+    socket.addEventListener("message", (event) => frames.push(String(event.data)));
+    // Sent before the upstream side is necessarily open: the relay must queue it.
+    socket.addEventListener("open", () => socket.send("ping"));
+    await eventually(() => expect(frames).toEqual(["hello from the sprout", "echo:ping"]));
+    socket.close();
+  } finally {
+    process.emit("SIGTERM");
+    await task;
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});
