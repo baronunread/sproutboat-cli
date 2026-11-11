@@ -78,9 +78,10 @@ export function dataErrorMessage(reply: DataReply, context: DataContext): string
         return missingGrant(isString(body?.need) ? body.need : undefined, product, context.write);
       return undefined;
     case 404:
-      if (reason === "no-database" || reason === "no-bucket")
-        return `${project} has no ${product} ${noun} "${name}" on its host yet; it exists once the deployed app has used it`;
-      if (reason === "no-object") return `no such object in "${name}"`;
+      if (reason === "no-database")
+        return `${project} has no ${product} ${noun} "${name}" on its host yet; a database exists once the deployed app has used it`;
+      if (reason === "no-bucket") return `${project} has no ${product} ${noun} "${name}" on its host yet`;
+      if (reason === "no-object") return "The specified key does not exist.";
       return `${project} is not deployed yet, so it has no ${noun}: run \`sproutboat deploy\` first`;
     case 409:
       if (reason === "capture-active") return `writes are paused while a backup capture is active; ${wait(reply)}`;

@@ -92,6 +92,8 @@ import {
   deleteObject,
   GET_USAGE as R2_GET_USAGE,
   getObject,
+  OBJECT_MAX_BYTES,
+  readCapped,
   parseObjectArgs,
   parseObjectPath,
   PUT_USAGE as R2_PUT_USAGE,
@@ -2049,13 +2051,15 @@ async function r2Object(args: string[]) {
       if (sub === "get") await getObject(target, key, flags, io, process.cwd());
       else if (sub === "delete") await deleteObject(target, key, io);
       else
-        await putObject(
-          target,
-          key,
-          flags,
-          io,
-          process.cwd(),
-          async () => new Uint8Array(await Bun.stdin.arrayBuffer()),
+        await putObject(target, key, flags, io, process.cwd(), () =>
+          readCapped(
+            Bun.stdin.stream(),
+            OBJECT_MAX_BYTES,
+            () =>
+              new CloudError(
+                `the piped object is larger than ${OBJECT_MAX_BYTES / 1024 / 1024} MiB, the most the Cloud takes`,
+              ),
+          ),
         );
     });
   } catch (error) {

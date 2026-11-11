@@ -7,6 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { authHeaders, CloudError, explainApiFailure, parseBody } from "./cloud";
+import { dataErrorMessage } from "./data-errors";
 import { isString } from "./json";
 import { dim, ok } from "./style";
 
@@ -14,8 +15,10 @@ export const GET_USAGE = "r2 object get <bucket>/<key> [--file <path> | --pipe]"
 export const PUT_USAGE =
   "r2 object put <bucket>/<key> (--file <path> | --pipe) [--content-type <type>] [--cache-control <v>] [--content-disposition <v>] [--content-encoding <v>] [--content-language <v>] [--expires <date>]";
 export const DELETE_USAGE = "r2 object delete <bucket>/<key>";
-/** What one object may be through the Cloud API for now (it is buffered in memory on the way). */
+/** What one object may be through the Cloud API (a PUT is refused over it before any host is called). */
 export const OBJECT_MAX_BYTES = 64 * 1024 * 1024;
+/** The longest key, in bytes of UTF-8. */
+export const KEY_MAX_BYTES = 1024;
 
 export class R2UsageError extends Error {
   constructor(
@@ -42,11 +45,66 @@ export type ObjectFlags = {
 /** `{bucket}/{key}`: the bucket is everything before the first slash, the key everything after it. */
 export type ObjectPath = { bucket: string; key: string };
 
+/**
+ * The rules the Cloud applies to a key (docs/host-data.md, "R2 keys"), so a bad one is refused here with a reason
+ * instead of coming back as a 400: 1 to 1024 bytes of UTF-8, no control character (C0, DEL, C1), no backslash, and no
+ * empty, `.` or `..` segment. Returns the problem, or undefined when the key is fine.
+ */
+export function keyProblem(key: string): string | undefined {
+  if (key.length === 0) return "the key is empty";
+  try {
+    encodeURIComponent(key); // throws on a lone surrogate, which has no UTF-8 form
+  } catch {
+    return "the key is not valid UTF-8";
+  }
+  const bytes = new TextEncoder().encode(key).length;
+  if (bytes > KEY_MAX_BYTES) return `the key is ${bytes} bytes; at most ${KEY_MAX_BYTES}`;
+  for (let at = 0; at < key.length; at += 1) {
+    const code = key.charCodeAt(at);
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f))
+      return `the key has a control character (U+${code.toString(16).toUpperCase().padStart(4, "0")}) at position ${at + 1}`;
+    if (code === 0x5c) return "the key has a backslash; use / between folders";
+  }
+  const segments = key.split("/");
+  if (segments.some((part) => part === "")) return 'the key has an empty segment: no leading, trailing or doubled "/"';
+  const dots = segments.find((part) => part === "." || part === "..");
+  if (dots) return `the key has a "${dots}" segment; a key is a name, not a path`;
+  return undefined;
+}
+
 export function parseObjectPath(path: string | undefined, usage: string): ObjectPath {
   const slash = path?.indexOf("/") ?? -1;
-  if (path === undefined || slash <= 0 || slash === path.length - 1)
-    throw new R2UsageError("the object path must be <bucket>/<key>", usage);
-  return { bucket: path.slice(0, slash), key: path.slice(slash + 1) };
+  if (path === undefined || slash <= 0) throw new R2UsageError("the object path must be <bucket>/<key>", usage);
+  const key = path.slice(slash + 1);
+  const problem = keyProblem(key);
+  if (problem)
+    throw new R2UsageError(
+      `${path.slice(0, slash)}/${key.length > 60 ? `${key.slice(0, 57)}...` : key}: ${problem}`,
+      usage,
+    );
+  return { bucket: path.slice(0, slash), key };
+}
+
+/** Read stdin up to `max` bytes; a longer input stops the read instead of filling memory. */
+export async function readCapped(
+  stream: ReadableStream<Uint8Array>,
+  max: number,
+  tooLong: () => Error,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    size += chunk.byteLength;
+    if (size > max) throw tooLong();
+    chunks.push(chunk);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
 }
 
 export function parseObjectArgs(args: readonly string[], usage: string) {
@@ -170,31 +228,32 @@ export type ObjectTarget = {
 async function explain(target: ObjectTarget, response: Response, method: string, key: string): Promise<never> {
   const text = await response.text().catch(() => "");
   const body = parseBody(text);
+  if (target.community) {
+    if (response.status === 404) {
+      if (method !== "GET")
+        throw new CloudError(
+          `${method === "PUT" ? "writing" : "deleting"} R2 objects is not supported on self-hosted Community yet (this endpoint has no such route); read-only: r2 object get`,
+        );
+      throw new CloudError(isString(body?.error) ? `${key}: not found` : `no R2 bucket "${target.bucket}"`);
+    }
+    throw new CloudError(explainApiFailure(response.status, text, false));
+  }
+  const message = dataErrorMessage(
+    { status: response.status, body, headers: response.headers },
+    { project: target.app, product: "R2", noun: "bucket", name: target.bucket, write: method !== "GET" },
+  );
+  if (message) throw new CloudError(message);
   if (response.status === 404) {
-    if (target.community && method !== "GET")
-      throw new CloudError(
-        `${method === "PUT" ? "writing" : "deleting"} R2 objects is not supported on self-hosted Community yet (this endpoint has no such route); read-only: r2 object get`,
-      );
-    if (body?.reason === "no-bucket" || (target.community && !isString(body?.error)))
-      throw new CloudError(`no R2 bucket "${target.bucket}"${target.community ? "" : ` for ${target.app}`}`);
-    if (body?.reason === "no-object") throw new CloudError("The specified key does not exist.");
     if (isString(body?.error) && /no such app/i.test(body.error))
       throw new CloudError(`${target.app} is not deployed yet, so it has no bucket: run \`sproutboat deploy\` first`);
     throw new CloudError(`${key}: not found`);
   }
-  if (response.status === 501)
-    throw new CloudError(
-      `the host that runs ${target.app} does not support R2 objects yet; ask the operator to update its agent`,
-    );
-  if (response.status === 413)
-    throw new CloudError(
-      `the object is larger than ${OBJECT_MAX_BYTES / 1024 / 1024} MiB, the most the Cloud takes through this command for now`,
-    );
-  if (response.status === 403 && body?.need)
-    throw new CloudError(
-      `this key lacks the ${String(body.need)} permission (see \`sproutboat whoami\` for this key's access)`,
-    );
   throw new CloudError(explainApiFailure(response.status, text, false));
+}
+
+/** The object's own type: the `x-object-content-type` header, present only when one was stored (`content-type` is always octet-stream). */
+export function storedContentType(headers: Headers): string | undefined {
+  return headers.get("x-object-content-type") ?? undefined;
 }
 
 /** Where `get` writes: --file, stdout with --pipe, otherwise ./<key> (Wrangler's default), creating folders. */
@@ -216,7 +275,11 @@ export async function getObject(
   const path = resolve(cwd, flags.file ?? key);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, bytes);
-  io.note(`${ok(`Downloaded "${key}" from "${target.bucket}"`)} ${dim(`to ${path} (${bytes.byteLength} bytes)`)}`);
+  // The response's own content-type is always application/octet-stream; the object's type is x-object-content-type.
+  const type = storedContentType(response.headers);
+  io.note(
+    `${ok(`Downloaded "${key}" from "${target.bucket}"`)} ${dim(`to ${path} (${bytes.byteLength} bytes${type ? `, ${type}` : ""})`)}`,
+  );
 }
 
 export async function putObject(
@@ -236,7 +299,7 @@ export async function putObject(
     if (!existsSync(path) || !statSync(path).isFile()) throw new CloudError(`${flags.file}: no such file`);
     if (statSync(path).size > OBJECT_MAX_BYTES)
       throw new CloudError(
-        `${flags.file} is larger than ${OBJECT_MAX_BYTES / 1024 / 1024} MiB, the most the Cloud takes through this command for now`,
+        `${flags.file} is larger than ${OBJECT_MAX_BYTES / 1024 / 1024} MiB, the most the Cloud takes`,
       );
     bytes = new Uint8Array(readFileSync(path));
     fileType = Bun.file(path).type.split(";")[0];
@@ -245,14 +308,15 @@ export async function putObject(
     bytes = await readStdin();
     if (bytes.byteLength > OBJECT_MAX_BYTES)
       throw new CloudError(
-        `the piped object is larger than ${OBJECT_MAX_BYTES / 1024 / 1024} MiB, the most the Cloud takes through this command for now`,
+        `the piped object is larger than ${OBJECT_MAX_BYTES / 1024 / 1024} MiB, the most the Cloud takes`,
       );
   }
   const headers = metadataHeaders(flags, fileType);
   const response = await target.request("PUT", key, { body: bytes, headers });
   if (!response.ok) return explain(target, response, "PUT", key);
-  await response.body?.cancel();
-  io.note(`${ok(`Uploaded "${key}" to "${target.bucket}"`)} ${dim(`(${bytes.byteLength} bytes)`)}`);
+  const answer = parseBody(await response.text().catch(() => ""));
+  const etag = isString(answer?.etag) ? `, etag ${answer.etag}` : "";
+  io.note(`${ok(`Uploaded "${key}" to "${target.bucket}"`)} ${dim(`(${bytes.byteLength} bytes${etag})`)}`);
 }
 
 export async function deleteObject(target: ObjectTarget, key: string, io: ObjectIo): Promise<void> {
@@ -262,21 +326,29 @@ export async function deleteObject(target: ObjectTarget, key: string, io: Object
   io.note(ok(`Deleted "${key}" from "${target.bucket}"`));
 }
 
-/** A Cloud app's bucket: `/v1/apps/<app>/r2/<BUCKET>/objects/<key>` with the key's slashes kept. */
+/**
+ * A Cloud app's bucket: `/v1/apps/<app>/r2/<BUCKET>/objects/<key>` with the key's slashes kept. A key never holds a dot
+ * segment, a backslash or a control character (checked before this), so `encodeURIComponent` never writes the `%2e`,
+ * `%2f` or `%5c` the Cloud refuses. The body is whole bytes, so the request always carries `content-length` (an
+ * `x-declared-length` is only for a chunked body, which this never sends). A GET is not decompressed: the bytes written are
+ * the bytes stored, whatever the transport says.
+ */
 export function cloudTarget(apiUrl: string, token: string, app: string, bucket: string): ObjectTarget {
   return {
     community: false,
     bucket,
     app,
-    request: (method, key, init = {}) =>
-      fetch(
-        `${apiUrl}/v1/apps/${app}/r2/${encodeURIComponent(bucket)}/objects/${key.split("/").map(encodeURIComponent).join("/")}`,
-        {
-          method,
-          headers: { ...authHeaders(token), ...init.headers },
-          body: init.body === undefined ? undefined : init.body,
-        },
-      ),
+    request: (method, key, init = {}) => {
+      const headers = new Headers({ ...authHeaders(token), ...init.headers });
+      if (init.body !== undefined) headers.set("content-length", String(init.body.byteLength));
+      const path = key.split("/").map(encodeURIComponent).join("/");
+      return fetch(`${apiUrl}/v1/apps/${app}/r2/${encodeURIComponent(bucket)}/objects/${path}`, {
+        method,
+        headers,
+        body: init.body,
+        decompress: false,
+      });
+    },
   };
 }
 

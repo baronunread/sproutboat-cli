@@ -3,6 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FAKE_KEY, startFakeCloud, type FakeOptions } from "./cloud-fake";
+import { fakeLogin } from "./fake-login";
+import type { JsonObject } from "./json";
 
 const MAIN = join(import.meta.dir, "main.ts");
 const roots: string[] = [];
@@ -82,9 +84,12 @@ describe("r2 object on a Cloud endpoint", () => {
       expect(put.stderr).toContain('Uploaded "img/pic.bin" to "FILES"');
       expect(cloud.objects.get("FILES/img/pic.bin")?.headers).toMatchObject({
         "content-type": "image/png",
-        "x-object-cache-control": "max-age=60",
+        "cache-control": "max-age=60",
         expires: "Tue, 01 Jan 2030 00:00:00 GMT",
       });
+      // The PUT declared its length, as the Cloud requires; nothing was chunked.
+      expect(cloud.putRequests[0]?.headers["content-length"]).toBe("5");
+      expect(cloud.putRequests[0]?.headers["transfer-encoding"]).toBeUndefined();
       const get = await cli(dir, ["r2", "object", "get", "FILES/img/pic.bin", "-f", "out/copy.bin"], env);
       expect(get.code).toBe(0);
       expect([...readFileSync(join(dir, "out/copy.bin"))]).toEqual([0, 1, 2, 254, 255]);
@@ -133,13 +138,22 @@ describe("r2 object on a Cloud endpoint", () => {
     });
   });
 
-  test("a read-only key may read but is told it needs app:write to write; an undeployed app says so", async () => {
-    await withCloud({ denyPermissions: ["app:write"] }, async (_cloud, env) => {
+  test("a key without data:write may read but is told which grant it lacks and how to get it", async () => {
+    await withCloud({ denyPermissions: ["data:write"] }, async (_cloud, env) => {
       const dir = project();
       writeFileSync(join(dir, "a.txt"), "x");
       const put = await cli(dir, ["r2", "object", "put", "FILES/a.txt", "--file", "a.txt"], env);
       expect(put.code).toBe(1);
-      expect(put.stderr).toContain("app:write");
+      expect(put.stderr).toContain("lacks the data:write grant");
+      expect(put.stderr).toContain("Deploy and data");
+      const del = await cli(dir, ["r2", "object", "delete", "FILES/a.txt"], env);
+      expect(del.stderr).toContain("lacks the data:write grant");
+    });
+    await withCloud({ denyPermissions: ["data:read"] }, async (_cloud, env) => {
+      const get = await cli(project(), ["r2", "object", "get", "FILES/a.txt", "--pipe"], env);
+      expect(get.code).toBe(1);
+      expect(get.stderr).toContain("lacks the data:read grant");
+      expect(get.stderr).toContain("Read data");
     });
     await withCloud({ appExists: false }, async (_cloud, env) => {
       const run = await cli(project(), ["r2", "object", "get", "FILES/a", "--pipe"], env);
@@ -188,5 +202,176 @@ describe("r2 object on self-hosted Community", () => {
     } finally {
       server.stop(true);
     }
+  });
+});
+
+describe("the Cloud's final data contract", () => {
+  test("a GET is an inert download: the object's own type comes from x-object-content-type, and an etag is quoted", async () => {
+    await withCloud({}, async (cloud, env) => {
+      const dir = project();
+      writeFileSync(join(dir, "pic.png"), new Uint8Array([137, 80, 78, 71]));
+      const put = await cli(dir, ["r2", "object", "put", "FILES/pic.png", "--file", "pic.png"], env);
+      expect(put.code, put.stderr).toBe(0);
+      expect(put.stderr).toMatch(/etag "[0-9a-f]{32}"/);
+      const response = await fetch(`${cloud.url}/v1/apps/hello/r2/FILES/objects/pic.png`, {
+        headers: { authorization: `Bearer ${FAKE_KEY}` },
+      });
+      expect(response.headers.get("content-type")).toBe("application/octet-stream");
+      expect(response.headers.get("content-disposition")).toBe("attachment");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("content-security-policy")).toBe("sandbox");
+      expect(response.headers.get("x-object-content-type")).toBe("image/png");
+      const get = await cli(dir, ["r2", "object", "get", "FILES/pic.png", "-f", "got.png"], env);
+      expect(get.stderr).toContain("image/png");
+      expect(get.stderr).not.toContain("octet-stream");
+      expect([...readFileSync(join(dir, "got.png"))]).toEqual([137, 80, 78, 71]);
+      // Stored without a type: the Cloud sends no x-object-content-type, and nothing is invented.
+      const piped = await cli(dir, ["r2", "object", "put", "FILES/raw", "--pipe"], env, new Uint8Array([1, 2]));
+      expect(piped.code).toBe(0);
+      expect(cloud.objects.get("FILES/raw")?.headers["content-type"]).toBeUndefined();
+      const raw = await cli(dir, ["r2", "object", "get", "FILES/raw", "-f", "raw.bin"], env);
+      expect(raw.stderr).not.toContain("octet-stream");
+      expect(raw.stderr).toContain("(2 bytes)");
+    });
+  });
+
+  test("a bad key is refused with a reason before anything is sent", async () => {
+    await withCloud({}, async (cloud, env) => {
+      const dir = project();
+      const cases: [string, string][] = [
+        ["FILES/a//b", "empty segment"],
+        ["FILES/a/../b", '".." segment'],
+        ["FILES/./a", '"." segment'],
+        ["FILES/a\\b", "backslash"],
+        ["FILES/a\u0085b", "U+0085"],
+        [`FILES/${"k".repeat(1025)}`, "1025 bytes"],
+      ];
+      for (const [path, words] of cases)
+        for (const verb of ["get", "put", "delete"]) {
+          const run = await cli(dir, ["r2", "object", verb, path, "--pipe"], env, new Uint8Array([1]));
+          expect(run.code, `${verb} ${path}`).toBe(2);
+          expect(run.stderr).toContain(words);
+        }
+      expect(cloud.calls.filter((call) => call.path.includes("/r2/"))).toEqual([]);
+    });
+  });
+
+  const failures: [string, string, number, JsonObject, string, Record<string, string>?][] = [
+    ["get", "a rate limit says when to retry", 429, { error: "x", reason: "rate", retry_after: 3 }, "try again in 3 s"],
+    [
+      "put",
+      "a busy host reads retry-after from the header",
+      503,
+      { error: "x", reason: "busy" },
+      "try again in 7 s",
+      { "retry-after": "7" },
+    ],
+    [
+      "get",
+      "an unavailable host says remote R2 isn't there yet",
+      503,
+      { error: "x", reason: "host-unavailable" },
+      "remote D1/R2 isn't available on this Cloud host yet",
+    ],
+    [
+      "put",
+      "a failed audit says the request was not served",
+      503,
+      { error: "x", reason: "audit-unavailable" },
+      "read before retrying",
+    ],
+    [
+      "delete",
+      "an agent error says remote R2 isn't there yet",
+      502,
+      { error: "x", reason: "agent-error" },
+      "remote D1/R2 isn't available on this Cloud host yet",
+    ],
+    [
+      "get",
+      "a bare 503 says remote R2 isn't there yet",
+      503,
+      {},
+      "remote D1/R2 isn't available on this Cloud host yet",
+    ],
+    [
+      "put",
+      "a backup capture says writes are paused",
+      409,
+      { error: "x", reason: "capture-active" },
+      "writes are paused while a backup capture is active",
+    ],
+    ["put", "a full quota says so", 507, { error: "x", reason: "quota-exceeded" }, "quota exceeded"],
+    ["put", "a missing length is explained", 411, { error: "x", reason: "length-required" }, "length up front"],
+    ["put", "a too-large object names the limit", 413, { error: "too large", reason: "too-large" }, "at most 64 MiB"],
+    [
+      "put",
+      "a body that does not match its length names the body",
+      400,
+      { error: "the body ran past its length", reason: "invalid", path: "body" },
+      "(body)",
+    ],
+    ["get", "a timeout says the host did not answer", 504, { error: "x", reason: "timeout" }, "did not answer in time"],
+  ];
+  for (const [verb, title, status, body, expected, headers] of failures)
+    test(`${verb}: ${title}`, async () => {
+      await withCloud({ dataFailure: { status, body, headers } }, async (_cloud, env) => {
+        const dir = project();
+        const args = ["r2", "object", verb, "FILES/a.txt", ...(verb === "put" ? ["--pipe"] : ["--pipe"])];
+        const run = await cli(dir, args, env, new Uint8Array([1]));
+        expect(run.code).toBe(1);
+        expect(run.stderr).toContain(expected);
+        expect(run.stderr).not.toContain("HTTP");
+      });
+    });
+});
+
+describe("global flags and unknown options", () => {
+  test("--profile, -c and --cwd work for object commands", async () => {
+    const cloud = startFakeCloud({ appExists: true, r2: ["FILES"] });
+    const login = fakeLogin(cloud.url);
+    roots.push(login.dir);
+    const dir = project();
+    const elsewhere = mkdtempSync(join(tmpdir(), "sb-r2-elsewhere-"));
+    roots.push(elsewhere);
+    writeFileSync(join(dir, "n.txt"), "hello");
+    try {
+      const put = await cli(
+        dir,
+        ["r2", "object", "put", "FILES/n.txt", "-f", "n.txt", "--profile", login.profile],
+        login.env,
+      );
+      expect(put.code, put.stderr).toBe(0);
+      const config = join(dir, "sproutboat.jsonc");
+      for (const args of [
+        ["--profile", login.profile, "-c", config, "r2", "object", "get", "FILES/n.txt", "--pipe"],
+        ["r2", "object", "get", "FILES/n.txt", "--pipe", `--profile=${login.profile}`, "-c", config],
+        ["r2", "object", "get", "FILES/n.txt", "--pipe", "--profile", login.profile, "--cwd", dir],
+      ]) {
+        const run = await cli(elsewhere, args, login.env);
+        expect(run.code, `${args.join(" ")}: ${run.stderr}`).toBe(0);
+        expect(run.text).toBe("hello");
+      }
+      // Without a profile the decoy default is used, so nothing reaches the Cloud.
+      expect((await cli(dir, ["r2", "object", "get", "FILES/n.txt", "--pipe"], login.env)).code).toBe(1);
+    } finally {
+      cloud.stop();
+    }
+  });
+
+  test("an unknown option is refused with exit 2", async () => {
+    await withCloud({}, async (cloud, env) => {
+      const dir = project();
+      for (const args of [
+        ["r2", "object", "get", "FILES/a", "--pipe", "--follow"],
+        ["r2", "object", "put", "FILES/a", "--pipe", "--cotnent-type", "x"],
+        ["r2", "object", "delete", "FILES/a", "--force"],
+      ]) {
+        const run = await cli(dir, args, env, new Uint8Array([1]));
+        expect(run.code, args.join(" ")).toBe(2);
+        expect(run.stderr).toContain("unknown option");
+      }
+      expect(cloud.calls.filter((call) => call.path.includes("/r2/"))).toEqual([]);
+    });
   });
 });

@@ -7,7 +7,9 @@ import {
   communityTarget,
   deleteObject,
   getObject,
+  keyProblem,
   metadataHeaders,
+  readCapped,
   parseObjectArgs,
   parseObjectPath,
   putObject,
@@ -88,8 +90,48 @@ const stdin = async () => new TextEncoder().encode("piped bytes");
 describe("arguments", () => {
   test("the object path is bucket/key; the key may hold slashes", () => {
     expect(parseObjectPath("FILES/a/b c.txt", GET_USAGE)).toEqual({ bucket: "FILES", key: "a/b c.txt" });
-    for (const bad of [undefined, "FILES", "FILES/", "/key"])
+    for (const bad of [undefined, "FILES", "/key"])
       expect(() => parseObjectPath(bad, GET_USAGE)).toThrow("<bucket>/<key>");
+    expect(() => parseObjectPath("FILES/", GET_USAGE)).toThrow("the key is empty");
+  });
+
+  test("a key follows the Cloud's rules, and each break says which", () => {
+    const fine = ["a", "a/b/c.txt", "é/ü", ".hidden", "a..b", "x".repeat(1024), "é".repeat(512), "a b/(1).png"];
+    for (const key of fine) expect(keyProblem(key), key).toBeUndefined();
+    const bad: [string, string][] = [
+      ["", "empty"],
+      ["x".repeat(1025), "1025 bytes"],
+      ["é".repeat(513), "1026 bytes"],
+      ["a//b", "empty segment"],
+      ["/a", "empty segment"],
+      ["a/", "empty segment"],
+      ["a/./b", '"." segment'],
+      ["a/../b", '".." segment'],
+      ["..", '".." segment'],
+      ["a\\b", "backslash"],
+      ["a\u0000b", "U+0000"],
+      ["a\tb", "U+0009"],
+      ["a\u001fb", "U+001F"],
+      ["a\u007fb", "U+007F"],
+      ["a\u0080b", "U+0080"],
+      ["a\u009fb", "U+009F"],
+      ["a\ud800b", "not valid UTF-8"],
+    ];
+    for (const [key, words] of bad) expect(keyProblem(key), JSON.stringify(key)).toContain(words);
+    // It is the path that is checked on the command line, before anything is sent.
+    expect(() => parseObjectPath("FILES/a/../b", GET_USAGE)).toThrow('FILES/a/../b: the key has a ".." segment');
+  });
+
+  test("a piped object stops being read at the limit", async () => {
+    const chunks = (count: number) =>
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (count-- > 0) controller.enqueue(new Uint8Array(4));
+          else controller.close();
+        },
+      });
+    expect((await readCapped(chunks(3), 12, () => new Error("long"))).byteLength).toBe(12);
+    await expect(readCapped(chunks(4), 12, () => new Error("long"))).rejects.toThrow("long");
   });
 
   test("Wrangler's flags and their short forms", () => {
@@ -205,7 +247,7 @@ describe("a Cloud app's bucket", () => {
       "The specified key does not exist.",
     );
     await expect(getObject(cloudTarget(url, "t", "hello", "OTHER"), "k", { pipe: true }, io, dir)).rejects.toThrow(
-      'no R2 bucket "OTHER" for hello',
+      'hello has no R2 bucket "OTHER" on its host yet',
     );
     expect(existsSync(join(dir, "nope"))).toBe(false);
   });
