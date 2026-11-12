@@ -13,6 +13,8 @@
     "MAX_UPLOAD_BYTES": "1048576",
     // The whole demo bucket: every file together, so a stranger cannot fill the disk.
     "MAX_TOTAL_BYTES": "8388608",
+    // A file is deleted an hour after its upload.
+    "FILE_TTL_SECONDS": "3600",
   },
   "secrets": ["ADMIN_TOKEN"],
   "kv_namespaces": ["SESSIONS"],
@@ -32,8 +34,9 @@
     // the dashboard GET routes
     { "binding": "READS", "limit": 240, "period": 60 },
   ],
-  // */1 prunes sessions and logs a heartbeat; 0 4 * * * resets the demo data (UTC)
-  "triggers": { "crons": ["*/1 * * * *", "0 4 * * *"] },
+  // */1 prunes sessions and logs a heartbeat; */15 deletes the files whose hour is up (and chunks of
+  // abandoned uploads); 0 4 * * * resets the demo data (UTC)
+  "triggers": { "crons": ["*/1 * * * *", "*/15 * * * *", "0 4 * * *"] },
   "assets": {
     "directory": "site",
     "binding": "ASSETS",

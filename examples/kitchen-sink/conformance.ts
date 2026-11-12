@@ -415,6 +415,67 @@ export async function runConformance(
     return fetch(url, addressed(init, fileAddress.get(name) ?? runAddress));
   });
 
+  step("public hardening: healthz, expiry, daily quota");
+  // GET /healthz is what an uptime monitor polls: cheap JSON, no rate limit, and it needs no address.
+  const health = await globalThis.fetch(base + "/healthz");
+  const healthBody = obj(parseJsonValue(await health.text()));
+  const healthHead = await globalThis.fetch(base + "/healthz", { method: "HEAD" });
+  const healthPost = await globalThis.fetch(base + "/healthz", { method: "POST", body: "{}" });
+  await healthPost.text();
+  check(
+    "healthz: GET answers 200 {ok: true} uncached, HEAD 200, POST 405",
+    health.status === 200 &&
+      healthBody.ok === true &&
+      (health.headers.get("content-type") ?? "").includes("application/json") &&
+      health.headers.get("cache-control") === "no-store" &&
+      healthHead.status === 200 &&
+      healthPost.status === 405,
+    { status: health.status, body: healthBody, head: healthHead.status, post: healthPost.status },
+  );
+  let health429 = 0;
+  for (let i = 0; i < 300; i++) if ((await globalThis.fetch(base + "/healthz")).status !== 200) health429++;
+  check("healthz: 300 polls in a row are all answered (it has no rate limit)", health429 === 0, { refused: health429 });
+  const limits = obj((await jget("/api/info")).body);
+  check(
+    "limits: /api/info states how long a file lives and how much an address may upload a day",
+    Number(limits.file_ttl_seconds) > 0 && Number(limits.max_upload_per_day) > 0,
+    { ttl: limits.file_ttl_seconds, day: limits.max_upload_per_day },
+  );
+  // The first chunk of a declared 25 MB file is charged 25 MB. Four of them spend 100 MB, the next is
+  // refused with the 429 a quota gives; that address has nothing left today, another address does.
+  const hoarder = `192.0.2.${20 + (Date.now() % 200)}`;
+  const spend = (id: string, address: string, total: number) =>
+    jfrom(
+      address,
+      `/api/r2/chunk?name=q-${id}.bin&id=${id.padStart(16, "0")}&n=0&count=${Math.ceil(total / 1048576)}&total=${total}&type=application%2Foctet-stream`,
+      {
+        method: "PUT",
+        body: new Uint8Array(1048576),
+      },
+    );
+  const daily = Number(limits.max_upload_per_day) || 104857600;
+  const piece = Math.floor(daily / 4);
+  if (piece > Number(limits.max_upload_bytes)) {
+    // The standalone build takes 1 MB files: four claims cannot add up to the day. worker.test.ts covers the quota.
+    console.log(
+      "  --  quota: skipped, a file here is at most " + limits.max_upload_bytes + " bytes (see worker.test.ts)",
+    );
+  } else {
+    const spent = [];
+    for (let i = 1; i <= 4; i++) spent.push((await spend("a" + i, hoarder, piece)).status);
+    const over = await spend("a5", hoarder, 2097152);
+    const fresh = await spend("b1", `192.0.2.${20 + ((Date.now() + 97) % 200)}`, piece);
+    check(
+      "quota: an address that has uploaded its whole day gets a 429 with code quota and a Retry-After; another address does not",
+      spent.every((s) => s === 200) &&
+        over.status === 429 &&
+        obj(over.body).code === "quota" &&
+        Number(over.headers.get("retry-after")) > 0 &&
+        fresh.status === 200,
+      { spent, over: over.status, body: over.body, fresh: fresh.status },
+    );
+  }
+
   step("input caps");
   // Every input is capped and validated with a 4xx, never a 500.
   const writer = `192.0.2.${20 + (Date.now() % 200)}`;
@@ -579,6 +640,38 @@ export async function runConformance(
   check("cron: scheduled() runs (204)", sched.status === 204, sched.status);
   const afterCron = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
   check("cron: heartbeat row written by scheduled()", Number(obj(afterCron.body).cron_heartbeats) > 0, afterCron.body);
+
+  // The file sweep (*/15) deletes files whose hour is up. Its scheduledTime is its clock, so a run
+  // "two hours from now" finds a file uploaded just now expired; one "now" leaves it alone.
+  step("cron: the file sweep");
+  const sweeper = `192.0.2.${20 + ((Date.now() + 53) % 200)}`;
+  const kept = await jfrom(
+    sweeper,
+    "/api/r2/chunk?name=sweep.txt&id=00000000000000aa&n=0&count=1&total=4&type=text%2Fplain",
+    {
+      method: "PUT",
+      body: "keep",
+    },
+  );
+  const trigger = (cron: string, scheduledTime: number) =>
+    fetch(base + "/", {
+      method: "POST",
+      headers: { "x-sb-trigger": "scheduled", "x-sb-token": TOKEN, "content-type": "application/json" },
+      body: JSON.stringify({ cron, scheduledTime }),
+    });
+  const early = await trigger("*/15 * * * *", Date.now());
+  const stillThere = await jfrom(sweeper, "/api/r2/file?name=sweep.txt");
+  const late = await trigger("*/15 * * * *", Date.now() + 2 * 3600000);
+  const afterSweep = await jfrom(sweeper, "/api/r2");
+  check(
+    "cron: the */15 sweep keeps a fresh file and deletes one whose hour is up",
+    kept.status === 201 &&
+      early.status === 204 &&
+      stillThere.status === 200 &&
+      late.status === 204 &&
+      !arr(obj(afterSweep.body).objects).some((o) => obj(o).name === "sweep.txt"),
+    { kept: kept.status, early: early.status, stillThere: stillThere.status, late: late.status, list: afterSweep.body },
+  );
 
   // The daily reset is its own cron (0 4 * * *), told apart by event.cron: it empties the bucket,
   // goes back to the three seed guestbook rows and clears the chat history.

@@ -9,8 +9,9 @@ public/                         the dashboard: index.html, app.css, app.js, font
 build-web.ts                    public/ -> site/, plus site/build-info.json (sizes, config, code excerpts)
 conformance.ts                  the binding checks, run against the broker and standalone backends
 r2-roundtrip.ts                 sha256 round trips of 5 MB and 25 MB files, run by conformance.ts or against a deployed app
-harness.ts                      broker backend: host sprout + in-process broker (80 checks)
+harness.ts                      broker backend: host sprout + in-process broker (105 checks)
 harness-standalone.ts           one binary with the bindings compiled in (same checks)
+worker.test.ts                  the worker in-process with a clock the test moves: file expiry, the daily quota, Content-Disposition, /healthz (`bun test`)
 serve.ts                        like harness.ts, but stays up for the browser
 sproutboat.jsonc                the Cloud config (with the service binding)
 sproutboat.standalone.jsonc     the same app without the service binding, for `build --standalone`
@@ -30,8 +31,8 @@ scrolls inside it, so a tile is as tall empty as full.
 | --- | --- | --- |
 | KV counter | `env.SESSIONS` | `get` then `put` on one key; the two operations are timed separately. A read-modify-write on KV is not atomic, and the tile says so. |
 | D1 guestbook | `env.DB` | Sign the guestbook, see the rows, and the SQL that ran with its bound values, time and rows read. |
-| R2 upload | `env.UPLOADS` | Upload any file, up to 25 MB (`MAX_UPLOAD_BYTES`), with a progress bar and a Cancel; images get a thumbnail, other files an icon and a size. 50 files and 200 MB in all (`MAX_TOTAL_BYTES`), and files reset daily. Stored as 1 MiB R2 objects and streamed back with Range support (below). |
-| Chat room | `env.ROOM` (Durable Object) | A WebSocket to one `ChatRoom` object, using the hibernation API (`acceptWebSocket`, `webSocketMessage`, `webSocketClose`, socket attachments). Last 30 messages are kept in the object's storage. A frame cap, a message rate per connection and a connection cap per address protect it (below). |
+| R2 upload | `env.UPLOADS` | Upload any file, up to 25 MB (`MAX_UPLOAD_BYTES`), with a progress bar and a Cancel; images get a thumbnail, other files an icon and a size. 50 files and 200 MB in all (`MAX_TOTAL_BYTES`). A file is deleted an hour after its upload (`FILE_TTL_SECONDS`) and the list shows when. 100 MB per address a day. Stored as 1 MiB R2 objects and streamed back with Range support (below). |
+| Chat room | `env.ROOM` (Durable Object) | A WebSocket to one `ChatRoom` object, using the hibernation API (`acceptWebSocket`, `webSocketMessage`, `webSocketClose`, socket attachments). Last 30 messages are kept in the object's storage. A frame cap, a message rate per connection and a connection cap per address protect it (below). The list is a box of one size that scrolls inside itself; it follows new messages only while the reader is at its end (or wrote the message), else a "N new messages" button floating over it takes them there. Long messages, URLs and names wrap. |
 | Queue and cron feed | `env.EMAILS`, `triggers.crons` | Enqueue a job; the `queue()` handler writes an event to D1. The cron handler writes one per run. The feed reads those events back. |
 | Service binding | `env.PEER` | `env.PEER.fetch()` to `quote-service`. If the callee is unreachable the tile shows the error. A build without the binding says "Not in standalone". |
 | Secrets | `env.ADMIN_TOKEN` | Declared secret names and whether each has a value, never the value. A token you type is compared inside the worker (`env.THROTTLE` allows 3 checks a minute per address). |
@@ -69,7 +70,8 @@ the page turns that into a countdown on the tile and pauses its buttons.
 | --- | --- | --- |
 | Every route that writes: `POST /api/guestbook`, `POST /api/kv/incr`, `PUT` and `DELETE /api/r2`, `POST /api/queue/enqueue`; the conformance routes `POST /login`, `POST /notes`, `GET /notes/:id` (it counts a view), `POST /notes/:id/attach`, `POST /r2/direct-upload`; the calls that cost CPU or go out: `GET /api/quote`, `/quote`, `/peer`, `/egress`, `/hash`, `/throttle` | 30 a minute, all of them together | `WRITES`, `w:<address>` |
 | One chunk of a file upload (`PUT /api/r2/chunk`), instead of the line above; `POST /notes/:id/attach` and `POST /r2/direct-upload` count here as well as above | 60 a minute (a 25 MB file is 25 requests) | `BULK`, `b:<address>` |
-| Bytes in an hour, per address: uploads (charged by the size a file says it has, when its first chunk arrives) and downloads (charged by what a response sends) | 100 MB up, 250 MB down | a row in D1 (`quota`), key `up:<address>:<hour>` / `down:<address>:<hour>`; a refusal is a 429 with `code: "quota"` and the seconds to the next hour |
+| Bytes in an hour, per address: uploads (charged by the size a file says it has, when its first chunk arrives) and downloads (charged by what a response sends) | 100 MB up, 250 MB down | a row in D1 (`quota`), key `up:<address>:<hour>` / `down:<address>:<hour>`; a refusal is a 429 with `code: "quota"`, `window: "hour"` and the seconds to the next hour |
+| Bytes in a day, per address: uploads, charged the same way as above, from 04:00 UTC to 04:00 UTC (the daily reset's day, so the reset never hands out a second allowance) | 100 MB up (`MAX_UPLOAD_PER_DAY`) | a row in D1 (`quota`), key `upday:<address>:<day>`; a refusal is a 429 with `code: "quota"`, `window: "day"` and the seconds to 04:00 UTC |
 | The secret check (`POST /api/secrets/check`) and a wrong `x-admin-token` | 3 a minute | `THROTTLE`, `secret-check:<address>` and `admin-token:<address>` |
 | The dashboard's GET routes (`/api/*`, `/whoami`, `/notes`, `/attachments`, `/attach/:key`, `/r2/direct-download`) | 240 a minute | `READS`, `r:<address>` |
 | Opening the chat socket (`GET /api/chat`) | 30 a minute | `WRITES`, `ws:<address>` |
@@ -109,6 +111,8 @@ Every input is validated and answered with a `4xx` and a JSON `error`, never a `
 | Files in the bucket | 50 in `files/` | 409 |
 | Bytes in the bucket | `MAX_TOTAL_BYTES` (200 MB), every object counted; tickets for direct uploads are cut to what is left | 409 |
 | Bytes per address and hour | 100 MB up, 250 MB down | 429 |
+| Bytes per address and day | 100 MB up | 429 |
+| How long a file lives | `FILE_TTL_SECONDS` (3600): after that it is not served (404) and is deleted | 404 |
 | Note title, body | 200 and 4,000 characters | 400 |
 | `?key=` of `/throttle`, `?to=` of `/egress`, `?key=` of `/r2/direct-download` | 64, 2,048 and 256 characters; `/egress` takes only `http://` and `https://` | 400 |
 
@@ -124,8 +128,15 @@ request (`PUT /api/r2/chunk?name=&id=&n=&count=&total=&type=`, the body is the c
 `XMLHttpRequest`); the last one checks that every chunk is there and writes the manifest. A download reads one
 chunk per pull of a `ReadableStream`, so Range works: `206`, `Content-Range`, `416` outside the file, `Accept-Ranges`.
 A file is served with the type it was uploaded with, `x-content-type-options: nosniff`, and a CSP of
-`default-src none; sandbox`; only images (not SVG), PDF, text, audio and video are shown in the browser, every
-other type, SVG and HTML included, is `content-disposition: attachment`.
+`default-src none; sandbox`; only images (not SVG), audio and video are shown in the browser, every
+other type, PDF, text, SVG and HTML included, is `content-disposition: attachment`, so the demo does not host documents or
+pages for anyone.
+
+**A file lives an hour.** The manifest carries `expires` (the upload's end plus `FILE_TTL_SECONDS`, 3600). After that
+`GET /api/r2/file` answers 404 and the file is deleted, chunks and all. Deletion happens when anyone lists the files,
+fetches the file or starts an upload, and in the `*/15 * * * *` cron (`purgeExpired()`), which also removes the chunks of
+uploads nobody finished. The list (`GET /api/r2`) carries each file's `expires` in epoch milliseconds, and the page shows the minutes
+left. A file may be cached by the browser only for what is left of its hour.
 
 **One response sends at most `MAX_RESPONSE_BYTES` (2 MiB).** Reading a chunk costs about seven times its size
 in worker memory (measured on the host sprout: a 10 MB download peaks at 85 MB, a 25 MB one at 246 MB, a 1 MiB
@@ -136,9 +147,9 @@ page downloads a big file the same way, window by window, and saves it as one fi
 (a standalone binary, an app given more memory) raise `MAX_RESPONSE_BYTES` and a whole file streams in one response.
 
 `bun r2-roundtrip.ts <url>` uploads and reads back binary, PNG and JPEG files of 5 MB and 25 MB (plus the 256-byte
-fixture, an SVG and an empty file), compares sha256 and checks Range, `416`, the type, the disposition and the CSP;
+fixture, an SVG, a PDF, a text file, an HTML file and an empty file), compares sha256 and checks Range, `416`, the type, the disposition, the expiry in the list and the CSP;
 `conformance.ts` runs the same function against the broker and the standalone binary. Against a deployed app it
-uploads 90 MB from one address: run it once an hour.
+uploads 90 MB from one address, out of the 100 MB a day an address may upload: run it once a day (`--sizes 5` is 15 MB).
 
 ### Where the platform limits are
 
@@ -158,14 +169,34 @@ sproutd), not measured on Cloud:
 So a 25 MB upload fits (25 requests of 1 MiB, each far under every limit), and a 25 MB download fits only as
 Range windows: tickets and a single streamed response do not work on sproutd today.
 
+### Health check
+
+`GET /healthz` answers `200 {"ok":true,"at":<epoch ms>}` with `cache-control: no-store`; `HEAD` answers 200 with no body and any other method 405. It is
+answered by the worker alone: it reads no D1, KV or R2, writes no analytics point and has no rate limit, so polling it every minute costs
+next to nothing and never uses up a visitor's budget. A `200` means the app is up and serving. It does not mean the bindings work: for that
+the dashboard's own routes (`GET /api/info`, `GET /api/r2`) are the check.
+
+An external uptime monitor (Better Stack, UptimeRobot, a Cloudflare health check or a `curl` in cron) should:
+
+- poll `https://<app host>/healthz` with `GET` (or `HEAD`) every 1 to 5 minutes, from more than one region if it can;
+- call it down when the status is not `200`, the body does not contain `"ok":true`, or there is no answer within 5 seconds;
+- alert after two failed polls in a row, not one, so a restart does not page anyone.
+
+```sh
+curl -fsS --max-time 5 https://<app host>/healthz | grep -q '"ok":true' || echo "kitchen-sink is down"
+```
+
+This repository does not create the monitor: an external account for it is the operator's to make.
+
 ### Cleanup
 
 The demo data does not grow forever. The page says so: "Demo data resets daily at 04:00 UTC".
 
 | What | How |
 | --- | --- |
-| Daily at 04:00 UTC (cron `0 4 * * *`, told apart from `*/1 * * * *` by `event.cron`) | `dailyReset()`: every R2 object (any prefix: manifests, chunks, attachments), every KV key (sessions and the counter), the guestbook back to its three seed rows, notes, email log, heartbeats, view roll-ups and the queue feed, and the chat history in the `ChatRoom` object (connected pages are sent an empty history), and the spent hourly allowances. |
-| Between resets | guestbook 200 rows, notes 200, events 200, heartbeats 200, email log 200, view roll-ups 200; chat 30 messages; sessions expire after an hour and the `*/1` cron prunes them; files 50 and 200 MB; chunks of an upload nobody finished are deleted after an hour (the `*/1` cron), spent hourly allowances after two. |
+| Every 15 minutes (cron `*/15 * * * *`, told apart by `event.cron`) | `purgeExpired()` and `sweepChunks()`: files whose hour is up (manifest and chunks), and chunks over an hour old whose upload never finished. Its `scheduledTime` is its clock. |
+| Daily at 04:00 UTC (cron `0 4 * * *`, told apart from `*/1 * * * *` by `event.cron`) | `dailyReset()`: every R2 object (any prefix: manifests, chunks, attachments), every KV key (sessions and the counter), the guestbook back to its three seed rows, notes, email log, heartbeats, view roll-ups and the queue feed, and the chat history in the `ChatRoom` object (connected pages are sent an empty history), and the spent hourly and daily allowances. |
+| Between resets | guestbook 200 rows, notes 200, events 200, heartbeats 200, email log 200, view roll-ups 200; chat 30 messages; sessions expire after an hour and the `*/1` cron prunes them; files 50 and 200 MB, each deleted an hour after its upload; chunks of an upload nobody finished are deleted after an hour (the `*/15` cron), spent hourly allowances after two hours and daily ones after two days (the `*/1` cron). |
 | Not reset | Analytics Engine data points (the app can write them, not delete them) and the `ViewCounter` objects (a few bytes each, one per note id). |
 
 ## Routes
@@ -191,7 +222,8 @@ GET  /admin/stats          header x-admin-token      (secret gate; one number pe
 Every route above, and every `/api` route below, answers `429` over its limit (see the table above). The dashboard adds these under `/api`:
 
 ```
-GET  /api/info                        bindings in this build, request count
+GET  /healthz                         { ok: true }: for an uptime monitor (below), no rate limit
+GET  /api/info                        bindings in this build, request count, the limits
 GET  /api/kv       POST /api/kv/incr
 GET  /api/guestbook  POST /api/guestbook {name, msg}
 GET  /api/r2       PUT /api/r2?name=  DELETE /api/r2?name=   GET /api/r2/file?name=
