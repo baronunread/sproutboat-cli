@@ -59,8 +59,12 @@
     "version": "bun run surface && git add SURFACE.md",
     "prepublishOnly": "bun run typecheck && bun test",
     "style": "bunx style-doctor@latest --quiet",
-    "kitchen-sink": "bun examples/kitchen-sink/harness.ts",
-    "kitchen-sink:standalone": "bun examples/kitchen-sink/harness-standalone.ts"
+    "kitchen-sink": "bun run kitchen-sink:demo && bun run conformance",
+    "kitchen-sink:demo": "bun examples/kitchen-sink/harness.ts",
+    "conformance": "bun examples/conformance/harness.ts",
+    "kitchen-sink:standalone": "bun run kitchen-sink:demo:standalone && bun run conformance:standalone",
+    "kitchen-sink:demo:standalone": "bun examples/kitchen-sink/harness-standalone.ts",
+    "conformance:standalone": "bun examples/conformance/harness-standalone.ts"
   },
   "dependencies": {
     "@sproutboat/artifact": "^0.3.0",

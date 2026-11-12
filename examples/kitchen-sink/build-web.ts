@@ -6,8 +6,8 @@
  * site/build-info.json is the one place the page gets build-time facts from:
  *
  *   module     bytes of src/index.js, the worker source this build ships
- *   assets     every file in site/ with its size (build-info.json itself and the
- *              harness fixture left out), so the size card sums real files
+ *   assets     every file in site/ with its size (build-info.json itself left out),
+ *              so the size card sums real files
  *   snippets   the code between `// #region <name>` markers in src/index.js,
  *              copied verbatim into the tiles' Code panels
  *   config     compatibility date, crons, secret names and the bindings declared
@@ -18,7 +18,7 @@
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { parseConfig } from "../../src/config";
+import { parseConfig, resourceRefs } from "../../src/config";
 
 const HERE = import.meta.dir;
 const PUBLIC = join(HERE, "public");
@@ -67,10 +67,10 @@ export function buildWebUi(): string {
   regions.delete("timing");
 
   const bindings: Array<{ binding: string; type: string }> = [
-    ...(config.kv_namespaces ?? []).map((binding) => ({ binding, type: "KV" })),
-    ...(config.d1_databases ?? []).map((binding) => ({ binding, type: "D1" })),
-    ...(config.r2_buckets ?? []).map((binding) => ({ binding, type: "R2" })),
-    ...(config.queues ?? []).map((binding) => ({ binding, type: "Queue" })),
+    ...resourceRefs(config.kv_namespaces).map(({ binding }) => ({ binding, type: "KV" })),
+    ...resourceRefs(config.d1_databases).map(({ binding }) => ({ binding, type: "D1" })),
+    ...resourceRefs(config.r2_buckets).map(({ binding }) => ({ binding, type: "R2" })),
+    ...resourceRefs(config.queues).map(({ binding }) => ({ binding, type: "Queue" })),
     ...(config.analytics_engine_datasets ?? []).map((binding) => ({ binding, type: "Analytics Engine" })),
     ...Object.keys(config.durable_objects ?? {}).map((binding) => ({ binding, type: "Durable Object" })),
     ...(config.ratelimiters ?? []).map((entry) => ({ binding: entry.binding, type: "Rate limiter" })),
@@ -79,12 +79,6 @@ export function buildWebUi(): string {
     ...(config.assets ? [{ binding: config.assets.binding ?? "ASSETS", type: "Assets" }] : []),
   ];
 
-  // Every byte value catches UTF-8 decoding, replacement and truncation bugs. The
-  // conformance suite reads it back; it is not part of the measured assets.
-  const binary = new Uint8Array(256);
-  for (let index = 0; index < binary.length; index++) binary[index] = index;
-  writeFileSync(join(DIST, "binary-fixture.bin"), binary);
-
   const info = {
     builtAt: new Date().toISOString(),
     compatibilityDate: config.compatibility_date,
@@ -92,7 +86,7 @@ export function buildWebUi(): string {
     secrets: config.secrets ?? [],
     bindings,
     module: { path: config.main, bytes: Buffer.byteLength(sourceText) },
-    assets: walk(DIST).filter((file) => file.path !== "binary-fixture.bin"),
+    assets: walk(DIST),
     snippets: Object.fromEntries(regions),
   };
   writeFileSync(join(DIST, "build-info.json"), JSON.stringify(info, null, 2) + "\n");

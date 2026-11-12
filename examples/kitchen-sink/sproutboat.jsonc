@@ -10,7 +10,6 @@
   // Every binding Sproutboat supports, in one app.
   "vars": {
     "SITE_NAME": "Sproutboat Notes",
-    "QUOTE_URL": "https://api.quotable.local/random",
     // A file is stored as 1 MiB R2 objects, one per upload request and one per download read, so no
     // request holds a whole file and the worker stays flat (sproutd gives an app 32 MiB, and its R2
     // get() reads a whole object into memory). Per file 25 MiB, all files 200 MiB, and per client
@@ -33,7 +32,7 @@
   "r2_buckets": ["UPLOADS"],
   "queues": ["EMAILS"],
   "analytics_engine_datasets": ["METRICS"],
-  "durable_objects": { "VIEWS": "ViewCounter", "ROOM": "ChatRoom" },
+  "durable_objects": { "ROOM": "ChatRoom" },
   // Every one is a budget per client address (see src/index.js, gate()).
   "ratelimiters": [
     // the secret check and failed admin tokens
@@ -49,7 +48,7 @@
   // sprout serves one turn at a time, so a binding pointing back at its own
   // project deadlocks until the request times out.
   "services": [{ "binding": "PEER", "service": "quote-service" }],
-  // */1 prunes sessions and logs a heartbeat; */15 deletes the files whose hour is up (and chunks of
+  // */1 records a run in the events feed; */15 deletes the files whose hour is up (and chunks of
   // abandoned uploads); 0 4 * * * resets the demo data (UTC)
   "triggers": { "crons": ["*/1 * * * *", "*/15 * * * *", "0 4 * * *"] },
   "assets": {

@@ -1,59 +1,26 @@
-// Kitchen-sink Sproutboat app — exercises every binding.
+// Kitchen-sink Sproutboat app: a dashboard where every tile calls a real binding.
 //
 //   vars      SITE_NAME
-//   secret    ADMIN_TOKEN          (x-admin-token header gate)
-//   KV        SESSIONS             login tokens, pruned by cron
-//   D1        DB                   notes + email_log + heartbeat
-//   R2        UPLOADS              note attachments
-//   queue     EMAILS               notification jobs -> queue() handler
-//   DO        VIEWS (ViewCounter)  atomic per-note view count
-//   analytics METRICS              one data point per request
-//   fetch     api.quotable.local   any public host; private addresses refused
-//   cron      */1 * * * *          -> scheduled(): prune sessions + heartbeat
-//   assets    ASSETS (public/)     UI served via env.ASSETS.fetch(request)
-//   service   PEER -> quote-service  the dashboard's quote tile
+//   secret    ADMIN_TOKEN          (the Secrets tile reads whether it is set)
+//   KV        SESSIONS             the counter tile
+//   D1        DB                   guestbook, events, quotas
+//   R2        UPLOADS              files, stored as 1 MiB chunks
+//   queue     EMAILS               jobs -> queue() handler -> events in D1
 //   DO        ROOM (ChatRoom)      WebSocket chat on the hibernation API
+//   analytics METRICS              one data point per request
+//   ratelimit THROTTLE, WRITES, BULK, READS   per client address
+//   service   PEER -> quote-service  the quote tile
+//   cron      */1, */15, 0 4 * * *  -> scheduled()
+//   assets    ASSETS (site/)       the page, served by env.ASSETS.fetch(request)
 //
-// The routes under /api/ feed the dashboard in public/. Each tile's handler sits
-// between `#region` markers: build-web.ts copies those excerpts into the page's
-// Code panels, so the code on screen is the code that runs.
-
-export class ViewCounter {
-  constructor(state, env) {
-    this.state = state;
-    this.env = env;
-  }
-  // Awaited throughout: from compatibility date 2026-10-24 the bindings return promises.
-  async fetch(request) {
-    const url = new URL(request.url);
-    if (url.pathname === "/incr") {
-      const n = ((await this.state.storage.get("n")) || 0) + 1;
-      await this.state.storage.put("n", n);
-      // Debounced roll-up: every view schedules the same alarm a second out, so
-      // a burst of views produces one alarm rather than one per view. That is
-      // the pattern alarms exist for, and the reason at-most-one-pending is the
-      // rule rather than a queue.
-      await this.state.storage.setAlarm(Date.now() + 1000);
-      return new Response(String(n));
-    }
-    return new Response(String((await this.state.storage.get("n")) || 0));
-  }
-
-  // Runs after the views stop. Writes through to D1 so the effect is visible
-  // outside the object, and re-reads the counter rather than trusting a value
-  // captured when the alarm was set.
-  async alarm() {
-    const views = (await this.state.storage.get("n")) || 0;
-    await this.env.DB.prepare("INSERT INTO view_rollup (views, at) VALUES (?, ?)")
-      .bind(views, new Date().toISOString())
-      .run();
-    await this.env.DB.prepare("DELETE FROM view_rollup WHERE id <= (SELECT max(id) FROM view_rollup) - 200").run();
-  }
-}
+// The routes under /api/ feed the dashboard in public/. Each tile's handler sits between `#region` markers:
+// build-web.ts copies those excerpts into the page's Code panels, so the code on screen is the code that runs.
+// Routes and vectors that exist only to test the bindings live in examples/conformance, not here.
+import { DurableObject } from "cloudflare:workers";
 
 // #region chat
 // One room, one object. The sockets use the hibernation API: the object does not
-// hold the connections itself, it accepts them with state.acceptWebSocket and gets
+// hold the connections itself, it accepts them with ctx.acceptWebSocket and gets
 // webSocketMessage / webSocketClose calls, so an idle room can be unloaded.
 // The room is public, so it defends itself: a frame size cap, a message rate per
 // connection, a connection cap per address and for the room, and every field a
@@ -75,25 +42,21 @@ const CHAT = {
 const HISTORY = 30;
 const HISTORY_BYTES = 96 * 1024; // the stored history value stays under this (the platform limit is 128 KiB)
 
-export class ChatRoom {
-  constructor(state, env) {
-    this.state = state;
-    this.env = env;
-  }
-
+/** @extends {DurableObject<Env>} */
+export class ChatRoom extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     // The daily reset (scheduled()) calls this; /api/chat can never reach it,
     // because the worker only forwards that one path.
     if (url.pathname === "/reset" && request.method === "POST") {
-      await this.state.storage.delete("history");
+      await this.ctx.storage.delete("history");
       this.broadcast({ type: "history", messages: [] });
       return new Response("cleared");
     }
     // The limits are checked before the upgrade, so a page whose socket failed to open (a browser says
     // nothing about why) can ask with a plain GET: 503 means the room is full and will not take it, 429
     // means too many connections from its address, 426 means there is no limit in the way.
-    const sockets = this.state.getWebSockets();
+    const sockets = this.ctx.getWebSockets();
     if (sockets.length >= CHAT.room) return refusal(503, "the room is full: " + CHAT.room + " connections");
     const who = clientIp(request);
     if (who.known) {
@@ -110,16 +73,16 @@ export class ChatRoom {
       return new Response("expected a WebSocket upgrade", { status: 426 });
     }
     const pair = new WebSocketPair();
-    this.state.acceptWebSocket(pair[1]);
+    this.ctx.acceptWebSocket(pair[1]);
     pair[1].serializeAttachment({ name: "", ip: who.known ? who.ip : "", t1: 0, n1: 0, t10: 0, n10: 0, strikes: 0 });
-    const history = (await this.state.storage.get("history")) || [];
+    const history = (await this.ctx.storage.get("history")) || [];
     pair[1].send(JSON.stringify({ type: "history", messages: history }));
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
   presence() {
     const names = [];
-    const sockets = this.state.getWebSockets();
+    const sockets = this.ctx.getWebSockets();
     for (const ws of sockets) {
       const who = ws.deserializeAttachment();
       if (who && who.name && names.length < 20) names.push(who.name);
@@ -129,7 +92,13 @@ export class ChatRoom {
 
   broadcast(payload) {
     const text = JSON.stringify(payload);
-    for (const ws of this.state.getWebSockets()) ws.send(text);
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.send(text);
+      } catch {
+        // A socket that is closing may still be listed (as it is on Workers); it needs nothing sent.
+      }
+    }
   }
 
   // Count one frame against the connection's two windows (per second, per ten
@@ -221,7 +190,7 @@ export class ChatRoom {
       return;
     }
     const entry = { name: who.name || "guest", text, at: Date.now() };
-    const history = (await this.state.storage.get("history")) || [];
+    const history = (await this.ctx.storage.get("history")) || [];
     history.push(entry);
     while (history.length > HISTORY) history.shift();
     // One stored value holds the whole history; keep it well under the 128 KiB value limit
@@ -229,7 +198,7 @@ export class ChatRoom {
     while (history.length > 1 && new TextEncoder().encode(JSON.stringify(history)).length > HISTORY_BYTES) {
       history.shift();
     }
-    await this.state.storage.put("history", history);
+    await this.ctx.storage.put("history", history);
     // `sent` is the client's own clock value, echoed so it can time the round trip.
     // Only a plain number goes out: the field reaches every client in the room.
     const sent = isNumber(frame.sent) ? frame.sent : 0;
@@ -539,10 +508,6 @@ function uploadCap(env) {
   return Number(env.MAX_UPLOAD_BYTES) || 26214400;
 }
 
-function byteLength(text) {
-  return new TextEncoder().encode(text).length;
-}
-
 // The most bytes one response sends. Every chunk a response reads costs about seven times its size in
 // worker memory, and none of it is collected until the response ends (measured: a 10 MB download
 // peaks at 85 MB, a 1 MiB range at 14 MB), so a response is a bounded window of the file and a bigger
@@ -669,69 +634,26 @@ function fmtKb(n) {
   return n < 1048576 ? Math.round(n / 1024) + " KB" : Math.round((n / 1048576) * 10) / 10 + " MB";
 }
 
-async function asyncEcho(path) {
-  return json({ async: true, path });
-}
-
-// #133 — crypto.subtle: a SHA-256 digest and an HMAC round-trip against known
-// vectors, so an incorrect or missing subset fails the suite on both backends.
-async function asyncHash() {
-  const hex = (buf) => {
-    const b = new Uint8Array(buf);
-    let s = "";
-    for (let i = 0; i < b.length; i++) s += (b[i] + 0x100).toString(16).slice(1);
-    return s;
-  };
-  const enc = (text) => new TextEncoder().encode(text);
-  const d = hex(await crypto.subtle.digest("SHA-256", enc("abc")));
-  const k = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode("key"),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", k, enc("message"));
-  const ok = await crypto.subtle.verify("HMAC", k, sig, enc("message"));
-  const bad = await crypto.subtle.verify("HMAC", k, sig, enc("message!"));
-  const roundKey = await crypto.subtle.importKey(
-    "raw",
-    Uint8Array.from({ length: 16 }, (_, i) => i + 1),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  let roundData = new TextEncoder().encode("h1-regression-password-0001");
-  const rounds = [];
-  for (let i = 0; i < 2; i++) {
-    roundData = new Uint8Array(await crypto.subtle.sign("HMAC", roundKey, roundData));
-    rounds.push(hex(roundData));
-  }
-  // #153 — scrypt verify against a small-parameter vector (fast for the suite).
-  // node crypto.scryptSync("pw","salt",32,{N:1024,r:8,p:1}):
-  const scEx = "9f1f8695838e682c1689750f45a69fb95645b4a27f0c9994c696b1c98c0a1671";
-  const scOk = crypto.scryptVerify("pw", "salt", scEx, { N: 1024, r: 8, p: 1 });
-  const scBad = crypto.scryptVerify("nope", "salt", scEx, { N: 1024, r: 8, p: 1 });
-  return json({ digest: d, hmac: hex(sig), verifyOk: ok, verifyBad: bad, rounds, scryptOk: scOk, scryptBad: scBad });
-}
-
+// The tables are created once per process, by the first request or trigger that needs them, not on every request.
+let schema;
 async function ensureSchema(env) {
-  await env.DB.exec(
-    "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, body TEXT, attachment TEXT, created TEXT);" +
-      "CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER, sent_at TEXT);" +
-      "CREATE TABLE IF NOT EXISTS heartbeat (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, cron TEXT);" +
-      "CREATE TABLE IF NOT EXISTS view_rollup (id INTEGER PRIMARY KEY AUTOINCREMENT, views INTEGER, at TEXT);" +
-      "CREATE TABLE IF NOT EXISTS guestbook (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, msg TEXT, at TEXT);" +
+  schema ??= env.DB.exec(
+    "CREATE TABLE IF NOT EXISTS guestbook (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, msg TEXT, at TEXT);" +
       "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, label TEXT, ms REAL, at TEXT);" +
       "CREATE TABLE IF NOT EXISTS quota (key TEXT PRIMARY KEY, bytes INTEGER, expires INTEGER)",
   );
+  try {
+    await schema;
+  } catch (error) {
+    schema = undefined; // a failed attempt is not cached
+    throw error;
+  }
 }
 
-// KV list(): { keys: [{ name }], list_complete, cursor } from compatibility date 2026-10-25, an array of names before it.
-async function sessionNames(env) {
-  const listed = await env.SESSIONS.list("");
-  if (Array.isArray(listed)) return listed;
-  return (listed.keys || []).map((k) => k.name);
+// The names of the keys in the namespace: list() answers { keys: [{ name }], list_complete, cursor }.
+async function kvKeys(env) {
+  const { keys } = await env.SESSIONS.list();
+  return keys.map((key) => key.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,8 +1116,8 @@ const SEED = [
 ];
 
 // The daily reset, run by scheduled() for the "0 4 * * *" cron. Everything a visitor
-// can add goes: every R2 object, every KV key (sessions and the counter), the
-// guestbook (back to SEED), notes, logs and the queue feed, and the chat history.
+// can add goes: every R2 object, every KV key (the counter), the
+// guestbook (back to SEED), the events feed, the allowances, and the chat history.
 async function dailyReset(env, event) {
   const started = clock();
   // Each part runs on its own: one that fails is logged and does not keep the others from running.
@@ -1208,11 +1130,11 @@ async function dailyReset(env, event) {
       }
     },
     async () => {
-      const keys = await sessionNames(env);
+      const keys = await kvKeys(env);
       for (let i = 0; i < keys.length; i++) await env.SESSIONS.delete(keys[i]);
     },
     async () => {
-      for (const table of ["guestbook", "notes", "email_log", "heartbeat", "view_rollup", "events", "quota"]) {
+      for (const table of ["guestbook", "events", "quota"]) {
         await env.DB.prepare("DELETE FROM " + table).run();
       }
       const at = new Date().toISOString();
@@ -1294,11 +1216,11 @@ async function api(request, env, url, path, t0) {
 
   if (path === "/api/kv") {
     const n = Number((await env.SESSIONS.get("counter:home")) || 0);
-    return timed({ n, keys: (await sessionNames(env)).length }, 200, t0);
+    return timed({ n, keys: (await kvKeys(env)).length }, 200, t0);
   }
   if (path === "/api/kv/incr" && method === "POST") {
     const res = await kvIncrement(env);
-    res.keys = (await sessionNames(env)).length;
+    res.keys = (await kvKeys(env)).length;
     return timed(res, 200, t0);
   }
 
@@ -1453,255 +1375,6 @@ async function api(request, env, url, path, t0) {
 }
 
 // The routes the conformance suite and curl use, outside /api. Same rules as above.
-async function plain(request, env, url, path) {
-  const method = request.method;
-  let slow = null;
-
-  // POST /login -> a session token in KV, value carries its own expiry
-  if (path === "/login" && method === "POST") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    const token = crypto.randomUUID();
-    const expires = Date.now() + 60 * 60 * 1000;
-    await env.SESSIONS.put(token, JSON.stringify({ user: "demo", expires }));
-    return json({ token, expires });
-  }
-
-  // GET /whoami -> resolve a session token
-  if (path === "/whoami") {
-    slow = await gate(env.READS, "r:", request);
-    if (slow) return slow;
-    const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    if (!token || token.length > 128) return json({ error: "no session" }, 401);
-    const raw = await env.SESSIONS.get(token);
-    if (!raw) return json({ error: "no session" }, 401);
-    return json(JSON.parse(raw));
-  }
-
-  // POST /notes {title, body}
-  if (path === "/notes" && method === "POST") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    const parsed = await readJson(request, 8192);
-    if (parsed.error) return refusal(parsed.status, parsed.error);
-    const title = textField(parsed.value, "title", "title", 200, false);
-    if (title.error) return refusal(400, title.error);
-    const text = parsed.value.body === undefined || parsed.value.body === null ? "" : parsed.value.body;
-    if (!isText(text)) return refusal(400, "body must be text");
-    if (text.length > 4000) return refusal(400, "body is too long: at most 4000 characters, this has " + text.length);
-    const res = await env.DB.prepare("INSERT INTO notes (title, body, created) VALUES (?, ?, ?)")
-      .bind(title.value || "untitled", text, new Date().toISOString())
-      .run();
-    const id = res.meta.last_row_id;
-    // The demo keeps the newest 200 notes.
-    await env.DB.prepare("DELETE FROM notes WHERE id <= (SELECT max(id) FROM notes) - 200").run();
-    await env.EMAILS.send({ noteId: id }); // notify asynchronously
-    return json({ id }, 201);
-  }
-
-  // GET /notes
-  if (path === "/notes" && method === "GET") {
-    slow = await gate(env.READS, "r:", request);
-    if (slow) return slow;
-    return json(
-      (await env.DB.prepare("SELECT id, title, created, attachment FROM notes ORDER BY id DESC LIMIT 50").all())
-        .results,
-    );
-  }
-
-  // POST /r2/direct-upload creates a one-use URL whose PUT body bypasses
-  // the normal handler Request buffer. The harness uses a body larger than
-  // SB_REQUEST_BODY_MAX to exercise standalone native ingress. The ticket is
-  // never for more than the room the bucket has left.
-  if (path === "/r2/direct-upload" && method === "POST") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    slow = await gate(env.BULK, "b:", request);
-    if (slow) return slow;
-    const used = await bucketUsage(env, "");
-    const room = totalCap(env) - used.bytes;
-    if (used.truncated || room < 1024) {
-      return refusal(409, "the demo bucket is full: " + fmtKb(used.bytes) + " of " + fmtKb(totalCap(env)) + " stored");
-    }
-    const key = "direct-" + Date.now() + ".txt";
-    const ticket = await env.UPLOADS.createUploadUrl(key, { maxBytes: Math.min(5 * 1024 * 1024, room) });
-    return json(Object.assign({ key }, ticket), 201);
-  }
-  if (path === "/r2/direct-download" && method === "GET") {
-    slow = await gate(env.READS, "r:", request);
-    if (slow) return slow;
-    const key = url.searchParams.get("key") || "";
-    if (!key || key.length > 256) return refusal(400, "key is required, at most 256 characters");
-    return json(await env.UPLOADS.createDownloadUrl(key), 201);
-  }
-
-  // GET /notes/:id  -> note + a fresh view count from the Durable Object
-  const noteMatch = /^\/notes\/(\d+)$/.exec(path);
-  if (noteMatch && method === "GET") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    const id = noteMatch[1];
-    if (id.length > 9) return json({ error: "not found" }, 404);
-    const note = await env.DB.prepare("SELECT * FROM notes WHERE id = ?").bind(id).first();
-    if (!note) return json({ error: "not found" }, 404);
-    const stub = env.VIEWS.get(env.VIEWS.idFromName("note:" + id));
-    const views = Number(await (await stub.fetch("https://do/incr", { method: "POST" })).text());
-    return json({ note, views });
-  }
-
-  // POST /notes/:id/attach  (raw body is the file)
-  const attachMatch = /^\/notes\/(\d+)\/attach$/.exec(path);
-  if (attachMatch && method === "POST") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    slow = await gate(env.BULK, "b:", request);
-    if (slow) return slow;
-    const id = attachMatch[1];
-    if (id.length > 9) return json({ error: "not found" }, 404);
-    // The runtime refuses an inbound body over SB_REQUEST_BODY_MAX (1 MiB by
-    // default) before this handler runs, so raising the demo's own guard only
-    // helps when that variable is raised too. Whole-object R2 either way:
-    // chunked put and streaming get are baronunread/sproutboat#56.
-    const body = request.body || "";
-    const cap = Math.min(uploadCap(env), 1048576);
-    const size = byteLength(body);
-    if (size > cap) return json({ error: "file too large — this build accepts " + fmtKb(cap) }, 413);
-    const used = await bucketUsage(env, "");
-    if (used.truncated || used.bytes + size > totalCap(env)) {
-      return json(
-        { error: "the demo bucket is full: " + fmtKb(used.bytes) + " of " + fmtKb(totalCap(env)) + " stored" },
-        409,
-      );
-    }
-    const key = "note-" + id + "-" + Date.now() + ".txt";
-    try {
-      await env.UPLOADS.put(key, body, { customMetadata: { noteId: id } });
-    } catch (e) {
-      return json({ error: "R2 put failed: " + ((e && e.message) || e) }, 502);
-    }
-    await env.DB.prepare("UPDATE notes SET attachment = ? WHERE id = ?").bind(key, id).run();
-    return json({ key });
-  }
-
-  // GET /attach/:key
-  const fileMatch = /^\/attach\/(.+)$/.exec(path);
-  if (fileMatch && method === "GET") {
-    slow = await gate(env.READS, "r:", request);
-    if (slow) return slow;
-    if (fileMatch[1].length > 300) return json({ error: "not found" }, 404);
-    const obj = await env.UPLOADS.get(decodeURIComponent(fileMatch[1]));
-    if (!obj) return json({ error: "not found" }, 404);
-    return new Response(await obj.text(), {
-      headers: { "content-type": "text/plain", etag: obj.httpEtag, "x-content-type-options": "nosniff" },
-    });
-  }
-
-  // GET /attachments -> R2 list (the first 100 objects in the bucket)
-  if (path === "/attachments" && method === "GET") {
-    slow = await gate(env.READS, "r:", request);
-    if (slow) return slow;
-    const list = await env.UPLOADS.list({ limit: 100 });
-    return json(list.objects.map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded, httpEtag: o.httpEtag })));
-  }
-
-  // GET /hash -> crypto.subtle digest + HMAC (#133), no binding needed. It costs
-  // CPU, so it shares the writes budget.
-  if (path === "/hash") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    return asyncHash();
-  }
-
-  // GET /throttle -> rate-limiter binding (#69). limit 3 / 60s per key.
-  // resetAt (epoch ms) turns a rejection into an accurate Retry-After.
-  if (path === "/throttle") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    const key = url.searchParams.get("key") || "test";
-    if (key.length > 64) return refusal(400, "key is too long: at most 64 characters");
-    const r = await env.THROTTLE.limit({ key: "demo:" + key });
-    if (!r.success) {
-      const retry = Math.max(1, Math.ceil((r.resetAt - Date.now()) / 1000));
-      return new Response(JSON.stringify({ success: false, resetAt: r.resetAt }), {
-        status: 429,
-        headers: { "content-type": "application/json", "retry-after": String(retry) },
-      });
-    }
-    return json({ success: true, resetAt: r.resetAt });
-  }
-
-  // GET /quote -> outbound fetch to env.QUOTE_URL
-  if (path === "/quote") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    const r = await fetch(env.QUOTE_URL);
-    return new Response(r.body, { status: r.status, headers: { "content-type": "application/json" } });
-  }
-
-  // GET /egress?to=<url> -> what fetch() did with it. A private address is
-  // refused with a message naming it (#174); a redirect comes back unfollowed.
-  if (path === "/egress") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    const to = url.searchParams.get("to") || "";
-    if (!to || to.length > 2048) return refusal(400, "to is required, at most 2048 characters");
-    if (to.indexOf("http://") !== 0 && to.indexOf("https://") !== 0)
-      return refusal(400, "to must be an http:// or https:// URL");
-    try {
-      const r = await fetch(to, { redirect: "manual" });
-      return json({ status: r.status, location: r.headers.get("location") });
-    } catch (error) {
-      return json({ error: String(error && error.message) });
-    }
-  }
-
-  // GET /admin/stats -> secret-gated dashboard feed: one number per binding.
-  // A wrong token counts against env.THROTTLE, so it cannot be guessed at speed.
-  if (path === "/admin/stats") {
-    if (request.headers.get("x-admin-token") !== env.ADMIN_TOKEN) {
-      slow = await gate(env.THROTTLE, "admin-token:", request);
-      if (slow) return slow;
-      return json({ error: "forbidden" }, 403);
-    }
-    const metrics = await env.METRICS.query({ limit: 8 });
-    return json({
-      site: env.SITE_NAME,
-      kv_sessions: (await sessionNames(env)).length,
-      d1_notes: await env.DB.prepare("SELECT count(*) AS n FROM notes").first("n"),
-      r2_objects: (await env.UPLOADS.list()).objects.length,
-      queue_emails_processed: await env.DB.prepare("SELECT count(*) AS n FROM email_log").first("n"),
-      cron_heartbeats: await env.DB.prepare("SELECT count(*) AS n FROM heartbeat").first("n"),
-      do_alarm_rollups: await env.DB.prepare("SELECT count(*) AS n FROM view_rollup").first("n"),
-      analytics_points: metrics.count,
-      analytics_recent: metrics.rows.map((r) => ({ at: r.timestamp, method: r.blobs[0], path: r.blobs[1] })),
-      last_heartbeat: await env.DB.prepare("SELECT at, cron FROM heartbeat ORDER BY id DESC LIMIT 1").first(),
-    });
-  }
-
-  // GET /peer -> env.PEER.fetch(): a service binding calling another
-  // deployment through the edge (#48). Standalone binaries have no edge, so
-  // the binding is absent there and this route says so.
-  if (path === "/peer") {
-    slow = await gate(env.WRITES, "w:", request);
-    if (slow) return slow;
-    if (!env.PEER) return json({ error: "no service binding in this build" }, 501);
-    const res = await env.PEER.fetch(new Request("https://peer/random"));
-    return json({ status: res.status, body: res.text ? await res.text() : "" });
-  }
-
-  // GET /async -> the one promise-returning route. Everything else here is
-  // sync (http-sync-v0), but a handler may return a promise and the prelude
-  // has to hand it straight back — Porffor's server resolves the handler's
-  // own promise and nothing derived from it. Without a route exercising this,
-  // an async-hostile prelude change hangs every async worker silently.
-  if (path === "/async" && method === "GET") return asyncEcho(path);
-
-  // Anything else GET -> static assets (env.ASSETS), so `/` serves the UI and
-  // `/app.js` etc. resolve. run_sprout_first:true routes every path here first.
-  if (method === "GET") return await env.ASSETS.fetch(request);
-  return json({ error: "not found", path }, 404);
-}
-
 // GET /healthz -> { ok: true } and nothing else: cheap enough to poll every minute. It answers from the
 // worker alone, so a 200 says the app is up and serving; it does not read D1, KV or R2.
 function healthz(request) {
@@ -1718,7 +1391,11 @@ function healthz(request) {
 }
 
 export default {
-  async fetch(request) {
+  /**
+   * @param {Request} request
+   * @param {Env} env
+   */
+  async fetch(request, env) {
     const t0 = clock();
     const url = new URL(request.url);
     const path = url.pathname;
@@ -1728,11 +1405,13 @@ export default {
       await ensureSchema(env);
 
       // analytics: one point per request
-      await env.METRICS.writeDataPoint({ blobs: [request.method, path], indexes: [path], doubles: [1] });
+      env.METRICS.writeDataPoint({ blobs: [request.method, path], indexes: [path], doubles: [1] });
 
       // The dashboard's JSON API, handled in api() above.
       if (path.indexOf("/api/") === 0) return await api(request, env, url, path, t0);
-      return await plain(request, env, url, path);
+      // Anything else GET is the page or one of its files (env.ASSETS); `run_sprout_first: true` sends every path here first.
+      if (request.method === "GET") return await env.ASSETS.fetch(request);
+      return json({ error: "not found", path }, 404);
     } catch (e) {
       // Whatever went wrong stays in the log; a visitor gets no internals.
       console.log("500 " + request.method + " " + path + ": " + String((e && e.message) || e));
@@ -1741,64 +1420,52 @@ export default {
     }
   },
 
-  // cron */1: prune expired sessions, record a heartbeat. cron */15: delete expired files. cron 0 4 * * *: the daily reset.
-  async scheduled(event) {
+  // cron */1: record how long the run took. cron */15: delete expired files. cron 0 4 * * *: the daily reset.
+  /**
+   * @param {ScheduledController} controller
+   * @param {Env} env
+   */
+  async scheduled(controller, env) {
     const started = clock();
     await ensureSchema(env);
-    if (event.cron === DAILY_RESET) {
-      await dailyReset(env, event);
+    if (controller.cron === DAILY_RESET) {
+      await dailyReset(env, controller);
       return;
     }
-    if (event.cron === FILE_SWEEP) {
+    if (controller.cron === FILE_SWEEP) {
       // Expired files and abandoned chunks, nothing else: the scheduledTime is the clock.
-      await purgeExpired(env, Number(event.scheduledTime) || Date.now());
+      await purgeExpired(env, Number(controller.scheduledTime) || Date.now());
       await sweepChunks(env);
       return;
     }
-    const now = Date.now();
-    const keys = await sessionNames(env);
-    for (let i = 0; i < keys.length; i++) {
-      // The dashboard's KV counter lives in this namespace; only sessions expire.
-      if (keys[i].indexOf("counter:") === 0) continue;
-      const raw = await env.SESSIONS.get(keys[i]);
-      if (raw) {
-        const s = JSON.parse(raw);
-        if (!s.expires || s.expires < now) await env.SESSIONS.delete(keys[i]);
-      }
-    }
-    await env.DB.prepare("INSERT INTO heartbeat (at, cron) VALUES (?, ?)")
-      .bind(new Date(event.scheduledTime).toISOString(), event.cron)
-      .run();
-    await env.DB.prepare("DELETE FROM heartbeat WHERE id <= (SELECT max(id) FROM heartbeat) - 200").run();
     // Spent allowances of hours and days gone by.
     await env.DB.prepare("DELETE FROM quota WHERE expires < ?").bind(Date.now()).run();
     // The dashboard's feed reads this row: how long the run took.
     await env.DB.prepare("INSERT INTO events (kind, label, ms, at) VALUES ('cron', ?, ?, ?)")
-      .bind(event.cron, ms2(started), new Date().toISOString())
+      .bind(controller.cron, ms2(started), new Date().toISOString())
       .run();
     await trimEvents(env);
   },
 
-  // queue consumer for EMAILS: pretend to send, log to D1
-  async queue(batch) {
+  // queue consumer for EMAILS: a job from the dashboard records how long it waited in the queue (ms between send
+  // and delivery) next to the work itself, as an event the feed reads back.
+  /**
+   * @param {MessageBatch} batch
+   * @param {Env} env
+   */
+  async queue(batch, env) {
     await ensureSchema(env);
-    for (let i = 0; i < batch.messages.length; i++) {
-      const m = batch.messages[i];
+    for (const message of batch.messages) {
       const started = clock();
-      await env.DB.prepare("INSERT INTO email_log (note_id, sent_at) VALUES (?, ?)")
-        .bind(Number(m.body && m.body.noteId) || 0, new Date().toISOString())
-        .run();
-      await env.DB.prepare("DELETE FROM email_log WHERE id <= (SELECT max(id) FROM email_log) - 200").run();
-      // A job from the dashboard: record how long it waited in the queue (ms
-      // between send and delivery) next to the work itself.
-      if (m.body && m.body.kind === "job") {
-        const waited = Math.max(0, Date.now() - Number(m.body.sent || 0));
+      const job = message.body;
+      if (job && job.kind === "job") {
+        const waited = Math.max(0, Date.now() - Number(job.sent || 0));
         await env.DB.prepare("INSERT INTO events (kind, label, ms, at) VALUES ('processed', ?, ?, ?)")
-          .bind(String(m.body.label || "job"), waited + ms2(started), new Date().toISOString())
+          .bind(String(job.label || "job"), waited + ms2(started), new Date().toISOString())
           .run();
         await trimEvents(env);
       }
-      m.ack();
+      message.ack();
     }
   },
 };

@@ -9,7 +9,6 @@
   "compatibility_date": "2026-11-18",
   "vars": {
     "SITE_NAME": "Sproutboat Notes",
-    "QUOTE_URL": "https://api.quotable.local/random",
     "MAX_UPLOAD_BYTES": "1048576",
     // The whole demo bucket: every file together, so a stranger cannot fill the disk.
     "MAX_TOTAL_BYTES": "8388608",
@@ -22,7 +21,7 @@
   "r2_buckets": ["UPLOADS"],
   "queues": ["EMAILS"],
   "analytics_engine_datasets": ["METRICS"],
-  "durable_objects": { "VIEWS": "ViewCounter", "ROOM": "ChatRoom" },
+  "durable_objects": { "ROOM": "ChatRoom" },
   // Every one is a budget per client address (see src/index.js, gate()).
   "ratelimiters": [
     // the secret check and failed admin tokens
@@ -34,7 +33,7 @@
     // the dashboard GET routes
     { "binding": "READS", "limit": 240, "period": 60 },
   ],
-  // */1 prunes sessions and logs a heartbeat; */15 deletes the files whose hour is up (and chunks of
+  // */1 records a run in the events feed; */15 deletes the files whose hour is up (and chunks of
   // abandoned uploads); 0 4 * * * resets the demo data (UTC)
   "triggers": { "crons": ["*/1 * * * *", "*/15 * * * *", "0 4 * * *"] },
   "assets": {

@@ -119,10 +119,29 @@ type Vars = {
 };
 type Limiter = { limit(arg: { key: string }): Promise<{ success: boolean; resetAt: number }> };
 type Limiters = { READS?: Limiter; WRITES?: Limiter };
+type Bindings = Vars &
+  Limiters & {
+    DB: ReturnType<typeof fakeD1>;
+    UPLOADS: ReturnType<typeof fakeBucket>;
+    METRICS: { writeDataPoint(): void };
+  };
 type Worker = {
-  fetch(request: Request): Promise<Response>;
-  scheduled(event: { cron: string; scheduledTime: number }): Promise<void>;
+  fetch(request: Request, env: Bindings): Promise<Response>;
+  scheduled(controller: { cron: string; scheduledTime: number }, env: Bindings): Promise<void>;
 };
+/** What `cloudflare:workers` gives a Durable Object class: `this.ctx` and `this.env`, set by the constructor. */
+class DurableObjectBase {
+  constructor(
+    readonly ctx: RoomState,
+    readonly env: Record<string, never>,
+  ) {}
+}
+Bun.plugin({
+  name: "cloudflare-workers",
+  setup(build) {
+    build.module("cloudflare:workers", () => ({ exports: { DurableObject: DurableObjectBase }, loader: "object" }));
+  },
+});
 let vars: Vars = {};
 let limiters: Limiters = {};
 let worker: Worker;
@@ -149,32 +168,35 @@ type Room = {
 };
 let ChatRoom: new (state: RoomState, env: Record<string, never>) => Room;
 
-function freshEnv() {
+let env: Bindings;
+let loads = 0;
+/**
+ * New bindings, and a fresh copy of the worker: it creates its tables once per process, so each test, with its own
+ * in-memory database, needs a process of its own.
+ */
+async function freshEnv() {
   bucket = fakeBucket();
   db = new Database(":memory:");
   dbCalls.calls = 0;
-  // The worker reads its bindings from the global `env`, as the runtime's prelude provides it.
-  Object.assign(globalThis, {
-    env: { ...vars, ...limiters, DB: fakeD1(db, dbCalls), UPLOADS: bucket, METRICS: { writeDataPoint() {} } },
-  });
+  // The bindings the handler gets as its second argument.
+  env = { ...vars, ...limiters, DB: fakeD1(db, dbCalls), UPLOADS: bucket, METRICS: { writeDataPoint() {} } };
+  const module = await import(`./src/index.js?load=${++loads}`);
+  worker = module.default;
+  ChatRoom = module.ChatRoom;
 }
 
 beforeAll(async () => {
   Date.now = () => clock;
-  freshEnv();
-  const module = await import("./src/index.js");
-  worker = module.default;
-  ChatRoom = module.ChatRoom;
+  await freshEnv();
 });
 afterAll(() => {
   Date.now = realNow;
-  Reflect.deleteProperty(globalThis, "env");
 });
-beforeEach(() => {
+beforeEach(async () => {
   clock = START;
   vars = {};
   limiters = {};
-  freshEnv();
+  await freshEnv();
 });
 
 const BASE = "https://kitchen-sink.test";
@@ -184,7 +206,7 @@ const hex16 = () => (nextId++).toString(16).padStart(16, "0");
 function call(path: string, init: RequestInit = {}, ip = "198.51.100.1") {
   const headers = new Headers(init.headers);
   if (!headers.has("x-forwarded-for")) headers.set("x-forwarded-for", ip);
-  return worker.fetch(new Request(BASE + path, { ...init, headers }));
+  return worker.fetch(new Request(BASE + path, { ...init, headers }), env);
 }
 
 const obj = (value: JsonValue): JsonObject => jsonObject(value) ?? {};
@@ -238,7 +260,7 @@ describe("/healthz", () => {
   test("is not rate limited: a monitor polling every second is always answered", async () => {
     const limited: Limiter = { limit: async () => ({ success: false, resetAt: clock + 60000 }) };
     limiters = { READS: limited, WRITES: limited };
-    freshEnv();
+    await freshEnv();
     for (let i = 0; i < 5; i++) expect((await call("/healthz")).status).toBe(200);
     expect((await call("/api/r2")).status).toBe(429);
   });
@@ -361,7 +383,7 @@ describe("expiry", () => {
     advance(25 * 60000);
     // old.txt is 65 minutes old, new.txt 25. Nobody has listed or fetched anything since.
     expect([...bucket.objects.keys()].some((k) => k === "files/old.txt")).toBe(true);
-    await worker.scheduled({ cron: "*/15 * * * *", scheduledTime: clock });
+    await worker.scheduled({ cron: "*/15 * * * *", scheduledTime: clock }, env);
     const keys = [...bucket.objects.keys()];
     expect(keys.filter((k) => k.startsWith("files/"))).toEqual(["files/new.txt"]);
     expect(keys.filter((k) => k.startsWith("chunks/")).length).toBe(1);
@@ -370,7 +392,7 @@ describe("expiry", () => {
 
   test("expired files free their room before an upload is counted against the caps", async () => {
     vars = { MAX_TOTAL_BYTES: String(2 * MIB) };
-    freshEnv();
+    await freshEnv();
     expect((await upload("a.bin", "application/octet-stream", new Uint8Array(MIB), "198.51.100.1")).status).toBe(201);
     expect((await upload("b.bin", "application/octet-stream", new Uint8Array(MIB), "198.51.100.2")).status).toBe(201);
     expect((await upload("c.bin", "application/octet-stream", new Uint8Array(MIB), "198.51.100.3")).status).toBe(409);
@@ -381,7 +403,7 @@ describe("expiry", () => {
 
   test("FILE_TTL_SECONDS sets the hour", async () => {
     vars = { FILE_TTL_SECONDS: "120" };
-    freshEnv();
+    await freshEnv();
     await upload("a.txt", "text/plain", "hi");
     advance(119000);
     expect((await file("a.txt")).status).toBe(200);
@@ -407,7 +429,7 @@ describe("daily upload quota", () => {
 
   test("an address that has spent its day is refused with a 429 and the seconds to 04:00 UTC", async () => {
     vars = { MAX_UPLOAD_PER_DAY: String(3 * MIB) };
-    freshEnv();
+    await freshEnv();
     for (const n of ["a", "b", "c"])
       expect((await upload(n + ".bin", "application/octet-stream", body(MIB))).status).toBe(201);
     const refused = await upload("d.bin", "application/octet-stream", body(1));
@@ -425,7 +447,7 @@ describe("daily upload quota", () => {
 
   test("another address has its own day", async () => {
     vars = { MAX_UPLOAD_PER_DAY: String(MIB) };
-    freshEnv();
+    await freshEnv();
     expect((await upload("a.bin", "application/octet-stream", body(MIB), "198.51.100.1")).status).toBe(201);
     expect((await upload("b.bin", "application/octet-stream", body(1), "198.51.100.1")).status).toBe(429);
     expect((await upload("c.bin", "application/octet-stream", body(MIB), "198.51.100.2")).status).toBe(201);
@@ -433,7 +455,7 @@ describe("daily upload quota", () => {
 
   test("the bytes a file declares are charged when its first chunk arrives, and a refusal charges nothing", async () => {
     vars = { MAX_UPLOAD_PER_DAY: String(10 * MIB), MAX_UPLOAD_BYTES: String(25 * MIB) };
-    freshEnv();
+    await freshEnv();
     // A 6 MiB file declared, only its first chunk sent: 6 MiB spent.
     expect((await upload("a.bin", "application/octet-stream", body(MIB), "198.51.100.1", 6 * MIB)).status).toBe(200);
     const refused = await upload("b.bin", "application/octet-stream", body(MIB), "198.51.100.1", 5 * MIB);
@@ -445,7 +467,7 @@ describe("daily upload quota", () => {
 
   test("the hour turning over does not give the day back", async () => {
     vars = { MAX_UPLOAD_PER_DAY: String(2 * MIB), MAX_UPLOAD_PER_HOUR: String(10 * MIB) };
-    freshEnv();
+    await freshEnv();
     await upload("a.bin", "application/octet-stream", body(MIB));
     await upload("b.bin", "application/octet-stream", body(MIB));
     advance(2 * 3600000);
@@ -457,7 +479,7 @@ describe("daily upload quota", () => {
 
   test("the hour's allowance still applies, and names its window", async () => {
     vars = { MAX_UPLOAD_PER_HOUR: String(MIB), MAX_UPLOAD_PER_DAY: String(10 * MIB) };
-    freshEnv();
+    await freshEnv();
     await upload("a.bin", "application/octet-stream", body(MIB));
     const refused = await upload("b.bin", "application/octet-stream", body(1));
     expect(refused.status).toBe(429);
@@ -468,7 +490,7 @@ describe("daily upload quota", () => {
 
   test("a new day (04:00 UTC) starts a new allowance", async () => {
     vars = { MAX_UPLOAD_PER_DAY: String(MIB) };
-    freshEnv();
+    await freshEnv();
     await upload("a.bin", "application/octet-stream", body(MIB));
     expect((await upload("b.bin", "application/octet-stream", body(1))).status).toBe(429);
     // 03:59 the next morning: still the same day.
@@ -480,7 +502,7 @@ describe("daily upload quota", () => {
 
   test("downloads have no daily quota; only the hourly one", async () => {
     vars = { MAX_UPLOAD_PER_DAY: String(MIB), MAX_DOWNLOAD_PER_HOUR: String(1000) };
-    freshEnv();
+    await freshEnv();
     await upload("a.bin", "application/octet-stream", body(600));
     expect((await file("a.bin")).status).toBe(200);
     const second = await file("a.bin");
