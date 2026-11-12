@@ -58,7 +58,21 @@ export class ViewCounter {
 // The room is public, so it defends itself: a frame size cap, a message rate per
 // connection, a connection cap per address and for the room, and every field a
 // client sends is checked before it is stored or echoed.
-const CHAT = { frame: 1024, text: 120, name: 20, perSecond: 3, perTenSeconds: 12, perAddress: 5, room: 60, strikes: 8 };
+// text counts characters (code points, so one emoji is one); frame counts UTF-8 bytes. A frame of 4096
+// bytes holds 1,000 four-byte characters (4,000 bytes) and the JSON around them. The history is 30
+// messages (HISTORY), so the stored room is at most 30 x 4 KB = 120 KB: well inside a Durable Object's
+// memory and under the 128 KiB a single storage value may hold.
+const CHAT = {
+  frame: 4096,
+  text: 1000,
+  name: 20,
+  perSecond: 3,
+  perTenSeconds: 12,
+  perAddress: 5,
+  room: 60,
+  strikes: 8,
+};
+const HISTORY = 30;
 
 export class ChatRoom {
   constructor(state, env) {
@@ -75,9 +89,9 @@ export class ChatRoom {
       this.broadcast({ type: "history", messages: [] });
       return new Response("cleared");
     }
-    if (request.headers.get("Upgrade") !== "websocket") {
-      return new Response("expected a WebSocket upgrade", { status: 426 });
-    }
+    // The limits are checked before the upgrade, so a page whose socket failed to open (a browser says
+    // nothing about why) can ask with a plain GET: 503 means the room is full and will not take it, 429
+    // means too many connections from its address, 426 means there is no limit in the way.
     const sockets = this.state.getWebSockets();
     if (sockets.length >= CHAT.room) return refusal(503, "the room is full: " + CHAT.room + " connections");
     const who = clientIp(request);
@@ -90,6 +104,9 @@ export class ChatRoom {
       if (mine >= CHAT.perAddress) {
         return refusal(429, "too many open connections from your address: " + CHAT.perAddress + " at most");
       }
+    }
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return new Response("expected a WebSocket upgrade", { status: 426 });
     }
     const pair = new WebSocketPair();
     this.state.acceptWebSocket(pair[1]);
@@ -155,12 +172,14 @@ export class ChatRoom {
       return;
     }
     const raw = String(message);
-    if (raw.length > CHAT.frame) {
+    // A string is never longer in UTF-16 units than in UTF-8 bytes, so the cheap test goes first and the
+    // exact count only runs on a frame that already fits in units.
+    if (raw.length > CHAT.frame || utf8Bytes(raw) > CHAT.frame) {
       ws.send(
         JSON.stringify({
           type: "error",
           code: "too_large",
-          error: "that frame is too large: " + CHAT.frame + " characters at most",
+          error: "that frame is too large: " + CHAT.frame + " bytes at most",
         }),
       );
       return;
@@ -188,9 +207,9 @@ export class ChatRoom {
       ws.send(JSON.stringify({ type: "error", code: "bad_frame", error: "text must be a string" }));
       return;
     }
-    const text = tidy(frame.text);
+    const text = tidy(frame.text, true);
     if (!text) return;
-    if (text.length > CHAT.text) {
+    if (points(text) > CHAT.text) {
       ws.send(
         JSON.stringify({
           type: "error",
@@ -203,7 +222,7 @@ export class ChatRoom {
     const entry = { name: who.name || "guest", text, at: Date.now() };
     const history = (await this.state.storage.get("history")) || [];
     history.push(entry);
-    while (history.length > 30) history.shift();
+    while (history.length > HISTORY) history.shift();
     await this.state.storage.put("history", history);
     // `sent` is the client's own clock value, echoed so it can time the round trip.
     // Only a plain number goes out: the field reaches every client in the room.
@@ -292,18 +311,24 @@ const DAY = 86400000;
 // Text a person typed, made safe to store and show: control characters become
 // spaces, bidirectional overrides (which can make a name read as something else)
 // and unpaired surrogates (which are not text) are dropped, runs of spaces
-// collapse, and the ends are trimmed.
-function tidy(input) {
+// collapse, and the ends are trimmed. With `lines` a line break is kept (a run of them becomes at
+// most one blank line); without it a break is a space, as in a name.
+function joint(gap, breaks) {
+  return breaks > 1 ? "\n\n" : breaks === 1 ? "\n" : gap ? " " : "";
+}
+function tidy(input, lines) {
   let out = "";
   let gap = false;
+  let breaks = 0;
   const text = String(input);
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i);
     if (c >= 0xd800 && c <= 0xdbff) {
       const d = text.charCodeAt(i + 1);
       if (d >= 0xdc00 && d <= 0xdfff) {
-        if (gap && out) out += " ";
+        if (out) out += joint(gap, breaks);
         gap = false;
+        breaks = 0;
         out += text[i] + text[i + 1];
         i++;
       }
@@ -311,15 +336,52 @@ function tidy(input) {
     }
     if (c >= 0xdc00 && c <= 0xdfff) continue;
     if ((c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069) || c === 0xfeff) continue;
+    if (lines && (c === 10 || c === 0x2028 || c === 0x2029)) {
+      breaks++;
+      continue;
+    }
     if (c <= 32 || (c >= 127 && c <= 160) || c === 0x2028 || c === 0x2029) {
       gap = true;
       continue;
     }
-    if (gap && out) out += " ";
+    if (out) out += joint(gap, breaks);
     gap = false;
+    breaks = 0;
     out += text[i];
   }
   return out;
+}
+
+// Characters in tidy text, a surrogate pair counting once (tidy leaves only whole pairs).
+function points(text) {
+  let n = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 0xdc00 || c > 0xdfff) n++;
+  }
+  return n;
+}
+
+// Bytes the text takes in UTF-8, as a WebSocket frame carries it (a lone surrogate counts as the three
+// bytes of U+FFFD).
+function utf8Bytes(text) {
+  let n = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (
+      c >= 0xd800 &&
+      c <= 0xdbff &&
+      i + 1 < text.length &&
+      text.charCodeAt(i + 1) >= 0xdc00 &&
+      text.charCodeAt(i + 1) <= 0xdfff
+    ) {
+      n += 4;
+      i++;
+    } else n += 3;
+  }
+  return n;
 }
 
 // One field of a JSON body: text, within a limit. Returns { value } or { error }.
@@ -1374,7 +1436,9 @@ async function api(request, env, url, path, t0) {
 
   // The chat socket: hand the upgrade to the one room object.
   if (path === "/api/chat") {
-    if (request.headers.get("Upgrade") !== "websocket")
+    // ?probe is the one plain GET the room answers: 503 (full), 429 (this address holds its five) or 426,
+    // so a page whose socket did not open can tell a refusal that will pass from one that will not.
+    if (request.headers.get("Upgrade") !== "websocket" && url.searchParams.get("probe") === null)
       return timed({ error: "expected a WebSocket upgrade" }, 426, t0);
     return env.ROOM.get(env.ROOM.idFromName("main")).fetch(request);
   }

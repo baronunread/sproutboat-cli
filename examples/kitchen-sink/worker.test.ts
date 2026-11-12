@@ -126,6 +126,28 @@ type Worker = {
 let vars: Vars = {};
 let limiters: Limiters = {};
 let worker: Worker;
+type Attachment = { name: string; ip: string; t1: number; n1: number; t10: number; n10: number; strikes: number };
+type HistoryEntry = { name: string; text: string; at: number };
+type RoomSocket = {
+  sent: JsonObject[];
+  send(text: string): void;
+  close(code: number): void;
+  serializeAttachment(value: Attachment): void;
+  deserializeAttachment(): Attachment;
+};
+type RoomState = {
+  getWebSockets(): RoomSocket[];
+  storage: {
+    get(key: string): Promise<HistoryEntry[] | undefined>;
+    put(key: string, value: HistoryEntry[]): Promise<void>;
+    delete(key: string): Promise<void>;
+  };
+};
+type Room = {
+  webSocketMessage(ws: RoomSocket, message: string): Promise<void>;
+  fetch(request: Request): Promise<Response>;
+};
+let ChatRoom: new (state: RoomState, env: Record<string, never>) => Room;
 
 function freshEnv() {
   bucket = fakeBucket();
@@ -142,6 +164,7 @@ beforeAll(async () => {
   freshEnv();
   const module = await import("./src/index.js");
   worker = module.default;
+  ChatRoom = module.ChatRoom;
 });
 afterAll(() => {
   Date.now = realNow;
@@ -463,5 +486,208 @@ describe("daily upload quota", () => {
     const second = await file("a.bin");
     expect(second.status).toBe(429);
     expect((await readObject(second)).window).toBe("hour");
+  });
+});
+
+/** A ChatRoom with a fake object state: sockets that record what they are sent, storage in a Map. */
+function fakeRoom() {
+  const sockets: RoomSocket[] = [];
+  const store = new Map<string, HistoryEntry[]>();
+  const state: RoomState = {
+    getWebSockets: () => sockets,
+    storage: {
+      async get(key) {
+        return store.get(key);
+      },
+      async put(key, value) {
+        store.set(key, value);
+      },
+      async delete(key) {
+        store.delete(key);
+      },
+    },
+  };
+  const room = new ChatRoom(state, {});
+  return { room, sockets, store };
+}
+function fakeSocket(ip = "198.51.100.9"): RoomSocket {
+  let attachment: Attachment = { name: "ada", ip, t1: 0, n1: 0, t10: 0, n10: 0, strikes: 0 };
+  const sent: JsonObject[] = [];
+  return {
+    sent,
+    send(text) {
+      sent.push(obj(parseJsonValue(text)));
+    },
+    close() {},
+    serializeAttachment(value) {
+      attachment = value;
+    },
+    deserializeAttachment() {
+      return attachment;
+    },
+  };
+}
+
+describe("chat room: message and frame caps", () => {
+  async function say(text: string, extra: Record<string, string | number> = {}) {
+    const { room, sockets, store } = fakeRoom();
+    const ws = fakeSocket();
+    sockets.push(ws);
+    await room.webSocketMessage(ws, JSON.stringify({ type: "msg", text, sent: 1, ...extra }));
+    return { ws, store };
+  }
+  const outcome = (ws: RoomSocket) => ws.sent.map((f) => String(f.code ?? f.type));
+
+  test("1,000 characters are accepted and broadcast whole", async () => {
+    const text = "a".repeat(1000);
+    const { ws, store } = await say(text);
+    expect(outcome(ws)).toEqual(["msg"]);
+    expect(ws.sent[0]!.text).toBe(text);
+    expect(store.get("history")?.length).toBe(1);
+  });
+
+  test("1,001 characters are refused with too_long, and nothing is stored", async () => {
+    const { ws, store } = await say("a".repeat(1001));
+    expect(outcome(ws)).toEqual(["too_long"]);
+    expect(String(ws.sent[0]!.error)).toContain("1000");
+    expect(store.has("history")).toBe(false);
+  });
+
+  test("1,000 four-byte emoji are accepted: the cap counts characters, the frame is 4 KB", async () => {
+    const text = "\u{1F600}".repeat(1000);
+    const frame = JSON.stringify({ type: "msg", text, sent: 1731412345678 });
+    expect(new TextEncoder().encode(frame).length).toBeGreaterThan(4000);
+    expect(new TextEncoder().encode(frame).length).toBeLessThanOrEqual(4096);
+    const { ws } = await say(text, { sent: 1731412345678 });
+    expect(outcome(ws)).toEqual(["msg"]);
+    expect(ws.sent[0]!.text).toBe(text);
+  });
+
+  test("1,001 emoji are refused with too_long (they fit the frame, not the cap)", async () => {
+    const { ws } = await say("\u{1F600}".repeat(1001));
+    expect(outcome(ws)).toEqual(["too_long"]);
+  });
+
+  test("1,000 CJK characters are accepted", async () => {
+    const { ws } = await say("\u4e2d".repeat(1000));
+    expect(outcome(ws)).toEqual(["msg"]);
+  });
+
+  test("a frame over 4096 bytes is refused with too_large, counted in bytes not characters", async () => {
+    // 1,000 emoji is within the text cap; the padding takes the frame past 4096 bytes.
+    const { ws } = await say("\u{1F600}".repeat(1000), { pad: "x".repeat(120) });
+    expect(outcome(ws)).toEqual(["too_large"]);
+    expect(String(ws.sent[0]!.error)).toContain("4096 bytes");
+    // 1,300 characters of 1-byte text are well inside 4096 bytes: only the text cap refuses them.
+    const plain = await say("a".repeat(1300));
+    expect(outcome(plain.ws)).toEqual(["too_long"]);
+  });
+
+  test("line breaks are kept (a run becomes one blank line) and a message of only breaks is dropped", async () => {
+    const { ws } = await say("  one\r\ntwo\n\n\n\nthree  four\n");
+    expect(ws.sent[0]!.text).toBe("one\ntwo\n\nthree four");
+    const empty = await say("\n\n \n");
+    expect(empty.ws.sent).toEqual([]);
+  });
+
+  test("a name stays on one line", async () => {
+    const { room, sockets } = fakeRoom();
+    const ws = fakeSocket();
+    sockets.push(ws);
+    await room.webSocketMessage(ws, JSON.stringify({ type: "hello", name: "A\nB" }));
+    expect(ws.deserializeAttachment().name).toBe("A B");
+  });
+
+  test("the history keeps 30 messages, and full ones are about 120 KB, under a 128 KiB value", async () => {
+    const { room, sockets, store } = fakeRoom();
+    const ws = fakeSocket();
+    sockets.push(ws);
+    for (let i = 0; i < 35; i++) {
+      clock += 5000;
+      await room.webSocketMessage(ws, JSON.stringify({ type: "msg", text: "\u{1F600}".repeat(1000), sent: i }));
+    }
+    const history = store.get("history") ?? [];
+    expect(history.length).toBe(30);
+    // Two bytes per UTF-16 unit, which is how a stored string weighs at most (an emoji is two units).
+    const bytes = JSON.stringify(history).length * 2;
+    expect(bytes).toBeLessThan(131072);
+  });
+
+  test("the per-second strike limits are unchanged: 4 frames in a second is a rate_limited error", async () => {
+    const { room, sockets } = fakeRoom();
+    const ws = fakeSocket();
+    sockets.push(ws);
+    for (let i = 0; i < 4; i++) await room.webSocketMessage(ws, JSON.stringify({ type: "msg", text: "hi", sent: i }));
+    expect(outcome(ws)).toEqual(["msg", "msg", "msg", "rate_limited"]);
+  });
+
+  test("a plain GET asks the room whether it would take the socket: 503 when full, 429 at the address cap, else 426", async () => {
+    const { room, sockets } = fakeRoom();
+    const probe = () =>
+      room
+        .fetch(new Request("https://room/", { headers: { "x-forwarded-for": "198.51.100.9" } }))
+        .then((r) => r.status);
+    expect(await probe()).toBe(426);
+    for (let i = 0; i < 5; i++) sockets.push(fakeSocket("198.51.100.9"));
+    expect(await probe()).toBe(429);
+    for (let i = 0; i < 55; i++) sockets.push(fakeSocket("203.0.113." + (i + 1)));
+    expect(await probe()).toBe(503);
+  });
+});
+
+/** What public/reconnect.js puts on the page's global. */
+type Rules = {
+  FIRST: number;
+  CEILING: number;
+  STABLE: number;
+  delay(attempt: number, random: number): number;
+  isFinal(code: number): boolean;
+  afterRefusal(status: number, retryAfter: string): { retry: boolean; minWait: number };
+};
+declare global {
+  var SBReconnect: Rules;
+}
+
+describe("chat reconnect rules (public/reconnect.js)", () => {
+  let rules: Rules;
+  beforeAll(async () => {
+    await import("./public/reconnect.js");
+    rules = globalThis.SBReconnect;
+  });
+
+  test("the first retries wait about half a second to a second, then the ceiling doubles to 30 s", () => {
+    expect(rules.delay(0, 0)).toBe(500);
+    expect(rules.delay(0, 1)).toBe(1000);
+    expect(rules.delay(1, 1)).toBe(2000);
+    expect(rules.delay(2, 1)).toBe(4000);
+    expect(rules.delay(4, 1)).toBe(16000);
+    expect(rules.delay(5, 1)).toBe(30000);
+    expect(rules.delay(40, 1)).toBe(30000);
+  });
+
+  test("the wait is jittered between the floor and the ceiling, and never below half a second", () => {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      for (const random of [0, 0.25, 0.5, 0.999]) {
+        const wait = rules.delay(attempt, random);
+        expect(wait).toBeGreaterThanOrEqual(rules.FIRST);
+        expect(wait).toBeLessThanOrEqual(rules.CEILING);
+      }
+    }
+    expect(rules.delay(3, 0.5)).toBeGreaterThan(rules.delay(3, 0.1));
+    expect(rules.STABLE).toBe(10000);
+  });
+
+  test("closes the room sends on purpose are final; a lost connection is retried", () => {
+    for (const code of [1008, 4008, 4000, 4999, 3000, 1002, 1003, 1007, 1009, 1010])
+      expect(rules.isFinal(code)).toBe(true);
+    for (const code of [1000, 1001, 1005, 1006, 1011, 1012, 1013, 1015]) expect(rules.isFinal(code)).toBe(false);
+  });
+
+  test("a socket that never opened: 503 (room full) stops, 429 waits at least what it says, the rest backs off", () => {
+    expect(rules.afterRefusal(503, "")).toEqual({ retry: false, minWait: 0 });
+    expect(rules.afterRefusal(429, "7")).toEqual({ retry: true, minWait: 7000 });
+    expect(rules.afterRefusal(429, "")).toEqual({ retry: true, minWait: 0 });
+    expect(rules.afterRefusal(426, "")).toEqual({ retry: true, minWait: 0 });
+    expect(rules.afterRefusal(0, "")).toEqual({ retry: true, minWait: 0 });
   });
 });

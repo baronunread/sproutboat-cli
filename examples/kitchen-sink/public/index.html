@@ -385,7 +385,10 @@
               >
                 <svg class="sb-icon"><use href="#i-up" /></svg>Choose file</button
               ><button class="btn sm" id="r2-sample" type="button">Upload note</button
-              ><span class="note">or drop any file, up to <span id="r2-cap">25 MB</span>. Files are deleted <span id="r2-ttl">an hour</span> after upload.</span>
+              ><span class="note"
+                >or drop any file, up to <span id="r2-cap">25 MB</span>. Files are deleted
+                <span id="r2-ttl">an hour</span> after upload.</span
+              >
               <div class="up" id="r2-up" hidden>
                 <span class="up-n" id="r2-up-name"></span><span class="up-p tnum" id="r2-up-pct"></span>
                 <div
@@ -457,17 +460,23 @@
               </button>
             </div>
             <form class="fl" id="chat-form" autocomplete="off">
-              <input
-                class="input grow"
+              <textarea
+                class="input grow chat-ta"
                 id="chat-in"
+                rows="1"
                 aria-label="Message to the room"
+                aria-describedby="chat-count"
                 placeholder="Message the room"
-                maxlength="120"
-              /><button class="btn sm primary" type="submit" id="chat-send">
+                enterkeyhint="send"
+              ></textarea
+              ><button class="btn sm primary" type="submit" id="chat-send">
                 <svg class="sb-icon"><use href="#i-send" /></svg>Send
               </button>
             </form>
-            <div class="frame" id="frame" role="status">No message yet</div>
+            <div class="frameRow" id="chat-frame">
+              <div class="frame" id="frame" role="status">No message yet</div>
+              <span class="count tnum" id="chat-count"></span>
+            </div>
             <div class="foot">
               <span>room “main” · one object per room</span><span class="tnum">last 30 messages kept</span>
             </div>
@@ -775,6 +784,7 @@ Loading…</pre>
       </div>
     </main>
 
+    <script src="/reconnect.js" defer></script>
     <script src="/app.js" defer></script>
   </body>
 </html>

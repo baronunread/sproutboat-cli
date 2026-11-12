@@ -468,3 +468,19 @@ kbd{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 
 .up .bar i.fill{transition:width 120ms linear}
 .up .btn{grid-area:x}
 .listbox.scroll{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 22px),transparent)}
+
+/* ---- chat: a message box that grows, a status that does not move anything ----------------------
+   The box grows from one line to five and then scrolls inside itself; the list above it keeps its size.
+   The count shares the line the status already has (its text gives way to it), so showing it moves nothing. */
+#chat-form{align-items:flex-end}
+.chat-ta{--lh:18px;--pv:7px;height:auto;min-height:32px;max-height:calc(var(--lh)*5 + var(--pv)*2);padding:var(--pv) 12px;line-height:var(--lh);resize:none;overflow-y:auto;scrollbar-width:thin;overflow-wrap:anywhere}
+@media(pointer:coarse){.chat-ta{--lh:22px;--pv:11px;min-height:44px}}
+.chat-ta[aria-invalid="true"]{box-shadow:inset 0 0 0 1.5px var(--sb-danger-fg)}
+.frameRow{position:relative;min-width:0}
+.frameRow.counting .frame{padding-inline-end:84px}
+.frameRow .count{position:absolute;inset-inline-end:0;top:0;height:16px;line-height:16px;font-family:var(--font-mono);font-size:11.5px;color:var(--sb-fg-muted);white-space:nowrap}
+.frameRow .count.over{color:var(--sb-danger-fg);font-weight:600}
+.chat .bub .tx{white-space:pre-wrap}
+#ws-state{min-width:96px;box-sizing:border-box}
+/* The status row is as tall as the Retry button from the start, so the button appearing moves nothing. */
+#t-do .row2{min-height:30px;align-items:center}
