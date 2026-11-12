@@ -1178,32 +1178,122 @@
     $("#who").title = text;
   }
 
+  // Connecting, and connecting again. One socket at a time: `socketGen` numbers every attempt, and a socket,
+  // a timer or a probe that belongs to an older number does nothing when it fires. While the page is not
+  // connected it retries by itself (backoff in reconnect.js) unless the room closed the socket on purpose:
+  // then it says why and waits for the button.
+  var socketGen = 0;
+  var retry = { attempt: 0, timer: 0, tick: 0, at: 0, stable: 0, final: false };
+  var RECONNECT = window.SBReconnect;
+
+  // One line in the list about the connection, replaced rather than added to each time.
+  var lastNote = null;
+  function statusNote(text, cls) {
+    if (lastNote && lastNote.parentNode === chatBox) chatBox.removeChild(lastNote);
+    chatNote(text, cls);
+    lastNote = chatBox.lastChild;
+  }
+
+  function stopRetry() {
+    clearTimeout(retry.timer);
+    clearInterval(retry.tick);
+    clearTimeout(retry.stable);
+    retry.timer = retry.tick = retry.stable = 0;
+  }
+
+  // Close the current socket without its close event being taken for the room's doing.
+  function dropSocket() {
+    socketGen++;
+    if (ws && ws.readyState < 2) {
+      try {
+        ws.close(1000, "reconnecting");
+      } catch {}
+    }
+    ws = null;
+  }
+
+  function setWho(text) {
+    $("#who").textContent = text;
+    $("#who").title = text;
+  }
+
+  function showWaiting() {
+    var left = Math.ceil((retry.at - Date.now()) / 1000);
+    setWho(left > 0 ? "Reconnecting in " + fmtWait(left) + "…" : "Reconnecting…");
+  }
+
+  // Reconnect after the backoff (and at least minWait ms). The button stays as "retry now".
+  function scheduleReconnect(minWait) {
+    stopRetry();
+    var gen = ++socketGen;
+    var wait = Math.max(RECONNECT.delay(retry.attempt, Math.random()), minWait || 0);
+    retry.attempt++;
+    retry.at = Date.now() + wait;
+    chatState("warn", "Retrying", "tri");
+    $("#ws-reconnect").textContent = "Retry now";
+    $("#ws-reconnect").hidden = false;
+    showWaiting();
+    if (!chatBox.children.length) statusNote("The room is not answering. This page keeps trying by itself.");
+    retry.tick = setInterval(showWaiting, 500);
+    retry.timer = setTimeout(function () {
+      if (gen === socketGen) connectChat();
+    }, wait);
+  }
+
+  // The room closed the socket on purpose (or refused it): say so and stop. The button starts over.
+  function giveUp(label, why) {
+    stopRetry();
+    retry.final = true;
+    chatState("bad", label, "tri");
+    setWho(why);
+    $("#ws-reconnect").textContent = "Reconnect";
+    $("#ws-reconnect").hidden = false;
+    statusNote(why + " Reconnect when you are ready.", "warn");
+    chatEnd();
+  }
+
   function connectChat() {
-    clearInterval(chat429.timer);
+    stopRetry();
+    dropSocket();
+    var gen = socketGen;
+    retry.final = false;
     $("#ws-reconnect").disabled = false;
-    clear(chatBox);
-    chatCount = 0;
     wsOpened = false;
-    $("#ws-reconnect").hidden = true;
-    chatState("", "Connecting", "ring");
+    // The list is left as it is: the room sends its history when the socket opens, and that replaces it.
+    $("#ws-reconnect").textContent = retry.attempt ? "Retry now" : "Reconnect";
+    $("#ws-reconnect").hidden = !retry.attempt;
+    chatState("", retry.attempt ? "Reconnecting" : "Connecting", "ring");
+    if (retry.attempt) setWho("Reconnecting…");
     var started = performance.now();
     var url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/chat";
+    var socket;
     try {
-      ws = new WebSocket(url);
+      socket = new WebSocket(url);
     } catch (e) {
       chatState("bad", "Unavailable", "tri");
       chatNote("This browser could not create the WebSocket: " + e.message, "bad");
       return;
     }
-    ws.addEventListener("open", function () {
+    ws = socket;
+    socket.addEventListener("open", function () {
+      if (gen !== socketGen) return;
       wsOpened = true;
       chatState("ok", "Open", "live");
+      $("#ws-reconnect").hidden = true;
       logLine("GET", "/api/chat", 101, null, false);
       $("#frame").textContent =
-        "Connected in " + fmtMs(performance.now() - started) + " ms (round trip, including the upgrade)";
-      ws.send(JSON.stringify({ type: "hello", name: myName }));
+        (retry.attempt ? "Reconnected" : "Connected") +
+        " in " +
+        fmtMs(performance.now() - started) +
+        " ms (round trip, including the upgrade)";
+      socket.send(JSON.stringify({ type: "hello", name: myName }));
+      // Open for long enough and the next loss starts the backoff over; a socket that drops sooner does not.
+      retry.stable = setTimeout(function () {
+        retry.attempt = 0;
+      }, RECONNECT.STABLE);
     });
-    ws.addEventListener("message", function (event) {
+    socket.addEventListener("message", function (event) {
+      if (gen !== socketGen) return;
       var msg;
       try {
         msg = JSON.parse(event.data);
@@ -1211,6 +1301,7 @@
         return;
       }
       if (msg.type === "history") {
+        // The whole room as it is now, so what was missed while away is back and nothing is shown twice.
         clear(chatBox);
         chatCount = 0;
         msg.messages.forEach(appendBubble);
@@ -1225,7 +1316,10 @@
           (msg.code === "rate_limited" ? "Slow down: " : "") + String(msg.error || "").replace(/^slow down: /, "");
         f.title = f.textContent;
         f.classList.add("warn");
-        if (lastText && !$("#chat-in").value) $("#chat-in").value = lastText;
+        if (lastText && !$("#chat-in").value) {
+          $("#chat-in").value = lastText;
+          chatInputChanged();
+        }
         lastText = "";
         clearTimeout(connectChat.warnTimer);
         connectChat.warnTimer = setTimeout(function () {
@@ -1240,73 +1334,161 @@
         }
       }
     });
-    ws.addEventListener("close", function () {
+    socket.addEventListener("close", function (event) {
+      if (gen !== socketGen) return;
+      clearTimeout(retry.stable);
+      ws = null;
       $("#ws-reconnect").hidden = false;
-      $("#who").textContent = "Not connected";
       if (wsOpened) {
-        chatState("warn", "Closed", "tri");
+        if (RECONNECT.isFinal(event.code)) {
+          var reason = event.reason && event.reason !== "bye" ? event.reason : "";
+          giveUp(
+            "Closed",
+            "The room closed this connection" + (reason ? ": " + reason : " (code " + event.code + ")") + ".",
+          );
+        } else {
+          scheduleReconnect(0);
+        }
       } else {
-        chatState("bad", "Failed", "tri");
-        clear(chatBox);
-        chatNote("The connection closed before it opened.", "bad");
-        explainRefusal();
+        explainRefusal(gen);
       }
     });
   }
 
-  // A browser does not say why a WebSocket upgrade failed, so ask the route once over plain HTTP:
-  // a 429 means this address is over its limit and says for how long.
-  async function explainRefusal() {
-    var reconnect = $("#ws-reconnect");
+  // A browser does not say why a WebSocket upgrade failed, so ask the route over plain HTTP, which the room
+  // answers with the same limits: 503 the room is full (do not go back), 429 a limit that passes (go back
+  // after the wait it names), anything else the network or the server being away (go back after the backoff).
+  async function explainRefusal(gen) {
+    chatState("warn", "Retrying", "tri");
+    setWho("Reconnecting…");
+    var status = 0;
+    var wait = "";
+    var message = "";
+    var abort = new AbortController();
+    var cut = setTimeout(function () {
+      abort.abort();
+    }, 4000);
     try {
-      var res = await api("/api/chat");
-      if (res.status === 429) {
-        chat429(res.retryAfter || 5);
-        return;
+      var res = await fetch("/api/chat?probe=1", { signal: abort.signal });
+      status = res.status;
+      wait = res.headers.get("retry-after") || "";
+      if (status === 429 || status === 503) {
+        var data = await res.json().catch(function () {
+          return null;
+        });
+        if (data) {
+          message = String(data.error || "");
+          if (!wait && data.retry_after) wait = String(data.retry_after);
+          if (!wait && data.resetAt) wait = String(Math.ceil((data.resetAt - Date.now()) / 1000));
+        }
       }
     } catch {}
-    clear(chatBox);
-    chatNote(
-      "The connection closed before it opened. Five connections per address and a connect rate limit apply. If neither fits, check that whatever serves this page forwards WebSocket upgrades to the app.",
-      "bad",
-    );
-    reconnect.hidden = false;
-  }
-
-  function chat429(retry) {
-    var reconnect = $("#ws-reconnect");
-    var until = Date.now() + retry * 1000;
-    reconnect.disabled = true;
-    clearInterval(chat429.timer);
-    function tick() {
-      var left = Math.ceil((until - Date.now()) / 1000);
-      clear(chatBox);
-      if (left <= 0) {
-        clearInterval(chat429.timer);
-        reconnect.disabled = false;
-        chatNote("You can reconnect now.");
-        return;
-      }
-      chatNote("Slow down: try again in " + fmtWait(left) + ".", "warn");
+    clearTimeout(cut);
+    if (gen !== socketGen) return;
+    var next = RECONNECT.afterRefusal(status, wait);
+    if (!next.retry) {
+      giveUp(
+        "Refused",
+        message ? message.charAt(0).toUpperCase() + message.slice(1) + "." : "The room refused the connection.",
+      );
+      return;
     }
-    tick();
-    chat429.timer = setInterval(tick, 1000);
+    if (status === 429 && message) $("#frame").textContent = message;
+    scheduleReconnect(next.minWait);
   }
 
-  $("#ws-reconnect").addEventListener("click", connectChat);
+  // "Retry now" and "Reconnect": go now, backoff starts over.
+  $("#ws-reconnect").addEventListener("click", function () {
+    retry.attempt = 0;
+    connectChat();
+  });
+
+  // The page is back (the tab was hidden, the laptop slept) or the network is: go now rather than at the
+  // end of the timer. Not after the room refused this page on purpose, and never over a live socket.
+  function retryNow() {
+    if (!info || !info.bindings.durable_object) return;
+    if (retry.final || stopped) return;
+    if (ws && ws.readyState < 2) return;
+    if (!chatStarted) return;
+    retry.attempt = 0;
+    connectChat();
+  }
+  var stopped = false;
+  var chatStarted = false;
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") retryNow();
+  });
+  window.addEventListener("online", retryNow);
+  // A page going into the back/forward cache must not keep a socket (or a timer) behind.
+  window.addEventListener("pagehide", function (event) {
+    if (!event.persisted) return;
+    stopped = true;
+    stopRetry();
+    dropSocket();
+  });
+  window.addEventListener("pageshow", function (event) {
+    if (!event.persisted) return;
+    stopped = false;
+    retryNow();
+  });
+
+  // The message box: grows with what is typed (to five lines, then scrolls inside), counts characters the way
+  // the room does (a pair of UTF-16 units is one), and shows the count only near the limit.
+  var CHAT_MAX = 1000;
+  var COUNT_FROM = 900;
+  var chatInput = $("#chat-in");
+  var coarse = window.matchMedia && window.matchMedia("(pointer: coarse)");
+
+  function chars(text) {
+    var n = 0;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      if (c < 0xdc00 || c > 0xdfff) n++;
+    }
+    return n;
+  }
+
+  function chatInputChanged() {
+    chatInput.style.height = "auto";
+    chatInput.style.height = chatInput.scrollHeight + "px";
+    var n = chars(chatInput.value.trim());
+    var row = $("#chat-frame");
+    var over = n > CHAT_MAX;
+    row.classList.toggle("counting", n >= COUNT_FROM);
+    $("#chat-count").textContent = n >= COUNT_FROM ? n + " / " + CHAT_MAX : "";
+    $("#chat-count").classList.toggle("over", over);
+    $("#chat-send").disabled = over;
+    chatInput.setAttribute("aria-invalid", over ? "true" : "false");
+  }
+  chatInput.addEventListener("input", chatInputChanged);
+  chatInput.addEventListener("keydown", function (event) {
+    // Enter sends and Shift+Enter makes a new line. A phone's Enter is a new line and the button sends; and
+    // Enter that confirms an input method's composition (CJK, accents) is not a send.
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+    if (coarse && coarse.matches) return;
+    event.preventDefault();
+    $("#chat-form").requestSubmit();
+  });
+
   $("#chat-form").addEventListener("submit", function (event) {
     event.preventDefault();
-    var input = $("#chat-in");
-    var text = input.value.trim();
+    var text = chatInput.value.trim();
     if (!text) return;
+    if (chars(text) > CHAT_MAX) {
+      $("#frame").textContent = "That message is too long: " + CHAT_MAX + " characters at most";
+      return;
+    }
     if (!ws || ws.readyState !== 1) {
-      $("#frame").textContent = "Not connected. Use Reconnect.";
+      $("#frame").textContent = retry.final
+        ? "Not connected. Use Reconnect."
+        : "Not connected, reconnecting. Your message is kept; send it again when it is back.";
       return;
     }
     // `sent` is echoed back by the room so this page can time the round trip.
     ws.send(JSON.stringify({ type: "msg", text: text, sent: Date.now() }));
     lastText = text;
-    input.value = "";
+    chatInput.value = "";
+    chatInputChanged();
   });
 
   // ---- Queue and cron feed -------------------------------------------------------------
@@ -1560,8 +1742,10 @@
     jobs.push(queueLoad(false));
     jobs.push(secretsLoad());
     await Promise.all(jobs);
-    if (info.bindings.durable_object) connectChat();
-    else notAvailable("#t-do", "Not in this build", "This build has no Durable Object binding.");
+    if (info.bindings.durable_object) {
+      chatStarted = true;
+      connectChat();
+    } else notAvailable("#t-do", "Not in this build", "This build has no Durable Object binding.");
     tickCron();
   })();
 })();

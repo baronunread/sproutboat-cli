@@ -562,7 +562,7 @@ export async function runConformance(
   room.socket.send(JSON.stringify({ type: "hello", name: "\u202e" + "n".repeat(30) }));
   room.socket.send(JSON.stringify({ type: "hello", name: "Ada\u0000" }));
   await Bun.sleep(1100);
-  room.socket.send(JSON.stringify({ type: "msg", text: "x".repeat(121) }));
+  room.socket.send(JSON.stringify({ type: "msg", text: "x".repeat(1001) }));
   room.socket.send("null");
   await Bun.sleep(1100);
   for (let i = 0; i < 30; i++)
@@ -571,7 +571,7 @@ export async function runConformance(
   const errors = room.frames.filter((f) => f.type === "error").map((f) => String(f.code));
   const said = room.frames.filter((f) => f.type === "msg");
   check(
-    "chat: a message over 120 characters and a non-object frame get an error frame",
+    "chat: a message over 1,000 characters and a non-object frame get an error frame",
     errors.includes("too_long") && errors.includes("bad_frame"),
     errors,
   );
