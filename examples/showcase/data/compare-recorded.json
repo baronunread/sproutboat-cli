@@ -1,0 +1,224 @@
+{
+  "recordedAt": "2026-11-12T15:51:15.936Z",
+  "host": "darwin-arm64",
+  "wrangler": "4.161.0",
+  "workerd": "1.20261110.1",
+  "sproutboat": "sproutboat 0.54.0 (sproutboat dev, broker backend)",
+  "sourceSha256": "998909f8ab388a3089a1f0e7312c3038b911e60b2c42de9410551a6c6c5f74da",
+  "runs": {
+    "sproutboat": {
+      "base": "http://127.0.0.1:55104",
+      "info": {
+        "edition": "cloud",
+        "runtime": "sproutboat",
+        "firstRequestAt": 1794498669109,
+        "limits": {
+          "maxFans": 500,
+          "maxSeats": 200,
+          "maxSeparate": 60,
+          "maxOpenSales": 8,
+          "saleTtlMs": 120000
+        },
+        "sleeperUrl": null,
+        "densityUrl": null,
+        "compareUrl": null
+      },
+      "inRequest": {
+        "naive": {
+          "strategy": "naive",
+          "sale": "c151e963-9722-4c19-bfd5-12ed31a0364f",
+          "fans": 300,
+          "seats": 100,
+          "ticketsIssued": 300,
+          "counterSold": 1,
+          "seatsDoubleBooked": 1,
+          "oversold": 200,
+          "turnedAway": 0,
+          "elapsedMs": 112
+        },
+        "statement": {
+          "strategy": "statement",
+          "sale": "cf04d836-ea58-429f-a401-9d571ff65860",
+          "fans": 300,
+          "seats": 100,
+          "ticketsIssued": 100,
+          "counterSold": 100,
+          "seatsDoubleBooked": 0,
+          "oversold": 0,
+          "turnedAway": 200,
+          "elapsedMs": 45
+        },
+        "object": {
+          "strategy": "object",
+          "sale": "bf6f5f60-46f1-4de5-aa77-69c8c86367ed",
+          "fans": 300,
+          "seats": 100,
+          "ticketsIssued": 100,
+          "counterSold": 100,
+          "seatsDoubleBooked": 0,
+          "oversold": 0,
+          "turnedAway": 200,
+          "elapsedMs": 89
+        }
+      },
+      "separateRequests": {
+        "naive": {
+          "strategy": "naive",
+          "sale": "14a6148a-6589-405a-a8ec-2a0d9f335f03",
+          "fans": 40,
+          "seats": 20,
+          "ticketsIssued": 20,
+          "counterSold": 20,
+          "seatsDoubleBooked": 0,
+          "oversold": 0,
+          "turnedAway": 20
+        },
+        "statement": {
+          "strategy": "statement",
+          "sale": "64f96038-c75b-4936-ab18-47a7d473ec21",
+          "fans": 40,
+          "seats": 20,
+          "ticketsIssued": 20,
+          "counterSold": 20,
+          "seatsDoubleBooked": 0,
+          "oversold": 0,
+          "turnedAway": 20
+        },
+        "object": {
+          "strategy": "object",
+          "sale": "f79b822f-113a-4041-80cb-fca8eb980dc6",
+          "fans": 40,
+          "seats": 20,
+          "ticketsIssued": 20,
+          "counterSold": 20,
+          "seatsDoubleBooked": 0,
+          "oversold": 0,
+          "turnedAway": 20
+        }
+      },
+      "timings": {
+        "d1": {
+          "batch": 200,
+          "samplesUs": [90, 90, 85, 95, 85, 85, 95, 100],
+          "medianUs": 90,
+          "minUs": 85,
+          "maxUs": 100
+        },
+        "object": {
+          "batch": 200,
+          "samplesUs": [85, 90, 85, 95, 100, 100, 85, 90],
+          "medianUs": 90,
+          "minUs": 85,
+          "maxUs": 100
+        }
+      }
+    },
+    "workerd": {
+      "base": "http://127.0.0.1:55245",
+      "info": {
+        "edition": "cloudflare",
+        "runtime": "workerd",
+        "firstRequestAt": 1794498673625,
+        "limits": {
+          "maxFans": 500,
+          "maxSeats": 200,
+          "maxSeparate": 60,
+          "maxOpenSales": 8,
+          "saleTtlMs": 120000
+        },
+        "sleeperUrl": null,
+        "densityUrl": null,
+        "compareUrl": null
+      },
+      "inRequest": {
+        "naive": {
+          "strategy": "naive",
+          "sale": "11c7e083-5410-46e6-9294-41f07216d2a3",
+          "fans": 300,
+          "seats": 100,
+          "ticketsIssued": 300,
+          "counterSold": 1,
+          "seatsDoubleBooked": 1,
+          "oversold": 200,
+          "turnedAway": 0,
+          "elapsedMs": 401
+        },
+        "statement": {
+          "strategy": "statement",
+          "sale": "e8a06019-d60b-445d-9d76-85f7af3de660",
+          "fans": 300,
+          "seats": 100,
+          "ticketsIssued": 100,
+          "counterSold": 100,
+          "seatsDoubleBooked": 0,
+          "oversold": 0,
+          "turnedAway": 200,
+          "elapsedMs": 189
+        },
+        "object": {
+          "strategy": "object",
+          "sale": "f62b11e3-85bc-412f-8a83-09cb1824b729",
+          "fans": 300,
+          "seats": 100,
+          "ticketsIssued": 100,
+          "counterSold": 100,
+          "seatsDoubleBooked": 0,
+          "oversold": 0,
+          "turnedAway": 200,
+          "elapsedMs": 73
+        }
+      },
+      "separateRequests": {
+        "naive": {
+          "strategy": "naive",
+          "sale": "8e748cbe-0dec-432e-bcae-81f88fba7002",
+          "fans": 40,
+          "seats": 20,
+          "ticketsIssued": 40,
+          "counterSold": 3,
+          "seatsDoubleBooked": 1,
+          "oversold": 20,
+          "turnedAway": 0
+        },
+        "statement": {
+          "strategy": "statement",
+          "sale": "052076b3-47f0-4d54-a791-a996f34e1b8d",
+          "fans": 40,
+          "seats": 20,
+          "ticketsIssued": 20,
+          "counterSold": 20,
+          "seatsDoubleBooked": 0,
+          "oversold": 0,
+          "turnedAway": 20
+        },
+        "object": {
+          "strategy": "object",
+          "sale": "0ceaa094-b029-43cd-95e3-4c5488cb2baf",
+          "fans": 40,
+          "seats": 20,
+          "ticketsIssued": 20,
+          "counterSold": 20,
+          "seatsDoubleBooked": 0,
+          "oversold": 0,
+          "turnedAway": 20
+        }
+      },
+      "timings": {
+        "d1": {
+          "batch": 50,
+          "samplesUs": [360, 440, 520, 400, 340, 300, 300, 300],
+          "medianUs": 340,
+          "minUs": 300,
+          "maxUs": 520
+        },
+        "object": {
+          "batch": 3200,
+          "samplesUs": [5, 5.3, 5, 5.3, 5, 5, 6.9, 5],
+          "medianUs": 5,
+          "minUs": 5,
+          "maxUs": 6.9
+        }
+      }
+    }
+  }
+}

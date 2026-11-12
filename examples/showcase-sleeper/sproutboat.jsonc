@@ -1,0 +1,8 @@
+{
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "showcase-sleeper",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  // ready.txt is served by the edge, so it does not start the app. Only /ping does.
+  "assets": { "directory": "site", "binding": "ASSETS", "not_found_handling": "none" },
+}

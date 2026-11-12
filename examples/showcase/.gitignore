@@ -1,0 +1,11 @@
+node_modules/
+site/
+site-standalone/
+binaries/
+dist/
+.sproutboat/
+.wrangler/
+*.data/
+sproutboat-env.d.ts
+sproutboat.local.jsonc
+worker-configuration.d.ts

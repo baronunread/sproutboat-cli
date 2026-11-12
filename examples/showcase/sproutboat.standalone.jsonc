@@ -1,0 +1,16 @@
+{
+  // The same app for `sproutboat build --standalone -c sproutboat.standalone.jsonc`: the binary on the download card.
+  // It serves site-standalone/, the page without the downloads folder (a binary cannot carry its own copy).
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "showcase",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "vars": { "EDITION": "standalone", "SLEEPER_URL": "", "DENSITY_URL": "", "COMPARE_URL": "" },
+  "d1_databases": ["DB"],
+  "durable_objects": { "TICKETS": "TicketOffice", "BENCH": "QueryBench" },
+  "ratelimiters": [
+    { "binding": "RUNS", "limit": 30, "period": 60 },
+    { "binding": "BUYS", "limit": 240, "period": 60 },
+  ],
+  "assets": { "directory": "site-standalone", "binding": "ASSETS", "not_found_handling": "none" },
+}

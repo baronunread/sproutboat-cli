@@ -1,0 +1,39 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index e8d3f37..513b926 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -63,6 +63,11 @@ jobs:
+       - run: bun install --frozen-lockfile
+       - run: bun run kitchen-sink
+       - run: bun run kitchen-sink:standalone
++      # The showcase page: its experiments against `sproutboat dev` and against one standalone binary.
++      - run: bun install --frozen-lockfile
++        working-directory: examples/showcase
++      - run: bun run showcase
++      - run: bun run showcase:standalone
+       # Standalone builds default to Porffor alpha 22; the alpha 19 fallback pin stays tested for the
+       # one release it is kept.
+       - run: bun run kitchen-sink:standalone
+@@ -70,6 +75,22 @@ jobs:
+           SPROUTBOAT_PORFFOR_CHANNEL: alpha-19
+       - run: bun run examples
+ 
++  # The same src/ the showcase deploys to Sproutboat, run by workerd (`wrangler dev`) through the same checks.
++  showcase-workerd:
++    runs-on: ubuntu-latest
++    defaults:
++      run:
++        working-directory: examples/showcase
++    steps:
++      - uses: actions/checkout@v7
++      - uses: oven-sh/setup-bun@v2
++        with:
++          bun-version: 1.4.0
++      - run: bun install --frozen-lockfile
++      - run: bun run typecheck
++      - run: bun run build
++      - run: bun run workerd
++
+   packaged-cli:
+     name: packaged CLI (${{ matrix.name }})
+     strategy:

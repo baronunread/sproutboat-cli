@@ -1,0 +1,27 @@
+{
+  "density": {
+    "label": "1,000 distinct apps on one host",
+    "date": "2026-11-05",
+    "source": "sproutd benchmarks/a22-density-2026-11-05 (private repo): Porffor alpha 22, 5 trials on host instabox-romeo (Linux 6.18, x86_64)",
+    "limits": "cgroup MemoryMax=1536M, MemorySwapMax=0, one CPU for the host, the load client on another",
+    "apps": 1000,
+    "trials": 5,
+    "trialsPassed": 4,
+    "trialsOomKilled": 1,
+    "note": "One trial reached the memory cap and the kernel killed a process; every one of its 5,000 requests was still answered correctly. The other four passed.",
+    "idlePssKiB": [1312644, 1313099, 1311792, 1311696, 1313224],
+    "afterTrafficPssKiB": [1478254, 1434859, 1458100, 1471885, 1471615],
+    "workerMedianKiB": { "privateDirty": 1160, "privateClean": 104, "anonymous": 3852, "sharedClean": 9972 },
+    "traffic": {
+      "requests": 5000,
+      "concurrency": 32,
+      "correct": "5000 of 5000 in all five trials",
+      "reqPerSec": [919, 1594],
+      "p50Ms": 8.07
+    },
+    "readyMs": [1728, 1880]
+  },
+  "coldStart": {
+    "note": "Cold start is measured live in section 1 and at build time for the standalone binary (section 4). No older figure is shown."
+  }
+}
