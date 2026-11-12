@@ -598,7 +598,18 @@ describe("chat room: message and frame caps", () => {
     expect(ws.deserializeAttachment().name).toBe("A B");
   });
 
-  test("the history keeps 30 messages, and full ones are about 120 KB, under a 128 KiB value", async () => {
+  test("the history keeps 30 short messages", async () => {
+    const { room, sockets, store } = fakeRoom();
+    const ws = fakeSocket();
+    sockets.push(ws);
+    for (let i = 0; i < 35; i++) {
+      clock += 5000;
+      await room.webSocketMessage(ws, JSON.stringify({ type: "msg", text: "hello " + i, sent: i }));
+    }
+    expect((store.get("history") ?? []).length).toBe(30);
+  });
+
+  test("full-size messages drop the oldest so the stored history stays under 96 KiB", async () => {
     const { room, sockets, store } = fakeRoom();
     const ws = fakeSocket();
     sockets.push(ws);
@@ -607,10 +618,12 @@ describe("chat room: message and frame caps", () => {
       await room.webSocketMessage(ws, JSON.stringify({ type: "msg", text: "\u{1F600}".repeat(1000), sent: i }));
     }
     const history = store.get("history") ?? [];
-    expect(history.length).toBe(30);
-    // Two bytes per UTF-16 unit, which is how a stored string weighs at most (an emoji is two units).
-    const bytes = JSON.stringify(history).length * 2;
-    expect(bytes).toBeLessThan(131072);
+    expect(history.length).toBeGreaterThan(10);
+    expect(history.length).toBeLessThan(30);
+    expect(history[history.length - 1].text).toBe("\u{1F600}".repeat(1000));
+    expect(new TextEncoder().encode(JSON.stringify(history)).length).toBeLessThanOrEqual(96 * 1024);
+    // Two bytes per UTF-16 unit is the most a stored string can weigh: still under the 128 KiB value limit.
+    expect(JSON.stringify(history).length * 2).toBeLessThan(131072);
   });
 
   test("the per-second strike limits are unchanged: 4 frames in a second is a rate_limited error", async () => {

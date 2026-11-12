@@ -73,6 +73,7 @@ const CHAT = {
   strikes: 8,
 };
 const HISTORY = 30;
+const HISTORY_BYTES = 96 * 1024; // the stored history value stays under this (the platform limit is 128 KiB)
 
 export class ChatRoom {
   constructor(state, env) {
@@ -223,6 +224,11 @@ export class ChatRoom {
     const history = (await this.state.storage.get("history")) || [];
     history.push(entry);
     while (history.length > HISTORY) history.shift();
+    // One stored value holds the whole history; keep it well under the 128 KiB value limit
+    // (30 messages of 1,000 four-byte characters would come close), dropping the oldest first.
+    while (history.length > 1 && new TextEncoder().encode(JSON.stringify(history)).length > HISTORY_BYTES) {
+      history.shift();
+    }
     await this.state.storage.put("history", history);
     // `sent` is the client's own clock value, echoed so it can time the round trip.
     // Only a plain number goes out: the field reaches every client in the room.
