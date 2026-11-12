@@ -8,8 +8,9 @@
  *
  * conformance.ts runs the same function against the broker and the standalone binary, so a
  * deployed app can be held to what the two local backends already pass. Run against a deployed
- * app it makes six uploads of up to 25 MB from one address: that is 90 MB of the 100 MB an hour
- * one address may upload, so run it once an hour (--sizes 5 is 15 MB).
+ * app it makes six uploads of up to 25 MB from one address: that is 90 MB of the 100 MB a day
+ * one address may upload, so run it once a day (--sizes 5 is 15 MB). Its files are deleted again at
+ * the end, and anyway an hour after they were uploaded.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { jsonObject, parseJsonValue, type JsonValue } from "../../src/json";
@@ -176,6 +177,20 @@ export async function runR2RoundTrip(
       inline: false,
     },
     { name: "rt-zero.bin", type: "application/octet-stream", bytes: new Uint8Array(0), inline: false },
+    // Only pictures, audio and video are shown in the browser: a document, a text file or a page is a download.
+    {
+      name: "rt-doc.pdf",
+      type: "application/pdf",
+      bytes: new TextEncoder().encode("%PDF-1.4\n%%EOF\n"),
+      inline: false,
+    },
+    { name: "rt-note.txt", type: "text/plain", bytes: new TextEncoder().encode("a plain text note\n"), inline: false },
+    {
+      name: "rt-page.html",
+      type: "text/html",
+      bytes: new TextEncoder().encode("<!doctype html><script>alert(1)</script>"),
+      inline: false,
+    },
   ];
   for (const mb of sizesMb) {
     const size = Math.min(cap, mb * MIB);
@@ -194,6 +209,18 @@ export async function runR2RoundTrip(
 
   for (const file of cases) {
     const put = await uploadFile(base, send, chunk, file.name, file.type, file.bytes);
+    // The list says when the file is deleted: file_ttl_seconds after its upload.
+    const listed = jsonObject(parseJsonValue(await (await send(base + "/api/r2")).text()));
+    const entry = Array.isArray(listed?.objects)
+      ? listed.objects.map((o) => jsonObject(o)).find((o) => o?.name === file.name)
+      : undefined;
+    const ttl = (Number(info?.file_ttl_seconds) || 3600) * 1000;
+    const expires = Number(entry?.expires);
+    check(
+      `round trip: ${file.name} is listed with its expiry, ${ttl / 1000} s after the upload`,
+      put.status === 201 && expires > Date.now() && expires <= Date.now() + ttl + 5000,
+      { expires, now: Date.now(), ttl },
+    );
     const stored = await send(base + "/api/r2/file?name=" + file.name);
     let back: Uint8Array;
     let reading = stored;

@@ -272,6 +272,11 @@ function refusal(status, message, extra) {
 // ---------------------------------------------------------------------------
 
 const DAILY_RESET = "0 4 * * *";
+// Every 15 minutes: delete the files whose hour is up, and the chunks of uploads nobody finished.
+const FILE_SWEEP = "*/15 * * * *";
+// The daily reset runs at 04:00 UTC, and a day of upload allowance is the same 24 hours, so the
+// reset (which empties the quota table) never hands anyone a second allowance inside one day.
+const DAY_STARTS = 4 * 3600000;
 const MAX_FILE_NAME = 64;
 const MAX_FILES = 50;
 const MAX_JSON_BODY = 4096;
@@ -282,6 +287,7 @@ const MAX_JSON_BODY = 4096;
 // outright before compatibility date 2026-10-27, so a chunk is exactly 1 MiB.
 const CHUNK = 1048576;
 const HOUR = 3600000;
+const DAY = 86400000;
 
 // Text a person typed, made safe to store and show: control characters become
 // spaces, bidirectional overrides (which can make a name read as something else)
@@ -484,42 +490,91 @@ function hourlyCap(env, kind) {
   return kind === "up" ? Number(env.MAX_UPLOAD_PER_HOUR) || 104857600 : Number(env.MAX_DOWNLOAD_PER_HOUR) || 262144000;
 }
 
-// Spend bytes from the address's hourly allowance (a row in D1, bumped in one statement).
-// null when there is room, else the 429 to send: how much, and when the hour turns over.
+// Bytes one address may upload in a day (04:00 UTC to 04:00 UTC).
+function dailyCap(env) {
+  return Number(env.MAX_UPLOAD_PER_DAY) || 104857600;
+}
+
+// How long an uploaded file lives, in milliseconds.
+function fileTtl(env) {
+  const seconds = Number(env.FILE_TTL_SECONDS);
+  return (seconds > 0 ? seconds : 3600) * 1000;
+}
+
+// Which allowance day a moment falls in, and when that day ends.
+function allowanceDay(now) {
+  return Math.floor((now - DAY_STARTS) / DAY);
+}
+
+// How a refusal says when the allowance comes back.
+function waitText(seconds) {
+  return seconds >= 5400 ? Math.ceil(seconds / 3600) + " h" : Math.ceil(seconds / 60) + " min";
+}
+
+// Spend bytes from the address's allowance (rows in D1, bumped in one statement). An upload is
+// charged to the hour and to the day; a download to the hour. null when there is room in every
+// window, else the 429 to send: which window, how much, and when it turns over.
 async function spendBytes(env, request, kind, bytes, t0) {
-  const limit = hourlyCap(env, kind);
-  const hour = Math.floor(Date.now() / HOUR);
-  const key = kind + ":" + clientIp(request).ip + ":" + hour;
-  const row = await env.DB.prepare("SELECT bytes FROM quota WHERE key = ?").bind(key).first();
-  const used = row ? Number(row.bytes) : 0;
-  if (used + bytes > limit) {
-    let retry = Math.ceil(((hour + 1) * HOUR - Date.now()) / 1000);
-    if (!(retry >= 1)) retry = 1;
-    const body = {
-      error:
-        "slow down: " +
-        (kind === "up" ? "uploads" : "downloads") +
-        " are limited to " +
-        fmtKb(limit) +
-        " an hour from your address. Try again in " +
-        Math.ceil(retry / 60) +
-        " min.",
-      code: "quota",
-      retry_after: retry,
-      limit: limit,
-      used: used,
-    };
-    if (t0 !== undefined) body.ms = Date.now() - t0;
-    return new Response(JSON.stringify(body), {
-      status: 429,
-      headers: { "content-type": "application/json", "retry-after": String(retry), "cache-control": "no-store" },
+  const now = Date.now();
+  const who = clientIp(request).ip;
+  const hour = Math.floor(now / HOUR);
+  const windows = [
+    {
+      name: "hour",
+      key: kind + ":" + who + ":" + hour,
+      limit: hourlyCap(env, kind),
+      ends: (hour + 1) * HOUR,
+      keep: (hour + 2) * HOUR,
+    },
+  ];
+  if (kind === "up") {
+    const day = allowanceDay(now);
+    windows.push({
+      name: "day",
+      key: "upday:" + who + ":" + day,
+      limit: dailyCap(env),
+      ends: (day + 1) * DAY + DAY_STARTS,
+      keep: (day + 2) * DAY + DAY_STARTS,
     });
   }
-  await env.DB.prepare(
-    "INSERT INTO quota (key, bytes, expires) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET bytes = bytes + excluded.bytes",
-  )
-    .bind(key, bytes, (hour + 2) * HOUR)
-    .run();
+  const used = [];
+  for (let i = 0; i < windows.length; i++) {
+    const w = windows[i];
+    const row = await env.DB.prepare("SELECT bytes FROM quota WHERE key = ?").bind(w.key).first();
+    used.push(row ? Number(row.bytes) : 0);
+    if (used[i] + bytes > w.limit) {
+      let retry = Math.ceil((w.ends - now) / 1000);
+      if (!(retry >= 1)) retry = 1;
+      const body = {
+        error:
+          "slow down: " +
+          (kind === "up" ? "uploads" : "downloads") +
+          " are limited to " +
+          fmtKb(w.limit) +
+          (w.name === "day" ? " a day" : " an hour") +
+          " from your address. Try again in " +
+          waitText(retry) +
+          ".",
+        code: "quota",
+        window: w.name,
+        retry_after: retry,
+        limit: w.limit,
+        used: used[i],
+      };
+      if (t0 !== undefined) body.ms = Date.now() - t0;
+      return new Response(JSON.stringify(body), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": String(retry), "cache-control": "no-store" },
+      });
+    }
+  }
+  for (let i = 0; i < windows.length; i++) {
+    await env.DB.prepare(
+      "INSERT INTO quota (key, bytes, expires) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET bytes = bytes + excluded.bytes",
+    )
+      .bind(windows[i].key, bytes, windows[i].keep)
+      .run();
+  }
   return null;
 }
 
@@ -682,17 +737,16 @@ async function guestbookList(env) {
 // custom metadata. Its bytes are CHUNK-sized objects, chunks/<id>/000000, 000001 and so on. An
 // upload sends one chunk per request, and the last one writes the manifest; a download streams
 // the chunks one pull at a time. Any file goes in, as bytes, with the content type the browser
-// gave it, and comes back with that type. Only images, PDFs, text, audio and video are shown in
-// the browser; every other type, SVG and HTML included, is an attachment, so an upload cannot run
-// script on this origin.
+// gave it, and comes back with that type. Only pictures, audio and video are shown in the browser;
+// every other type, PDF, text, SVG and HTML included, is an attachment, so an upload cannot run script
+// on this origin and the page is no host for documents. A file lives FILE_TTL_SECONDS (an hour) after
+// its upload: then it is not served and is deleted, so the demo is no free file hosting.
 const SHOWN_INLINE = [
   "image/png",
   "image/jpeg",
   "image/gif",
   "image/webp",
   "image/avif",
-  "application/pdf",
-  "text/plain",
   "video/mp4",
   "video/webm",
   "audio/mpeg",
@@ -721,6 +775,8 @@ function chunkKey(id, n) {
 }
 
 // What a manifest says about its file; a plain object stored under files/ is a one-chunk-less file (id "").
+// `expires` is when the upload finished plus the file's hour, in epoch milliseconds, written into the manifest;
+// a manifest without one (not made by this upload route) has none and counts as expired.
 function describe(key, o) {
   const m = o.customMetadata || {};
   return {
@@ -730,24 +786,52 @@ function describe(key, o) {
     id: m.id || "",
     count: Number(m.count) || 0,
     etag: m.id || o.httpEtag,
+    expires: Number(m.expires) || 0,
   };
 }
 
+// The files whose hour is up, deleted: manifest and chunks. Called by the */15 cron, by every listing
+// of the files and before an upload starts, so an expired file is gone soon after its hour whoever
+// looks. `now` is passed in so a cron run can say what time it is.
+async function purgeExpired(env, now) {
+  const listed = await env.UPLOADS.list({ prefix: "files/", limit: 1000, include: ["httpMetadata", "customMetadata"] });
+  let purged = 0;
+  for (const o of listed.objects) {
+    const d = describe(o.key, o);
+    if (d.expires > now) continue;
+    await removeFile(env, d);
+    purged++;
+  }
+  return purged;
+}
+
 async function filesList(env) {
+  const now = Date.now();
   const listed = await env.UPLOADS.list({ prefix: "files/", limit: 100, include: ["httpMetadata", "customMetadata"] });
   let bytes = 0;
   const objects = [];
   for (const o of listed.objects) {
     const d = describe(o.key, o);
+    if (d.expires <= now) {
+      await removeFile(env, d);
+      continue;
+    }
     bytes += d.size;
-    objects.push({ name: d.name, size: d.size, type: d.type, uploaded: o.uploaded, etag: d.etag });
+    objects.push({ name: d.name, size: d.size, type: d.type, uploaded: o.uploaded, etag: d.etag, expires: d.expires });
   }
-  return { objects, bytes, truncated: listed.truncated };
+  return { objects, bytes, truncated: listed.truncated, now: now };
 }
 
+// null for a file that is not there or whose hour is up (and an expired one is deleted on the spot).
 async function fileInfo(env, name) {
   const head = await env.UPLOADS.head("files/" + name);
-  return head ? describe("files/" + name, head) : null;
+  if (!head) return null;
+  const d = describe("files/" + name, head);
+  if (d.expires <= Date.now()) {
+    await removeFile(env, d);
+    return null;
+  }
+  return d;
 }
 
 async function removeFile(env, info) {
@@ -762,6 +846,8 @@ async function removeFile(env, info) {
 async function chunkPut(env, request, up, bytes, t0) {
   const key = chunkKey(up.id, up.n);
   if (up.n === 0) {
+    // Files whose hour is up make room first, so they do not count against the caps.
+    await purgeExpired(env, Date.now());
     // Replacing a file frees the old one's bytes, so they do not count against the new one.
     const old = await fileInfo(env, up.name);
     const used = await bucketUsage(env, "");
@@ -803,7 +889,13 @@ async function chunkPut(env, request, up, bytes, t0) {
   const old = await fileInfo(env, up.name);
   await env.UPLOADS.put("files/" + up.name, "", {
     httpMetadata: { contentType: up.type },
-    customMetadata: { id: up.id, size: String(up.total), count: String(up.count), type: up.type },
+    customMetadata: {
+      id: up.id,
+      size: String(up.total),
+      count: String(up.count),
+      type: up.type,
+      expires: String(Date.now() + fileTtl(env)),
+    },
   });
   if (old && old.id && old.id !== up.id) await env.UPLOADS.delete(chunkKeys(old.id, old.count));
   return null;
@@ -816,7 +908,7 @@ function chunkKeys(id, count) {
 }
 
 // Uploads that were started and never finished leave chunks with no manifest. Called from the
-// */1 cron: chunks over an hour old whose upload has no manifest are deleted.
+// */15 cron: chunks over an hour old whose upload has no manifest are deleted.
 async function sweepChunks(env) {
   const listed = await env.UPLOADS.list({ prefix: "chunks/", limit: 1000, include: ["customMetadata"] });
   if (!listed.objects.length) return;
@@ -891,13 +983,15 @@ function chunkStream(env, info, start, end) {
 // charged by what is sent.
 async function fileResponse(env, request, info, download, t0) {
   const inline = !download && SHOWN_INLINE.indexOf(info.type) >= 0;
+  // Everything but a picture, audio or video is an attachment, whatever the URL asks for.
   const headers = {
     "content-type": info.type === "text/plain" ? "text/plain; charset=utf-8" : info.type,
     "content-disposition": (inline ? "inline" : "attachment") + '; filename="' + info.name + '"',
     "x-content-type-options": "nosniff",
     "accept-ranges": "bytes",
     etag: '"' + info.etag + '"',
-    "cache-control": "private, max-age=3600",
+    // A file may be cached for what is left of its hour, never longer.
+    "cache-control": "private, max-age=" + Math.max(0, Math.min(3600, Math.floor((info.expires - Date.now()) / 1000))),
     "server-timing": "app;dur=" + ms2(t0),
   };
   // Nothing in a stored file may run or load anything here. (The PDF viewer needs to run, so a PDF is the exception.)
@@ -1117,6 +1211,8 @@ async function api(request, env, url, path, t0) {
         chunk_bytes: CHUNK,
         max_response_bytes: responseCap(env),
         max_upload_per_hour: hourlyCap(env, "up"),
+        max_upload_per_day: dailyCap(env),
+        file_ttl_seconds: fileTtl(env) / 1000,
         max_download_per_hour: hourlyCap(env, "down"),
         max_files: MAX_FILES,
         // How the rate limits tell visitors apart: "peer", "x-forwarded-for", or
@@ -1536,11 +1632,28 @@ async function plain(request, env, url, path) {
   return json({ error: "not found", path }, 404);
 }
 
+// GET /healthz -> { ok: true } and nothing else: cheap enough to poll every minute. It answers from the
+// worker alone, so a 200 says the app is up and serving; it does not read D1, KV or R2.
+function healthz(request) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(JSON.stringify({ error: "use GET" }), {
+      status: 405,
+      headers: { "content-type": "application/json", allow: "GET, HEAD", "cache-control": "no-store" },
+    });
+  }
+  return new Response(request.method === "HEAD" ? null : JSON.stringify({ ok: true, at: Date.now() }), {
+    status: 200,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+}
+
 export default {
   async fetch(request) {
     const t0 = clock();
     const url = new URL(request.url);
     const path = url.pathname;
+    // An uptime monitor polls this: no bindings, no rate limit, no analytics point.
+    if (path === "/healthz") return healthz(request);
     try {
       await ensureSchema(env);
 
@@ -1558,12 +1671,18 @@ export default {
     }
   },
 
-  // cron */1: prune expired sessions, record a heartbeat. cron 0 4 * * *: the daily reset.
+  // cron */1: prune expired sessions, record a heartbeat. cron */15: delete expired files. cron 0 4 * * *: the daily reset.
   async scheduled(event) {
     const started = clock();
     await ensureSchema(env);
     if (event.cron === DAILY_RESET) {
       await dailyReset(env, event);
+      return;
+    }
+    if (event.cron === FILE_SWEEP) {
+      // Expired files and abandoned chunks, nothing else: the scheduledTime is the clock.
+      await purgeExpired(env, Number(event.scheduledTime) || Date.now());
+      await sweepChunks(env);
       return;
     }
     const now = Date.now();
@@ -1581,9 +1700,8 @@ export default {
       .bind(new Date(event.scheduledTime).toISOString(), event.cron)
       .run();
     await env.DB.prepare("DELETE FROM heartbeat WHERE id <= (SELECT max(id) FROM heartbeat) - 200").run();
-    // Spent allowances of hours gone by, and chunks of uploads nobody finished.
+    // Spent allowances of hours and days gone by.
     await env.DB.prepare("DELETE FROM quota WHERE expires < ?").bind(Date.now()).run();
-    await sweepChunks(env);
     // The dashboard's feed reads this row: how long the run took.
     await env.DB.prepare("INSERT INTO events (kind, label, ms, at) VALUES ('cron', ?, ?, ?)")
       .bind(event.cron, ms2(started), new Date().toISOString())

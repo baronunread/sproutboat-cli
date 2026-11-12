@@ -301,7 +301,8 @@ kbd{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 
 .dz{border-radius:10px;box-shadow:inset 0 0 0 1px var(--sb-hairline-strong);padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;transition:background-color 120ms ease}
 .dz.over{background:var(--sb-brand-soft)}
 .dz .note{flex:1 1 120px}
-.chat{height:136px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:2px 2px 2px 0;scrollbar-width:thin}
+.chatwrap{position:relative;height:136px;flex:none}
+.chat{height:100%;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:3px 4px 3px 3px;scrollbar-width:thin}
 .chat .bub{max-width:88%;align-self:flex-start}
 .chat .bub.me{align-self:flex-end;background:var(--sb-brand-soft);color:var(--sb-brand-fg)}
 .chat .bub.typ{color:var(--sb-fg-muted)}
@@ -408,7 +409,8 @@ kbd{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 
 .mini.fixed td.id{width:auto;padding-inline-end:0}
 .mini.fixed td.act{width:auto;padding-inline-start:0;text-align:end}
 .gbt .c-id{width:40px}.gbt .c-nm{width:34%}.gbt .c-et{width:46px}
-.r2t .c-sz{width:76px}.r2t .c-act{width:32px}
+.r2t .c-sz{width:68px}.r2t .c-ex{width:60px}.r2t .c-act{width:32px}
+.r2t td.ex{color:var(--sb-fg-muted);font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .mini.fixed .empty{white-space:normal;text-align:center;padding:48px 12px;color:var(--sb-fg-muted)}
 .fn{display:flex;min-width:0;align-items:center}
 .fn a{display:flex;min-width:0}
@@ -421,9 +423,15 @@ kbd{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 
 .mt .v{overflow:hidden;text-overflow:ellipsis}
 .frame{height:16px;min-height:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .frame.warn{color:var(--sb-warn-fg)}
-.chat .bub{max-width:88%;min-width:0}
-.chat .bub small{overflow-wrap:anywhere}
-.chat .bub .tx{display:block;overflow-wrap:anywhere}
+/* The room: a box of one size whatever is said in it. Messages scroll inside it; the scrollbar's lane is
+   always reserved, so one appearing never re-wraps a line, and a long message wraps (a long unbroken
+   string or URL too) instead of being cut off or widening the box. */
+.chat{overscroll-behavior:contain;scrollbar-gutter:stable;overflow-x:hidden}
+.chat>*{flex:none}
+.chat .bub{max-width:88%;min-width:0;box-sizing:border-box}
+.chat .bub small,.chat .bub .tx{display:block;max-width:100%;overflow-wrap:anywhere}
+.chat-new{position:absolute;inset-inline-end:14px;bottom:6px;box-shadow:var(--sb-shadow-float)}
+.chat-new .sb-icon{margin-inline-end:4px}
 .chat .empty{text-align:center}
 .chat .empty.bad{color:var(--sb-danger-fg)}
 .jobs .jt{min-width:0}

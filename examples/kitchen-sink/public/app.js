@@ -46,7 +46,16 @@
   }
 
   // A wait as a person says it: seconds under a minute and a half, minutes after.
+  // "an hour", "30 minutes": how long a file lives.
+  function fmtTtl(seconds) {
+    if (seconds === 3600) return "an hour";
+    if (seconds % 3600 === 0) return seconds / 3600 + " hours";
+    if (seconds >= 120) return Math.round(seconds / 60) + " minutes";
+    return seconds + " seconds";
+  }
+
   function fmtWait(s) {
+    if (s >= 5400) return Math.ceil(s / 3600) + " h";
     return s < 90 ? s + " s" : Math.ceil(s / 60) + " min";
   }
 
@@ -506,6 +515,7 @@
       if (info.requests !== null && info.requests !== undefined) $("#m-req").textContent = fmtCount(info.requests);
       else $("#m-req").textContent = "n/a";
       $("#r2-cap").textContent = fmtBytes(info.max_upload_bytes).replace(" ", "\u00a0");
+      if (info.file_ttl_seconds) $("#r2-ttl").textContent = fmtTtl(info.file_ttl_seconds);
       $("#r2-max").textContent = fmtBytes(info.max_total_bytes);
       $("#r2-n-max").textContent = String(info.max_files);
       var kinds = ["kv", "d1", "r2", "queue", "durable_object", "service"];
@@ -726,13 +736,34 @@
     return holder;
   }
 
+  // "58 min", "4 min", "<1 min" until a file expires; "expired" once it has.
+  function fmtLeft(ms) {
+    if (!(ms > 0)) return "expired";
+    if (ms < 60000) return "<1 min";
+    if (ms >= 5400000) return Math.round(ms / 3600000) + " h";
+    return Math.round(ms / 60000) + " min";
+  }
+
+  // Count the expiry cells down every 20 seconds; when one runs out, ask the server for the list,
+  // which no longer has the file.
+  setInterval(function () {
+    var cells = document.querySelectorAll("#r2-list td.ex");
+    var gone = false;
+    cells.forEach(function (cell) {
+      var left = Number(cell.dataset.expires) - Date.now();
+      cell.textContent = fmtLeft(left);
+      if (!(left > 0)) gone = true;
+    });
+    if (gone) r2Load(false);
+  }, 20000);
+
   function renderFiles(data) {
     var body = $("#r2-list");
     clear(body);
     if (!data.objects.length) {
       var tr = el("tr");
       var empty = el("td", "empty", "The bucket is empty. Upload a file.");
-      empty.colSpan = 3;
+      empty.colSpan = 4;
       tr.appendChild(empty);
       body.appendChild(tr);
     }
@@ -764,6 +795,11 @@
       t.appendChild(wrap);
       tr.appendChild(t);
       tr.appendChild(el("td", "", fmtBytes(obj.size)));
+      // When the file is deleted, counted down on the page and checked again by the server.
+      var ex = el("td", "ex", fmtLeft(obj.expires - Date.now()));
+      ex.dataset.expires = String(obj.expires);
+      ex.title = "Deleted at " + new Date(obj.expires).toLocaleTimeString();
+      tr.appendChild(ex);
       var act = el("td", "act");
       var del = el("button", "ibtn");
       del.type = "button";
@@ -1081,7 +1117,41 @@
     chatBox.appendChild(div);
   }
 
+  // Is the list scrolled to its end (give or take a few pixels)? Only then does a new message scroll it.
+  function chatAtEnd() {
+    return chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight <= 24;
+  }
+
+  var chatUnread = 0;
+  function chatEnd() {
+    chatBox.scrollTop = chatBox.scrollHeight;
+    chatUnread = 0;
+    $("#chat-new").hidden = true;
+  }
+
+  chatBox.addEventListener("scroll", function () {
+    if (chatUnread && chatAtEnd()) chatEnd();
+  });
+  $("#chat-new").addEventListener("click", function () {
+    chatEnd();
+    chatBox.focus();
+  });
+
+  // One message at the end of the list, scrolled to only if the reader was at the end already or wrote
+  // it. Someone reading further up is left where they are, and told there is more below. The button
+  // that tells them floats over the list, so nothing around the list moves.
   function addBubble(msg) {
+    var follow = !chatCount || chatAtEnd() || msg.name === myName;
+    appendBubble(msg);
+    if (follow) chatEnd();
+    else {
+      chatUnread++;
+      $("#chat-new-n").textContent = chatUnread === 1 ? "1 new message" : chatUnread + " new messages";
+      $("#chat-new").hidden = false;
+    }
+  }
+
+  function appendBubble(msg) {
     if (!chatCount) clear(chatBox);
     chatCount++;
     var mine = msg.name === myName;
@@ -1095,7 +1165,6 @@
     chatBox.appendChild(b);
     // A flood must not grow the page: only the last 60 bubbles are kept.
     while (chatBox.children.length > 60) chatBox.removeChild(chatBox.firstChild);
-    chatBox.scrollTop = chatBox.scrollHeight;
   }
 
   function renderPresence(p) {
@@ -1144,7 +1213,8 @@
       if (msg.type === "history") {
         clear(chatBox);
         chatCount = 0;
-        msg.messages.forEach(addBubble);
+        msg.messages.forEach(appendBubble);
+        chatEnd();
         if (!msg.messages.length) chatNote("No messages yet. Say something.");
       } else if (msg.type === "presence") {
         renderPresence(msg);

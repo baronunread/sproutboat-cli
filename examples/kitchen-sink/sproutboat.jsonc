@@ -14,13 +14,17 @@
     // A file is stored as 1 MiB R2 objects, one per upload request and one per download read, so no
     // request holds a whole file and the worker stays flat (sproutd gives an app 32 MiB, and its R2
     // get() reads a whole object into memory). Per file 25 MiB, all files 200 MiB, and per client
-    // address 100 MiB uploaded and 250 MiB downloaded an hour.
+    // address 100 MiB uploaded a day (and an hour) and 250 MiB downloaded an hour. A file is deleted
+    // an hour after its upload, so the demo is no file hosting.
     "MAX_UPLOAD_BYTES": "26214400",
     "MAX_TOTAL_BYTES": "209715200",
     // One response sends at most this much of a file; the rest is read with Range requests. Each chunk a
     // response reads costs about seven times its size in worker memory until the response ends.
     "MAX_RESPONSE_BYTES": "2097152",
     "MAX_UPLOAD_PER_HOUR": "104857600",
+    // 04:00 UTC to 04:00 UTC, the same day as the daily reset
+    "MAX_UPLOAD_PER_DAY": "104857600",
+    "FILE_TTL_SECONDS": "3600",
     "MAX_DOWNLOAD_PER_HOUR": "262144000",
   },
   "secrets": ["ADMIN_TOKEN"],
@@ -45,8 +49,9 @@
   // sprout serves one turn at a time, so a binding pointing back at its own
   // project deadlocks until the request times out.
   "services": [{ "binding": "PEER", "service": "quote-service" }],
-  // */1 prunes sessions and logs a heartbeat; 0 4 * * * resets the demo data (UTC)
-  "triggers": { "crons": ["*/1 * * * *", "0 4 * * *"] },
+  // */1 prunes sessions and logs a heartbeat; */15 deletes the files whose hour is up (and chunks of
+  // abandoned uploads); 0 4 * * * resets the demo data (UTC)
+  "triggers": { "crons": ["*/1 * * * *", "*/15 * * * *", "0 4 * * *"] },
   "assets": {
     // site/ is public/ plus build-info.json: run `bun run build` (the harnesses and serve.ts do it for you)
     "directory": "site",
