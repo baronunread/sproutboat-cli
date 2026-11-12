@@ -901,7 +901,13 @@ async function fileResponse(env, request, info, download, t0) {
     "server-timing": "app;dur=" + ms2(t0),
   };
   // Nothing in a stored file may run or load anything here. (The PDF viewer needs to run, so a PDF is the exception.)
-  if (info.type !== "application/pdf") headers["content-security-policy"] = "default-src 'none'; sandbox";
+  // Opened directly, a video or audio file plays in a document the browser makes around it, under this
+  // policy. `sandbox` gives that document an opaque origin, and then the player cannot load the file at
+  // all (no duration, nothing plays), so media gets `media-src 'self'` without `sandbox`. A video/audio
+  // type with nosniff never runs as a page, so nothing is lost.
+  const media = info.type.startsWith("video/") || info.type.startsWith("audio/");
+  if (media) headers["content-security-policy"] = "default-src 'none'; media-src 'self'";
+  else if (info.type !== "application/pdf") headers["content-security-policy"] = "default-src 'none'; sandbox";
   // A Range is honoured unless If-Range names another version of the file.
   const ifRange = request.headers.get("if-range");
   const range = ifRange && ifRange !== headers.etag ? null : parseRange(request.headers.get("range"), info.size);
