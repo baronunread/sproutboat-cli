@@ -1,0 +1,23 @@
+{
+  // The same src/index.ts, run by workerd instead of Sproutboat: `bunx wrangler dev`.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "showcase",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "vars": { "EDITION": "cloudflare", "SLEEPER_URL": "", "DENSITY_URL": "", "COMPARE_URL": "" },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "showcase", "database_id": "00000000-0000-0000-0000-000000000000" },
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "TICKETS", "class_name": "TicketOffice" },
+      { "name": "BENCH", "class_name": "QueryBench" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TicketOffice", "QueryBench"] }],
+  "ratelimits": [
+    { "name": "RUNS", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
+    { "name": "BUYS", "namespace_id": "1002", "simple": { "limit": 240, "period": 60 } },
+  ],
+  "assets": { "directory": "site", "binding": "ASSETS" },
+}

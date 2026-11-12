@@ -1,0 +1,23 @@
+{
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "showcase",
+  "main": "src/index.ts",
+  // 2026-09-28 or later: fetch(request, env, ctx). 2026-10-29 or later: ctx.storage.sql inside a Durable Object.
+  "compatibility_date": "2026-11-01",
+  "vars": {
+    "EDITION": "cloud",
+    // The sleeping app the cold-start card wakes, and the Cloud endpoint for fleet numbers. Empty = the card
+    // shows only its dated benchmark.
+    "SLEEPER_URL": "",
+    "DENSITY_URL": "",
+    "COMPARE_URL": "",
+  },
+  "d1_databases": ["DB"],
+  "durable_objects": { "TICKETS": "TicketOffice", "BENCH": "QueryBench" },
+  "ratelimiters": [
+    { "binding": "RUNS", "limit": 30, "period": 60 },
+    { "binding": "BUYS", "limit": 240, "period": 60 },
+  ],
+  // site/ is public/ plus the generated files: run `bun run build`.
+  "assets": { "directory": "site", "binding": "ASSETS", "not_found_handling": "none" },
+}
