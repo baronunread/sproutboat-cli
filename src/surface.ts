@@ -110,11 +110,11 @@ export const COMMANDS: readonly Command[] = [
     name: "types",
     group: "Develop",
     emoji: "🧾",
-    short: "Write sproutboat-env.d.ts for your editor",
-    args: "[project-dir]",
-    brief: "[project-dir]",
+    short: "Write worker-configuration.d.ts for your editor",
+    args: "[path] [--env-interface <name>] [--strict-vars[=false]] [--include-runtime[=false]] [--include-env[=false]] [--check]",
+    brief: "[path]",
     summary:
-      "Write sproutboat-env.d.ts from the config, so an editor knows what `env` holds. `dev` and `deploy` refresh it when the config is newer.",
+      'Generate the project\'s `Env` as TypeScript from sproutboat.jsonc, like `wrangler types`: the file is worker-configuration.d.ts unless <path> names another; it declares `interface Env` (and `Cloudflare.Env`, which `import { env } from "cloudflare:workers"` reads) with a type per binding, literal types for vars (--strict-vars=false makes them `string`), and a Durable Object binding typed with its class when the entry is TypeScript. It references the runtime types shipped with the CLI (--include-runtime=false leaves that out, for a project that brings its own) instead of copying them in, and there is no --include-main-module. Type a handler as `export default { ... } satisfies ExportedHandler<Env>`. --check exits 1 when the file is missing or out of date, by the hash in its first lines. KV, D1, R2, Durable Object and Fetcher types follow the compatibility date, as the runtime does. `dev` and `deploy` refresh the default file when it was written by a plain `sproutboat types` and the config has moved on; they leave one made with other flags alone. A positional that is an existing directory is still read as the project directory. The file earlier releases wrote, sproutboat-env.d.ts, is removed when it is still as generated.',
   },
   {
     name: "dev",
