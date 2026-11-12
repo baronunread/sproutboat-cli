@@ -342,8 +342,8 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       generatedSource,
       target,
       optimize: input.optimize ?? "release",
-      // a non-LTO link is a different binary from the release one; only the alpha 22 channel honours it
-      lto: porfforChannel(input.withRestore) === "alpha-22" ? ltoEnabled({ ...input, target }) : true,
+      // a non-LTO link is a different binary from the release one; only the alpha 21 line's channels honour it
+      lto: porfforChannel(input.withRestore) !== "alpha-19" ? ltoEnabled({ ...input, target }) : true,
       toolchain: toolchainStamp(),
       toolchainPackageVersion,
       porffor: [PORFFOR_COMMIT_FULL, PORFFOR_ARCHIVE_SHA256],
@@ -351,7 +351,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       channel: porfforChannel(input.withRestore),
       // the alpha 22 channel's own inputs: the patched tree, the shim, the bridge, the build recipe, LTO
       channelInputs:
-        porfforChannel(input.withRestore) === "alpha-22"
+        porfforChannel(input.withRestore) !== "alpha-19"
           ? [A21_STANDALONE_FINGERPRINT, process.env.SPROUTBOAT_FLTO ?? ""]
           : null,
       native: embedded ? [sqliteStamp(), bearsslStamp()] : subtle ? [bearsslStamp()] : [],

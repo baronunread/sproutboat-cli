@@ -68,7 +68,7 @@ usage: sproutboat <init [name] | check [project-dir] | types [path] [--env-inter
 | `CXX` | C++ compiler for a host build's native-fetch link step (default `c++` if present, else the vendored Zig cross-compiler targeting this host). |
 | `AR` | Archiver used to assemble uSockets.a for a host build (default `ar` if present, else Zig's). |
 | `SPROUTBOAT_COMPILE_TIMEOUT_MS` | Porffor compile timeout in ms (default 600000). |
-| `SPROUTBOAT_PORFFOR_CHANNEL` | Porffor channel for standalone builds: `alpha-22` (default) or `alpha-19` (the previous compiler, kept as a fallback for one release). |
+| `SPROUTBOAT_PORFFOR_CHANNEL` | Porffor channel for standalone builds: `alpha-23` (default), `alpha-22` or `alpha-19` (the oldest compiler, kept as a fallback for one release). |
 | `SPROUTBOAT_RELEASE` | Same as `build --standalone --release`: link with LTO. Any value but empty, `0` or `false` turns it on. |
 | `SPROUTBOAT_FLTO` | Overrides link-time optimization on alpha 22 builds: `1` turns it on, `0` turns it off. |
 | `SPROUTBOAT_TOOLCHAIN_CACHE` | Managed Porffor and compiler cache root (default ~/.cache/sproutboat). |

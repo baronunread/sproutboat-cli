@@ -351,7 +351,7 @@ export const ENV_VARS: readonly EnvVar[] = [
   {
     name: "SPROUTBOAT_PORFFOR_CHANNEL",
     purpose:
-      "Porffor channel for standalone builds: `alpha-22` (default) or `alpha-19` (the previous compiler, kept as a fallback for one release).",
+      "Porffor channel for standalone builds: `alpha-23` (default), `alpha-22` or `alpha-19` (the oldest compiler, kept as a fallback for one release).",
   },
   {
     name: "SPROUTBOAT_RELEASE",

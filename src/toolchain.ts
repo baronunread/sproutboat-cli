@@ -19,6 +19,8 @@ import { BEARSSL_VERSION } from "./bearssl";
 import {
   PORFFOR_A22_CHANNEL,
   PORFFOR_A22_COMMIT,
+  PORFFOR_A23_CHANNEL,
+  PORFFOR_A23_COMMIT,
   standaloneChannel,
   type StandaloneChannel,
 } from "@sproutboat/toolchain/a21";
@@ -694,6 +696,7 @@ export function porfforRoot(start = import.meta.dir): string {
 /** The Porffor release a build compiles with, on the standalone channel it uses (default: the environment's). */
 export function porfforVersion(channel: StandaloneChannel = standaloneChannel()): string {
   if (process.env.PORFFOR_VERSION) return process.env.PORFFOR_VERSION;
+  if (channel === "alpha-23") return `${PORFFOR_A23_CHANNEL} (${PORFFOR_A23_COMMIT})`;
   if (channel === "alpha-22") return `${PORFFOR_A22_CHANNEL} (${PORFFOR_A22_COMMIT})`;
   return `${PORFFOR_CHANNEL} (${PORFFOR_COMMIT})`;
 }
