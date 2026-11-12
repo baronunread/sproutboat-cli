@@ -30,7 +30,11 @@ export type Options = {
 export const COMMAND_OPTIONS = {
   init: {},
   check: {},
-  types: {},
+  // The booleans take `--strict-vars=false` as in Wrangler (types-cmd.ts reads the pair); `--no-...` is the short way.
+  types: {
+    value: ["--env-interface", "--strict-vars", "--include-runtime", "--include-env"],
+    flag: ["--check", "--no-strict-vars", "--no-include-runtime", "--no-include-env"],
+  },
   dev: { value: ["--port"], flag: ["--no-watch"] },
   run: { value: ["--binary", "--port", "--data-dir", "--require"], flag: ["--check"] },
   build: {

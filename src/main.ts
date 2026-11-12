@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { existsSync, rmSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,7 +8,8 @@ import type { AssetFiles } from "./assets";
 import { pinBindingId, resourceRefs, type SproutboatConfig } from "./config";
 import { validateHttpSyncSource } from "./source";
 import { buildArtifact, emitGenerated } from "./build";
-import { generateTypes, TYPES_FILE } from "./types-gen";
+import { LEGACY_TYPES_FILE, TYPES_FILE } from "./types-gen";
+import { checkTypes, parseTypesArgs, planTypes, refreshTypes, removeLegacyTypes, TYPES_USAGE } from "./types-cmd";
 import { bundleHandler, BundleError, type BundleResult } from "./bundle";
 import { runDev } from "./dev";
 import { buildStandalone, emitStandalone, isReleaseBuild } from "./standalone-build";
@@ -479,33 +480,41 @@ async function check(directory?: string) {
   console.log(ok(`check passed — ${project.config.name} (${project.config.main}, native-fetch)`));
 }
 
-async function types(directory?: string) {
-  const project = await readProject(directory);
-  const path = resolve(project.directory, TYPES_FILE);
-  await writeFile(path, generateTypes(project.config));
-  console.log(ok(`wrote ${relative(process.cwd(), path) || TYPES_FILE}`));
-  console.log(dim("  Commit it. Add it to tsconfig `include` if your project has one."));
+async function types(args: string[]) {
+  const parsed = parseTypesArgs(args);
+  if ("error" in parsed) usageError(parsed.error, TYPES_USAGE);
+  // A positional that is a directory is the project directory, as it was before the positional became the output file.
+  const project = await readProjectConfig(
+    parsed.positional !== undefined && existsSync(parsed.positional) && (await stat(parsed.positional)).isDirectory()
+      ? parsed.positional
+      : undefined,
+  );
+  const plan = await planTypes(parsed, project.config, project.directory);
+  const shown = relative(process.cwd(), plan.path) || TYPES_FILE;
+  if (parsed.check) {
+    const state = await checkTypes(plan);
+    if (state === "current") {
+      console.log(ok(`types at ${shown} are up to date`));
+      return;
+    }
+    console.error(
+      `${rose("✗")} ${state === "missing" ? `${shown} does not exist` : `${shown} is out of date`}. Run \`sproutboat types\` to write it.`,
+    );
+    process.exit(1);
+  }
+  await mkdir(dirname(plan.path), { recursive: true });
+  await writeFile(plan.path, plan.text);
+  console.log(ok(`wrote ${shown}`));
+  if (await removeLegacyTypes(project.directory))
+    console.log(dim(`  removed ${LEGACY_TYPES_FILE}, which this file replaces`));
+  console.log(dim('  Commit it, and add it to the "include" of your tsconfig. Rerun after changing sproutboat.jsonc.'));
 }
 
-/**
- * Rewrite the generated types when the config has moved on, and only then.
- *
- * Called from `dev` and `deploy` so a binding added to sproutboat.jsonc cannot
- * sit unreflected in the editor. It writes only when the content actually
- * differs, which keeps it out of the way of git and of file watchers.
- */
-async function refreshTypes(projectDir: string, config: SproutboatConfig): Promise<void> {
-  const path = resolve(projectDir, TYPES_FILE);
-  const wanted = generateTypes(config);
-  try {
-    if ((await readFile(path, "utf8")) === wanted) return;
-  } catch {
-    // No file yet: only write one if the project already opted in by having a
-    // tsconfig. Generating into a plain JavaScript project is noise.
-    if (!(await Bun.file(resolve(projectDir, "tsconfig.json")).exists())) return;
-  }
-  await writeFile(path, wanted);
-  console.log(dim(`  ${TYPES_FILE} refreshed from sproutboat.jsonc`));
+/** `dev` and `deploy`: keep the default generated types current (types-cmd.ts says when it does and does not). */
+async function refreshProjectTypes(projectDir: string, config: SproutboatConfig): Promise<void> {
+  const { wrote, removedLegacy } = await refreshTypes(projectDir, config);
+  if (wrote) console.log(dim(`  ${TYPES_FILE} refreshed from sproutboat.jsonc`));
+  if (removedLegacy) console.log(dim(`  removed ${LEGACY_TYPES_FILE}, which it replaces`));
 }
 
 async function build(directory?: string, target: BuildTarget = "linux-x86_64") {
@@ -646,7 +655,7 @@ async function dev(args: string[]) {
     usageError("--env takes a name (letters, digits, - and _)", DEV_USAGE);
   for (const file of envFiles) if (!existsSync(file)) fail(`env file not found: ${file}`);
   const project = await readProject(directory);
-  await refreshTypes(project.directory, project.config);
+  await refreshProjectTypes(project.directory, project.config);
   console.log(dim(`Building ${project.config.name} for this machine (${hostTarget()})…`));
   await runDev({
     projectDir: project.directory,
@@ -661,7 +670,7 @@ async function dev(args: string[]) {
     // files changed, so the bundle captured at startup is stale by definition.
     rebuild: async () => {
       const next = await readProject(directory);
-      await refreshTypes(next.directory, next.config);
+      await refreshProjectTypes(next.directory, next.config);
       return { config: next.config, sourcePath: next.sourcePath, source: next.bundle.code };
     },
   });
@@ -896,7 +905,7 @@ async function deploy(args: string[]) {
     artifactDir = built.artifact.artifactDir;
     config = built.project.config;
     // After provisioning: ids may have been pinned into the config just now.
-    await refreshTypes(built.project.directory, built.project.config);
+    await refreshProjectTypes(built.project.directory, built.project.config);
   }
   const manifest = Bun.file(resolve(artifactDir, "manifest.json"));
   const sprout = Bun.file(resolve(artifactDir, "sprout"));
@@ -2531,7 +2540,7 @@ switch (resolveCommand(command)) {
     await check(args[0]);
     break;
   case "types":
-    await types(args[0]);
+    await types(args);
     break;
   case "dev":
     await dev(args);

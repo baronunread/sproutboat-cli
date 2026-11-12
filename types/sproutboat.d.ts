@@ -3,8 +3,8 @@
  *
  * Shipped with the CLI rather than as a separate package, so the types always
  * describe the runtime that the installed CLI compiles. `sproutboat types`
- * generates a project's `sproutboat-env.d.ts`, which references this file and
- * declares `env` with that project's bindings.
+ * generates a project's `worker-configuration.d.ts`, which references this file
+ * and declares `Env` with that project's bindings, as `wrangler types` does.
  *
  * KV, D1 and R2 are synchronous before the compatibility date that makes each one return a
  * Promise (D1 2026-10-24, KV 2026-10-25, R2 2026-10-26): `KVNamespace`, `D1Database` and
@@ -13,9 +13,24 @@
  * project's date. `await` works at every date. Before compatibility date 2026-09-28, `env` is a
  * global only and `ctx` is the second handler argument. From that date, `env`
  * is also passed as the second argument and `ctx` as the third.
+ *
+ * Durable Objects follow the same rule: from 2026-10-28 storage and `stub.fetch()` return Promises
+ * (`DurableObjectNamespaceAsync`, `DurableObjectStorageAsync`, `DurableObjectStateAsync`), from
+ * 2026-10-29 a class that extends `DurableObject` from "cloudflare:workers" is called over RPC, and from
+ * 2026-10-22 `fetch()` on a service or assets binding returns a Promise (`FetcherAsync`).
  */
 
+/// <reference path="./cloudflare-workers.d.ts" />
+
 declare global {
+  /**
+   * The project's bindings. Empty here; `sproutboat types` writes `interface Env extends ...` into
+   * `worker-configuration.d.ts`, which merges with this one, and `import { env } from "cloudflare:workers"` reads it.
+   */
+  namespace Cloudflare {
+    interface Env {}
+  }
+
   // ---------------------------------------------------------------- KV
 
   interface KVPutOptions {
@@ -262,6 +277,8 @@ declare global {
   }
 
   interface R2ObjectBodyAsync extends R2ObjectAsync {
+    /** Copies `httpMetadata` (content type, cache control, ...) onto `headers`, as on Workers. */
+    writeHttpMetadata(headers: Headers): void;
     body: ReadableStream;
     bodyUsed: boolean;
     arrayBuffer(): Promise<ArrayBuffer>;
@@ -419,6 +436,118 @@ declare global {
     getWebSocketAutoResponse(): WebSocketRequestResponsePair | null;
   }
 
+  // ------------------------------------- Durable Objects, from 2026-10-28
+
+  /** Workers RPC: the methods of a class, as Promise-returning stub methods. */
+  type RpcMethods<T> = {
+    [
+      K in keyof T as K extends
+        | "fetch"
+        | "alarm"
+        | "webSocketMessage"
+        | "webSocketClose"
+        | "webSocketError"
+        | "scheduled"
+        | "queue"
+        | "ctx"
+        | "env"
+        ? never
+        : T[K] extends (...args: never[]) => unknown
+          ? K
+          : never
+    ]: T[K] extends (...args: infer Args) => infer Result ? (...args: Args) => Promise<Awaited<Result>> : never;
+  };
+
+  /**
+   * What `namespace.get(id)` returns from 2026-10-28: `fetch()` is a Promise, and the methods of a
+   * class that extends `DurableObject` are callable as `await stub.method(...)` from 2026-10-29. Give
+   * the class as the type argument: `DurableObjectNamespaceAsync<Counter>`.
+   */
+  type DurableObjectStubAsync<T = undefined> = (T extends undefined ? unknown : RpcMethods<T>) & {
+    fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+    readonly id: DurableObjectId;
+    readonly name?: string;
+  };
+
+  interface DurableObjectNamespaceAsync<T = undefined> {
+    idFromName(name: string): DurableObjectId;
+    /** A 64-digit hex id, from `id.toString()`. */
+    idFromString(id: string): DurableObjectId;
+    newUniqueId(): DurableObjectId;
+    get(id: DurableObjectId): DurableObjectStubAsync<T>;
+    /** `get(idFromName(name))`, from 2026-10-29. */
+    getByName(name: string): DurableObjectStubAsync<T>;
+  }
+
+  interface DurableObjectListOptions {
+    prefix?: string;
+    start?: string;
+    startAfter?: string;
+    end?: string;
+    limit?: number;
+    reverse?: boolean;
+  }
+
+  interface DurableObjectTransaction {
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    put<T>(key: string, value: T): Promise<void>;
+    delete(key: string): Promise<boolean>;
+    list<T = unknown>(options?: DurableObjectListOptions): Promise<Map<string, T>>;
+    rollback(): void;
+  }
+
+  type SqlStorageValue = ArrayBuffer | string | number | null;
+
+  interface SqlStorageCursor<T = Record<string, SqlStorageValue>> extends Iterable<T> {
+    readonly columnNames: string[];
+    readonly rowsRead: number;
+    readonly rowsWritten: number;
+    toArray(): T[];
+    one(): T;
+    raw<R extends SqlStorageValue[] = SqlStorageValue[]>(): IterableIterator<R>;
+    next(): IteratorResult<T>;
+  }
+
+  /** From 2026-10-29: each object has its own SQLite database. */
+  interface SqlStorage {
+    exec<T = Record<string, SqlStorageValue>>(query: string, ...bindings: unknown[]): SqlStorageCursor<T>;
+    readonly databaseSize: number;
+  }
+
+  /** Storage from 2026-10-28: every call returns a Promise, and an object keeps its own input gate. */
+  interface DurableObjectStorageAsync {
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    get<T = unknown>(keys: string[]): Promise<Map<string, T>>;
+    put<T>(key: string, value: T): Promise<void>;
+    put(entries: Record<string, unknown>): Promise<void>;
+    delete(key: string): Promise<boolean>;
+    delete(keys: string[]): Promise<number>;
+    deleteAll(): Promise<void>;
+    list<T = unknown>(options?: DurableObjectListOptions): Promise<Map<string, T>>;
+    transaction<T>(closure: (txn: DurableObjectTransaction) => Promise<T>): Promise<T>;
+    /** Synchronous transaction over `sql`; rolls back if `closure` throws. */
+    transactionSync<T>(closure: () => T): T;
+    sync(): Promise<void>;
+    /** At most one alarm is pending per object; a later `setAlarm` replaces it. */
+    setAlarm(scheduledTime: number | Date): Promise<void>;
+    getAlarm(): Promise<number | null>;
+    deleteAlarm(): Promise<void>;
+    readonly sql: SqlStorage;
+  }
+
+  interface DurableObjectStateAsync {
+    readonly id: DurableObjectId;
+    readonly storage: DurableObjectStorageAsync;
+    /** Holds every other event out of the object until `callback` settles. Use it for start-up work. */
+    blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+    waitUntil(promise: Promise<unknown>): void;
+    acceptWebSocket(ws: WebSocket, tags?: string[]): void;
+    getWebSockets(tag?: string): WebSocket[];
+    getTags(ws: WebSocket): string[];
+    setWebSocketAutoResponse(pair?: WebSocketRequestResponsePair): void;
+    getWebSocketAutoResponse(): WebSocketRequestResponsePair | null;
+  }
+
   // ---------------------------------------------------------- WebSockets
 
   /**
@@ -502,10 +631,19 @@ declare global {
 
   // ------------------------------------ Fetchers: services and assets
 
-  /** A service binding, and the shape of the static-asset binding. */
+  /** A service binding, and the shape of the static-asset binding, before 2026-10-22. */
   interface Fetcher {
     fetch(request: Request): Response;
   }
+
+  /**
+   * From 2026-10-22 `fetch()` on a service or assets binding returns a Promise. A service binding to a
+   * `WorkerEntrypoint` also exposes its methods over RPC from 2026-11-18: give the class as the type
+   * argument, `FetcherAsync<QuoteService>`, and `await env.PEER.random()` is checked.
+   */
+  type FetcherAsync<T = undefined> = (T extends undefined ? unknown : RpcMethods<T>) & {
+    fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  };
 
   // --------------------------------------------------------- Handlers
 
@@ -513,6 +651,15 @@ declare global {
     /** The expression that fired, as written in `triggers.crons`. */
     cron: string;
     scheduledTime: number;
+  }
+
+  /** What `scheduled(controller, env, ctx)` receives, from compatibility date 2026-09-28. */
+  interface ScheduledController {
+    /** The expression that fired, as written in `triggers.crons`. */
+    readonly cron: string;
+    readonly scheduledTime: number;
+    /** Do not retry this run if the handler throws. */
+    noRetry(): void;
   }
 
   /** Work that outlives the response, drained in-process and capped at 25s. */
@@ -527,6 +674,16 @@ declare global {
     fetch(request: Request, ctx: ExecutionContext): Response | Promise<Response>;
     scheduled?(event: ScheduledEvent, ctx: ExecutionContext): void | Promise<void>;
     queue?(batch: MessageBatch<QueueBody>, ctx: ExecutionContext): void | Promise<void>;
+  }
+
+  /**
+   * The default export of a Worker, as in Workers: `satisfies ExportedHandler<Env>`. Compatibility dates
+   * from 2026-09-28; `Env` comes from `sproutboat types`.
+   */
+  interface ExportedHandler<Bindings = unknown, QueueBody = unknown> {
+    fetch?(request: Request, env: Bindings, ctx: ExecutionContext): Response | Promise<Response>;
+    scheduled?(controller: ScheduledController, env: Bindings, ctx: ExecutionContext): void | Promise<void>;
+    queue?(batch: MessageBatch<QueueBody>, env: Bindings, ctx: ExecutionContext): void | Promise<void>;
   }
 
   /** Handler signature for compatibility dates from 2026-09-28. */
