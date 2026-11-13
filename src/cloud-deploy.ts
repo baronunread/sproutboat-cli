@@ -182,7 +182,8 @@ type SpecAdditions = {
   queue_consumers?: RecordQueueConsumer[];
   secrets_patch?: { set: Record<string, string> };
 };
-type AppSpec = { module: { sha256: string }; hosts: string[]; assets_manifest_ref?: string } & SpecAdditions;
+type HostsField = { hosts_patch: { add: string[] } } | { hosts: string[] };
+type AppSpec = { module: { sha256: string }; assets_manifest_ref?: string } & HostsField & SpecAdditions;
 type Call = { method: string; path: string; body?: BodyInit; json?: object; ok?: number[] };
 type CallResult = { status: number; text: string; body?: JsonObject; headers: Headers };
 type CallFn = (c: Call) => Promise<CallResult>;
@@ -210,14 +211,41 @@ export function makeCall(plan: CloudCredentials): CallFn {
   };
 }
 
-/** What the app holds now: tells a first deploy from an update, and keeps its assets when this deploy has none. */
+/**
+ * Send an app spec that adds the deploy's own hosts (the `<project>.<team>.sproutboat.app` name) to the app's routes and
+ * removes none. `hosts` on the Cloud is the whole list, so sending only the default host would unroute every custom domain an
+ * operator added; `hosts_patch` leaves the others alone, as `wrangler deploy` leaves dashboard routes when the config declares
+ * none. A Cloud that predates `hosts_patch` refuses the key by name; then the live routes (read at the start of this deploy)
+ * are merged here and sent as `hosts`.
+ */
+async function sendWithHosts(
+  plan: CloudCredentials,
+  call: CallFn,
+  wanted: string[],
+  live: string[],
+  io: CloudIo,
+  request: (hosts: HostsField) => Call,
+): Promise<CallResult> {
+  const first = request({ hosts_patch: { add: wanted } });
+  const answer = await call({ ...first, ok: [...(first.ok ?? []), 400] });
+  if (answer.status !== 400) return answer;
+  const body = answer.body;
+  if (body?.path !== "hosts_patch" || !String(body.error).startsWith("unknown key"))
+    throw new CloudError(explainApiFailure(400, answer.text, plan.tokenFromEnv));
+  io.log(dim("  hosts   this Cloud has no hosts_patch yet; sending its current routes back with this deploy's"));
+  return call(request({ hosts: [...live, ...wanted.filter((host) => !live.includes(host))] }));
+}
+
+/** What the app holds now: tells a first deploy from an update, keeps its assets when this deploy has none, and lists its routes. */
 async function resolveAssets(
   call: CallFn,
   plan: { project: string; assets?: AssetBundle },
   io: CloudIo,
-): Promise<{ created: boolean; assetsRef: string | undefined }> {
+): Promise<{ created: boolean; assetsRef: string | undefined; hosts: string[] }> {
   const current = await call({ method: "GET", path: `/v1/apps/${plan.project}`, ok: [404] });
   const created = current.status === 404;
+  const live = jsonObject(current.body?.spec ?? null)?.hosts;
+  const hosts = Array.isArray(live) ? live.filter(isString) : [];
   let assetsRef: string | undefined;
   if (plan.assets) {
     await pushAssets(call, plan.assets, io);
@@ -230,7 +258,7 @@ async function resolveAssets(
       io.log(`  assets  keeping the current ${ref.slice(0, 19)}`);
     }
   }
-  return { created, assetsRef };
+  return { created, assetsRef, hosts };
 }
 
 /** Wait for a host to apply `generation`; false at the deadline. */
@@ -264,17 +292,19 @@ export async function deployToCloud(plan: CloudDeployPlan, io: CloudIo): Promise
   const call = makeCall(plan);
   checkServiceBindings(plan.project, plan.services ?? [], plan.compatibilityDate);
   const wiring = await resolveServiceBindings(call, plan.project, plan.services ?? []);
-  const { created, assetsRef } = await resolveAssets(call, plan, io);
+  const { created, assetsRef, hosts: liveHosts } = await resolveAssets(call, plan, io);
 
   const bytes = new Uint8Array(readFileSync(plan.modulePath));
   const sha = createHash("sha256").update(bytes).digest("hex");
   io.log(`  module  ${sha.slice(0, 12)} (${(bytes.byteLength / 1024).toFixed(0)} KiB)`);
   await call({ method: "PUT", path: `/v1/modules/${sha}`, body: bytes });
 
-  const spec: AppSpec = { module: { sha256: sha }, hosts: plan.hosts };
-  if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
-  applyExtras(spec, wiring, plan.secrets, plan.cloudBindings);
-  const put = await call({ method: "PUT", path: `/v1/apps/${plan.project}`, json: spec });
+  const put = await sendWithHosts(plan, call, plan.hosts, liveHosts, io, (hosts) => {
+    const spec: AppSpec = { module: { sha256: sha }, ...hosts };
+    if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
+    applyExtras(spec, wiring, plan.secrets, plan.cloudBindings);
+    return { method: "PUT", path: `/v1/apps/${plan.project}`, json: spec };
+  });
   const generation = put.body?.record_generation;
   if (!isSafeInteger(generation)) throw new CloudError("the Cloud's reply carried no record generation");
   const url = plan.hosts[0] === undefined ? undefined : `https://${plan.hosts[0]}`;
@@ -361,7 +391,7 @@ export const SOURCE_MAX_BYTES = 8 * 1024 * 1024;
 /** Ctrl-C while the build runs: the build was asked to cancel (exit 130). */
 export class Interrupted extends CloudError {}
 
-type BuildSpec = { hosts: string[]; assets_manifest_ref?: string } & SpecAdditions;
+type BuildSpec = { assets_manifest_ref?: string } & HostsField & SpecAdditions;
 type BuildCli = { version: string; runtime?: string; toolchain?: string };
 
 export type BuildPlan = CloudCredentials &
@@ -683,7 +713,7 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
       "--secrets-file is applied once the build is ready, so it cannot be combined with --no-wait; drop --no-wait, or set the secrets afterwards with `sproutboat secrets put`",
     );
   const wiring = await resolveServiceBindings(call, plan.project, plan.services ?? []);
-  const { created, assetsRef } = await resolveAssets(call, plan, io);
+  const { created, assetsRef, hosts: liveHosts } = await resolveAssets(call, plan, io);
 
   const missingBody = (await call({ method: "POST", path: "/v1/sources/missing", json: { sha256: [sha] } })).body
     ?.missing;
@@ -694,19 +724,22 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
     await call({ method: "PUT", path: `/v1/sources/${sha}`, body: bytes });
   } else io.log(`${label}  unchanged`);
 
-  const spec: BuildSpec = { hosts: plan.hosts };
-  if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
-  // The build spec is stored in plaintext by the Cloud: secrets never go in it (they follow the build, below).
-  applyExtras(spec, wiring, undefined, plan.cloudBindings);
   const cli: BuildCli = { version: plan.cli.version };
   if (plan.cli.runtime) cli.runtime = plan.cli.runtime;
   if (plan.cli.toolchain) cli.toolchain = plan.cli.toolchain;
   const build = { v: 1, name: plan.project, cli };
-  const accepted = await call({
-    method: "POST",
-    path: `/v1/apps/${plan.project}/builds`,
-    json: { source_sha256: sha, kind: "generated", build, spec },
-    ok: [429, 503],
+  // The routes are merged when the build is applied, minutes from now, so one added meanwhile is kept too.
+  const accepted = await sendWithHosts(plan, call, plan.hosts, liveHosts, io, (hosts) => {
+    const spec: BuildSpec = { ...hosts };
+    if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
+    // The build spec is stored in plaintext by the Cloud: secrets never go in it (they follow the build, below).
+    applyExtras(spec, wiring, undefined, plan.cloudBindings);
+    return {
+      method: "POST",
+      path: `/v1/apps/${plan.project}/builds`,
+      json: { source_sha256: sha, kind: "generated", build, spec },
+      ok: [429, 503],
+    };
   });
   if (accepted.status === 429 || accepted.status === 503) throw new CloudError(explainBuildRefusal(accepted));
   let view = parseBuildView(accepted.body);

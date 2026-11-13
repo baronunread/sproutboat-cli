@@ -223,9 +223,10 @@ export const COMMANDS: readonly Command[] = [
     group: "Configure",
     emoji: "🌐",
     short: "Attach custom domains",
-    args: "<list | add <host> | verify <host> | delete <host>> [project-dir] [--api-url <url>]",
+    args: "<list | add <host> | verify <host> | delete <host>> [project-dir] [--api-url <url>] [--account <team>]",
     brief: "<list | add | verify | delete>",
-    summary: "Attach a custom domain to the project (TXT-verified). No sub-command lists.",
+    summary:
+      "List the project's domains, or attach one (TXT-verified). On the Cloud only list works: custom domains are added by an operator, and deploys keep them.",
   },
   {
     name: "secrets",

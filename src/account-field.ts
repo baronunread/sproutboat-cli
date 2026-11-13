@@ -50,13 +50,44 @@ const MIGRATIONS_DIR_ERROR = 'migrations_dir must be a relative folder inside th
 const validMigrationsDir = (dir: JsonValue | undefined): boolean =>
   isString(dir) && dir !== "" && !dir.startsWith("/") && !/^[A-Za-z]:/.test(dir) && !dir.split(/[\\/]/).includes("..");
 
+/** The `main` a project with assets and no `main` gets: a file that does not exist, written by `readProject` into `.sproutboat/`. */
+export const ASSETS_ONLY_MAIN = "src/.assets-only.js";
+
+/**
+ * The entry a Worker with only static assets runs, as Wrangler allows (`assets` and no `main`). The platform serves a matching
+ * file before any code runs; a request that matches none reaches this, and `env.<binding>.fetch` answers it with the project's
+ * `not_found_handling`: the single-page app shell, the nearest 404 page, or a plain 404.
+ */
+export function assetsOnlySource(binding: string): string {
+  return [
+    "// Written by sproutboat: this project has `assets` and no `main`, so it is a Worker with only static assets.",
+    "export default {",
+    "  fetch(request, env) {",
+    `    return env.${binding}.fetch(request);`,
+    "  },",
+    "};",
+    "",
+  ].join("\n");
+}
+
+/** `assets` with a directory and no `main`: the assets-only case. The entry and the binding it calls are filled in. */
+function withAssetsOnlyEntry(config: JsonObject): JsonObject {
+  const assets = jsonObject(config.assets ?? null);
+  if (config.main !== undefined || assets === undefined) return config;
+  return { ...config, main: ASSETS_ONLY_MAIN, assets: { ...assets, binding: assets.binding ?? "ASSETS" } };
+}
+
 /**
  * parseConfig for a file that may carry the CLI-owned fields `account` and `migrations_dir`: they are validated here and
  * removed before the shared schema sees them.
  */
 export function parseProjectConfig(source: string): ConfigValidation {
   const loose = parseLoose(source);
-  if (loose === undefined || !("account" in loose || "migrations_dir" in loose)) return parseConfig(source);
+  if (loose === undefined) return parseConfig(source);
+  if (!("account" in loose || "migrations_dir" in loose)) {
+    const filled = withAssetsOnlyEntry(loose);
+    return filled === loose ? parseConfig(source) : parseConfig(JSON.stringify(filled));
+  }
   const errors: string[] = [];
   if ("account" in loose && (!isString(loose.account) || !ACCOUNT_RE.test(loose.account)))
     errors.push("account must be the URL name of a team (lowercase letters, digits and dashes)");
@@ -65,5 +96,5 @@ export function parseProjectConfig(source: string): ConfigValidation {
   const rest = Object.fromEntries(
     Object.entries(loose).filter(([key]) => key !== "account" && key !== "migrations_dir"),
   );
-  return parseConfig(JSON.stringify(rest));
+  return parseConfig(JSON.stringify(withAssetsOnlyEntry(rest)));
 }

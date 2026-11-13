@@ -14,6 +14,10 @@ export type FakeOptions = {
   role?: string;
   applyStates?: string[];
   existingAssetsRef?: string;
+  /** Hosts the app already routes (an operator added them): the app exists with these in its spec. */
+  existingHosts?: string[];
+  /** A Cloud that predates `hosts_patch`: a spec carrying it is a 400 naming the key, as the real one answered. */
+  legacyHosts?: boolean;
   appExists?: boolean;
   /** Fail every authenticated call with this status. */
   failWith?: { status: number; body: JsonObject };
@@ -129,8 +133,22 @@ export function startFakeCloud(options: FakeOptions = {}) {
   const dataDenied = (need: string) =>
     Response.json({ error: "forbidden", reason: "forbidden", need }, { status: 403 });
   const permissionDenied = (need: string) => Response.json({ error: "forbidden", need }, { status: 403 });
+  /** The Cloud's rules for `hosts` and `hosts_patch` (apps.ts normalizeSpec), as an error reply or null. */
+  const checkHosts = (sent: JsonObject): Response | null => {
+    const refuse = (error: string, path: string) => Response.json({ error, reason: "invalid", path }, { status: 400 });
+    if (sent.hosts_patch === undefined) return null;
+    if (options.legacyHosts) return refuse("unknown key hosts_patch", "hosts_patch");
+    if (sent.hosts !== undefined) return refuse("hosts and hosts_patch are mutually exclusive", "hosts_patch");
+    const add = jsonObject(sent.hosts_patch)?.add;
+    for (const [i, host] of (Array.isArray(add) ? add : []).entries())
+      if (!isString(host) || !/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(\/.*)?$/.test(host))
+        return refuse(`hosts_patch.add[${i}]: ${JSON.stringify(host)} is not a valid route`, `hosts_patch.add[${i}]`);
+    return null;
+  };
   /** The Cloud's spec rules for service bindings and secrets, then the merge. Returns an error reply or null. */
   const checkAndStore = (sent: JsonObject, project: string): Response | null => {
+    const refusedHosts = checkHosts(sent);
+    if (refusedHosts) return refusedHosts;
     const patch = jsonObject(sent.secrets_patch ?? null);
     if (sent.secrets !== undefined && patch)
       return Response.json({ error: "secrets and secrets_patch are exclusive" }, { status: 400 });
@@ -162,10 +180,22 @@ export function startFakeCloud(options: FakeOptions = {}) {
     return null;
   };
   const stored = (sent: JsonObject): JsonObject => {
-    const { secrets: _a, secrets_patch: _b, ...rest } = sent;
-    return rest;
+    const { secrets: _a, secrets_patch: _b, hosts_patch: patch, ...rest } = sent;
+    const edit = jsonObject(patch ?? null);
+    if (!edit) return rest;
+    // hosts_patch merges into the live routes (an app that does not exist yet starts with none): removals first, then additions.
+    const live = Array.isArray(spec.hosts) ? spec.hosts.filter(isString) : [];
+    const drop = new Set(Array.isArray(edit.remove) ? edit.remove : []);
+    const hosts = live.filter((host) => !drop.has(host));
+    for (const host of Array.isArray(edit.add) ? edit.add : [])
+      if (isString(host) && !hosts.includes(host)) hosts.push(host);
+    return { ...rest, hosts };
   };
   if (options.existingAssetsRef) spec.assets_manifest_ref = options.existingAssetsRef;
+  if (options.existingHosts) {
+    spec.hosts = options.existingHosts;
+    appExists = true;
+  }
 
   const databases = new Map<string, Database>((options.d1 ?? []).map((name) => [name, new Database(":memory:")]));
   const d1Requests: JsonObject[] = [];
@@ -216,7 +246,10 @@ export function startFakeCloud(options: FakeOptions = {}) {
     error: b.error,
     module_sha256: b.state === "ready" ? "f".repeat(64) : null,
     record_generation: b.generation,
-    hosts: jsonObject(b.body.spec ?? null)?.hosts ?? [],
+    hosts:
+      jsonObject(b.body.spec ?? null)?.hosts ??
+      jsonObject(jsonObject(b.body.spec ?? null)?.hosts_patch ?? null)?.add ??
+      [],
     input_hash: "1".repeat(64),
     queued_at: `2026-11-11T10:00:0${b.id.slice(-1)}.000Z`,
     finished_at:
@@ -368,6 +401,8 @@ export function startFakeCloud(options: FakeOptions = {}) {
         const buildSpec = jsonObject(sent.spec ?? null) ?? {};
         if ("secrets" in buildSpec || "secrets_patch" in buildSpec)
           return Response.json({ error: "secrets do not belong in a build spec" }, { status: 400 });
+        const refusedHosts = checkHosts(buildSpec);
+        if (refusedHosts) return refusedHosts;
         if (!sources.has(sent.source_sha256))
           return Response.json({ error: "source not uploaded", reason: "source-missing" }, { status: 409 });
         buildRequests.push(sent);

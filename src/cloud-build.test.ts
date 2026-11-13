@@ -159,12 +159,32 @@ describe("buildAndDeploy", () => {
           source_sha256: sha256(source),
           kind: "generated",
           build: { v: 1, name: "hello", cli: { version: "9.9.9" } },
-          spec: { hosts: ["hello.acme.sproutboat.app"] },
+          spec: { hosts_patch: { add: ["hello.acme.sproutboat.app"] } },
         },
       ]);
       expect(cloud.spec).toMatchObject({ hosts: ["hello.acme.sproutboat.app"] });
       expect(cloud.calls.every((c) => c.auth === `Bearer ${FAKE_KEY}`)).toBe(true);
       expect(cloud.calls.some((c) => c.path.startsWith("/v1/modules/"))).toBe(false);
+    });
+  });
+
+  test("a deploy from source keeps the routes an operator added", async () => {
+    const live = ["hello.acme.sproutboat.app", "risulta.dev"];
+    await withCloud({ existingHosts: live }, async (cloud) => {
+      await buildAndDeploy(plan(cloud.url), fakeIo().io);
+      expect(cloud.buildRequests[0]).toMatchObject({ spec: { hosts_patch: { add: ["hello.acme.sproutboat.app"] } } });
+      expect(cloud.spec.hosts).toEqual(live);
+    });
+  });
+
+  test("a Cloud without hosts_patch gets the live routes sent back with the build", async () => {
+    await withCloud({ existingHosts: ["risulta.dev"], legacyHosts: true }, async (cloud) => {
+      const { io, lines } = fakeIo();
+      await buildAndDeploy(plan(cloud.url), io);
+      expect(cloud.buildRequests).toHaveLength(1);
+      expect(cloud.buildRequests[0]).toMatchObject({ spec: { hosts: ["risulta.dev", "hello.acme.sproutboat.app"] } });
+      expect(cloud.spec.hosts).toEqual(["risulta.dev", "hello.acme.sproutboat.app"]);
+      expect(lines.some((line) => line.includes("no hosts_patch yet"))).toBe(true);
     });
   });
 
