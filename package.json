@@ -48,6 +48,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint .",
     "examples": "bun examples/smoke.ts",
+    "examples:types": "bun examples/typecheck.ts",
+    "examples:workerd": "bun examples/workerd.ts",
     "build:cli": "bun scripts/build-cli.ts",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
@@ -75,7 +77,8 @@
     "lefthook": "2.1.14",
     "oxfmt": "0.70.0",
     "oxlint": "1.85.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "wrangler": "4.161.0"
   },
   "optionalDependencies": {
     "@sproutboat/cli-darwin-arm64": "0.54.0",

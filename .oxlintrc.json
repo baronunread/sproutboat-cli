@@ -23,6 +23,12 @@
       "specifier": "./tools/oxlint/anti-slop/index.ts"
     }
   ],
+  "overrides": [
+    {
+      "files": ["examples/*/src/**", "examples/*/*/src/**"],
+      "rules": { "anti-slop/require-safety-comment-for-type-assertion": "off" }
+    }
+  ],
   "rules": {
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",

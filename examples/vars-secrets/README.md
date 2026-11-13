@@ -1,5 +1,9 @@
 # vars-secrets: one binary, different settings
 
+What it shows: `vars` (plain text in `sproutboat.jsonc`) and `secrets` (declared by name, never in the build) read from `env` in a standard Workers handler. The handler is typed with `satisfies ExportedHandler<Env>`; `sproutboat types` writes `Env` into `worker-configuration.d.ts`.
+
+To deploy: `sproutboat secrets put API_KEY` (it reads the value from stdin), then `sproutboat deploy`; or `sproutboat deploy --secrets-file prod.env` on the first deploy.
+
 `vars` are compiled in. `secrets` never are: a standalone binary reads its port,
 data directory and secrets from the environment when it starts, so the same file
 runs on a laptop and on a server with different settings. `sproutboat run`

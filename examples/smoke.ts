@@ -25,15 +25,13 @@ import { descendantPids, Harness, HarnessFailure } from "./lib/harness";
 import { buildStandalone } from "../src/standalone-build";
 import { bundleHandler } from "../src/bundle";
 import { parseConfig } from "../src/config";
-import type { JsonValue } from "../src/json";
+import { CHECKS, SECRETS, STANDALONE_SKIPS, type Check, type Context, type Ok } from "./checks";
 import { prunePorfforBuilds } from "../src/compile";
 import { ensurePorffor } from "../src/porffor-toolchain";
 import { ensurePorfforPatched } from "../src/patch-porffor";
 import { ensureUWebSocketsHost, UwsUnavailableError } from "../src/toolchain";
 import { ensureSqliteObject } from "../src/sqlite";
 import { ensureBearssl } from "../src/bearssl";
-
-type Check = (base: string, ok: (name: string, cond: boolean, detail?: JsonValue) => void) => Promise<void>;
 
 // #276: each example's requests go through its own Harness (found by origin),
 // so every one has a deadline (SB_HARNESS_REQUEST_TIMEOUT_MS, default 30 s),
@@ -48,82 +46,12 @@ const fetch = (url: string, init?: RequestInit) => {
 
 const text = async (url: string, init?: RequestInit) => (await fetch(url, init)).text();
 
-const EXAMPLES = {
-  hello: async (base, ok) => {
-    ok("greets the world", (await text(base + "/")) === "Hello, world!\n");
-    ok("reads the query string", (await text(base + "/?name=sprout")) === "Hello, sprout!\n");
-  },
+const context: Context = { fetch, text, runtime: "standalone" };
 
-  "cf-json": async (base, ok) => {
-    const response = await fetch(base + "/");
-    ok("returns a JSON content type", response.headers.get("content-type")?.includes("application/json") === true);
-    ok("returns the JSON object", JSON.stringify(await response.json()) === '{"hello":"world"}');
-  },
-
-  "cf-cookies": async (base, ok) => {
-    ok(
-      "reads a named cookie",
-      (await text(base + "/", { headers: { cookie: "other=1; __uid=abc=123" } })) === "abc=123",
-    );
-    ok(
-      "does not match a prefix",
-      (await text(base + "/", { headers: { cookie: "__uid_extra=no" } })) === "No cookie with name: __uid",
-    );
-  },
-
-  "cf-redirects": async (base, ok) => {
-    const redirect = await fetch(base + "/old-guide?from=search", { redirect: "manual" });
-    ok("redirects a mapped path", redirect.status === 301 && redirect.headers.get("location") === base + "/guide", {
-      status: redirect.status,
-      location: redirect.headers.get("location"),
-    });
-    ok("does not redirect an unmapped path", (await fetch(base + "/unknown", { redirect: "manual" })).status === 404);
-  },
-
-  "cf-headers": async (base, ok) => {
-    const response = await fetch(base + "/");
-    ok("returns the page", (await response.text()) === "Protected page");
-    ok(
-      "sets security headers",
-      response.headers.get("x-content-type-options") === "nosniff" &&
-        response.headers.get("x-frame-options") === "DENY" &&
-        response.headers.get("content-security-policy") === "default-src 'none'",
-    );
-  },
-
-  "cf-post": async (base, ok) => {
-    const json = await fetch(base + "/", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: '{"message":"hello"}',
-    });
-    ok(
-      "reads JSON bodies",
-      json.status === 200 && JSON.stringify(await json.json()) === '{"received":{"message":"hello"}}',
-    );
-    const invalid = await fetch(base + "/", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{",
-    });
-    ok("rejects malformed JSON", invalid.status === 400);
-    ok(
-      "reads text bodies",
-      (await text(base + "/", { method: "POST", headers: { "content-type": "text/plain" }, body: "hello" })) ===
-        "hello",
-    );
-    ok(
-      "rejects unsupported media",
-      (
-        await fetch(base + "/", {
-          method: "POST",
-          headers: { "content-type": "application/octet-stream" },
-          body: "a",
-        })
-      ).status === 415,
-    );
-  },
-
+// The public examples share their requests with the workerd run (checks.ts). What is here is only for the fixtures that
+// are not examples. Each check is handed the runner's own request functions.
+type Verbatim = (base: string, ok: Ok) => Promise<void>;
+const FIXTURES = {
   "worker-return-json": async (base, ok) => {
     const response = await fetch(base + "/");
     ok("returns the original JSON", response.status === 200 && (await response.text()) === '{"hello":"world"}');
@@ -152,170 +80,22 @@ const EXAMPLES = {
   "workers-contract": async (base, ok) => {
     ok("passes env second and ctx third", (await text(base + "/")) === "sproutboat:true");
   },
+} satisfies Record<string, Verbatim>;
 
-  kv: async (base, ok) => {
-    await fetch(base + "/greeting", { method: "PUT", body: "hello" });
-    ok("get returns what put stored", (await text(base + "/greeting")) === "hello\n");
-    ok("list includes the key", (await text(base + "/")).includes("greeting"));
-    ok("a missing key is a 404", (await fetch(base + "/nope")).status === 404);
-    await fetch(base + "/greeting", { method: "DELETE" });
-    ok("delete removes it", (await fetch(base + "/greeting")).status === 404);
-  },
-
-  d1: async (base, ok) => {
-    const created = await (await fetch(base + "/", { method: "POST", body: '{"title":"read the docs"}' })).json();
-    ok("insert returns a row id", Number(created.id) > 0, created);
-    const rows = await (await fetch(base + "/")).json();
-    ok(
-      "select returns the row",
-      rows.some((r: { title: string }) => r.title === "read the docs"),
-      rows,
-    );
-  },
-
-  // The d1 example rebuilt at compatibility date 2026-10-22, where request.body is a
-  // ReadableStream and fetch() is asynchronous. It catches an example handler that only
-  // works before that date, which no example's own config would.
-  "d1@2026-10-22": async (base, ok) => {
-    const created = await (await fetch(base + "/", { method: "POST", body: '{"title":"read the docs"}' })).json();
-    ok("insert returns a row id", Number(created.id) > 0, created);
-    const rows = await (await fetch(base + "/")).json();
-    ok(
-      "select returns the row",
-      rows.some((r: { title: string }) => r.title === "read the docs"),
-      rows,
-    );
-  },
-
-  r2: async (base, ok) => {
-    await fetch(base + "/notes.txt", { method: "PUT", body: "the file contents" });
-    const got = await fetch(base + "/notes.txt");
-    ok("get returns the body", (await got.text()) === "the file contents");
-    ok("get returns an etag", !!got.headers.get("etag"));
-    ok("list includes the key", (await text(base + "/")).includes("notes.txt"));
-  },
-
-  queue: async (base, ok) => {
-    const sent = await fetch(base + "/", { method: "POST", body: '{"email":"someone@example.com"}' });
-    ok("send accepts without waiting", sent.status === 202);
-    // The consumer runs out of band — poll rather than assume it already has.
-    let delivered = false;
-    for (let i = 0; i < 40 && !delivered; i++) {
-      delivered = (await text(base + "/")).includes("someone@example.com");
-      if (!delivered) await Bun.sleep(250);
-    }
-    ok("the consumer received the message", delivered);
-  },
-
-  cron: async (base, ok) => {
-    // Only that the handler and binding work: waiting for a */1 tick would put
-    // a minute into every run. The cron firing itself is covered by the
-    // kitchen-sink conformance suite.
-    ok("reports a tick count before any tick", (await text(base + "/")).startsWith("0 ticks"));
-  },
-
-  "durable-object": async (base, ok) => {
-    ok("first call to a name is 1", (await text(base + "/downloads")) === "downloads: 1\n");
-    ok("the same name keeps counting", (await text(base + "/downloads")) === "downloads: 2\n");
-    ok("a different name is its own object", (await text(base + "/signups")) === "signups: 1\n");
-  },
-
-  assets: async (base, ok) => {
-    const home = await fetch(base + "/");
-    ok("serves index.html from public/", (await home.text()).includes("Served from public/"));
-    ok("with an html content-type", (home.headers.get("content-type") || "").includes("text/html"));
-    const api = await (await fetch(base + "/api/time")).json();
-    ok("run_sprout_first gives /api to the handler", !Number.isNaN(Date.parse(String(api.now))), api);
-  },
-
-  analytics: async (base, ok) => {
-    await fetch(base + "/", { method: "POST", body: '{"path":"/pricing"}' });
-    const rows = await (await fetch(base + "/")).json();
-    ok(
-      "query returns the recorded point",
-      rows.some((r: { blobs: string[] }) => r.blobs[0] === "/pricing"),
-      rows,
-    );
-  },
-
-  // Streamed request bodies from compatibility date 2026-10-27.
-  upload: async (base, ok) => {
-    const encoder = new TextEncoder();
-    const body = new ReadableStream({
-      async start(controller) {
-        controller.enqueue(encoder.encode("first "));
-        await Bun.sleep(400);
-        controller.enqueue(new Uint8Array(8 * 1024 * 1024));
-        controller.close();
-      },
-    });
-    const init: RequestInit & { duplex: string } = { method: "POST", body, duplex: "half" };
-    const counted = await (await fetch(base + "/", init)).json();
-    ok(
-      "the handler reads the body as it arrives",
-      counted.bytes === 6 + 8 * 1024 * 1024 && counted.spreadMs > 200,
-      counted,
-    );
-  },
-
-  // Request semantics from compatibility date 2026-10-23, as workerd has them.
-  request: async (base, ok) => {
-    const forwarded = await (
-      await fetch(base + "/forward", { method: "POST", headers: { "x-from": "client" }, body: "hi é" })
-    ).json();
-    ok(
-      "a copy of the incoming request keeps its method, headers and body",
-      JSON.stringify(forwarded) ===
-        JSON.stringify({
-          url: "https://upstream.example/echo",
-          method: "POST",
-          from: "client",
-          body: "hi é",
-          incomingUsed: true,
-        }),
-      forwarded,
-    );
-    const rules = await (await fetch(base + "/rules")).json();
-    ok(
-      "init merges, clone() tees, a used body cannot be copied, GET refuses a body, incoming headers are immutable",
-      JSON.stringify(rules) ===
-        JSON.stringify({
-          merged: ["PUT", [["x-b", "2"]], "abc", "abc"],
-          originalUsed: true,
-          copyUsed: "TypeError: Cannot reconstruct a Request with a used body.",
-          getWithBody: "TypeError: Request with a GET or HEAD method cannot have a body.",
-          immutable: "TypeError: Can't modify immutable headers.",
-        }),
-      rules,
-    );
-  },
-
-  "outbound-fetch": async (base, ok) => {
-    ok("fetches a public host", (await text(base + "/")).startsWith("example.com answered with 200"));
-    ok("refuses a private address", (await fetch(base + "/blocked")).status === 403);
-  },
-
-  ratelimit: async (base, ok) => {
-    let last = 200;
-    for (let i = 0; i < 4; i++) last = (await fetch(base + "/limited")).status;
-    ok("the 4th request over the limit is a 429", last === 429);
-  },
-
-  "vars-secrets": async (base, ok) => {
-    ok(
-      "reads the baked-in var and the injected secret",
-      (await text(base + "/")) === "hej, your key ends in ...-key\n",
-    );
-  },
+const EXAMPLES = {
+  ...CHECKS,
+  ...Object.fromEntries(
+    Object.entries(FIXTURES).map(([name, check]) => [name, (base: string, ok: Ok) => check(base, ok)]),
+  ),
+  // The d1 example rebuilt at 2026-10-27, the earliest date where every form it uses is the standard one (D1 returns Promises
+  // from 2026-10-24, request bodies and request.json() from 2026-10-27): it catches an example that only works at the
+  // date its own config names. Before 2026-10-27 request.json() is synchronous, so `.catch()` on it is a TypeError.
+  "d1@2026-10-27": CHECKS.d1,
 } satisfies Record<string, Check>;
 
 // Everything else spawns with just PORT/SB_DATA_DIR; vars-secrets also needs
 // its one declared secret, which a standalone binary reads from the process
 // environment rather than anything sproutboat.jsonc can supply.
-const EXTRA_ENV = {
-  "vars-secrets": { API_KEY: "demo-key" },
-} satisfies Partial<Record<Name, Record<string, string>>>;
-
 type Name = keyof typeof EXAMPLES;
 const isName = (v: string): v is Name => Object.hasOwn(EXAMPLES, v);
 
@@ -339,7 +119,11 @@ function freePort(): number {
 const HERE = import.meta.dir;
 const wanted = process.argv.slice(2);
 for (const name of wanted) if (!isName(name)) throw new Error(`no such example: ${name}`);
-const names: Name[] = wanted.length ? wanted.filter(isName) : Object.keys(EXAMPLES).filter(isName);
+const names: Name[] = wanted.length
+  ? wanted.filter(isName)
+  : Object.keys(EXAMPLES)
+      .filter(isName)
+      .filter((name) => !STANDALONE_SKIPS.has(name));
 
 const rawConcurrency = process.env.SMOKE_CONCURRENCY ?? "4";
 const concurrency = Number(rawConcurrency);
@@ -399,8 +183,8 @@ async function runExample(name: Name): Promise<Result> {
   let size = "";
   const harness = new Harness({
     backend: `smoke:${name}`,
-    prefix: `sb-smoke-${name.replace("@", "-")}-`,
-    secrets: Object.values(EXTRA_ENV[name] ?? {}),
+    prefix: `sb-smoke-${name.replace(/[@/]/g, "-")}-`,
+    secrets: Object.values(SECRETS.get(name) ?? {}),
     handleSignals: false,
   });
   const entry: LiveEntry = { harness };
@@ -439,7 +223,7 @@ async function runExample(name: Name): Promise<Result> {
 
     const port = freePort();
     harness.spawn("standalone binary", [built.outPath], {
-      env: { ...process.env, ...EXTRA_ENV[name], PORT: String(port), SB_DATA_DIR: join(workdir, "data") },
+      env: { ...process.env, ...SECRETS.get(name), PORT: String(port), SB_DATA_DIR: join(workdir, "data") },
     });
     const base = `http://127.0.0.1:${port}`;
     origin = new URL(base).origin;
@@ -448,13 +232,17 @@ async function runExample(name: Name): Promise<Result> {
     // Readiness has its own deadline (SB_HARNESS_READY_TIMEOUT_MS).
     await harness.waitReady(base + "/");
     harness.step(`checks for ${name}`);
-    await EXAMPLES[name](base, (check, cond, detail) => {
-      if (cond) lines.push("  ok    " + check);
-      else {
-        lines.push(`  FAIL  ${check}${detail === undefined ? "" : ": " + JSON.stringify(detail)}`);
-        failed++;
-      }
-    });
+    await EXAMPLES[name](
+      base,
+      (check, cond, detail) => {
+        if (cond) lines.push("  ok    " + check);
+        else {
+          lines.push(`  FAIL  ${check}${detail === undefined ? "" : ": " + JSON.stringify(detail)}`);
+          failed++;
+        }
+      },
+      context,
+    );
   } catch (error) {
     if (error instanceof HarnessFailure) {
       // A stall, a child that exited, or a deadline: step, backend, versions

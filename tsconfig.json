@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "examples/*.ts", "examples/lib/*.ts"]
 }

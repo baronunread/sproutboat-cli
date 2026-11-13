@@ -1,0 +1,15 @@
+{
+  // Shared by every example's tsconfig.json. Each example has its own, because each has its own
+  // worker-configuration.d.ts (`sproutboat types`), and two of those cannot share one program.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true
+  }
+}
