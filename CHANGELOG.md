@@ -10,6 +10,8 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.55.0] - 2026-11-13
+
 ### Added
 
 - **`sproutboat init --template <name>` writes a starter, with the shape of `npm create cloudflare`.** Four starters, each standard Workers TypeScript that runs unchanged on workerd, with a README, tests (Node's own test runner, `npm test`), a `tsconfig.json` and a current `worker-configuration.d.ts`: `realtime-room` (a chat room on a Durable Object with hibernating WebSockets: `acceptWebSocket`, tags, `serializeAttachment`, presence, history), `api-d1` (a JSON API on D1 with a migration, validation and keyset pagination), `site-api` (static assets plus `/api/*` routes and KV in one Worker) and `jobs` (a cron trigger that enqueues, a queue consumer with retries and idempotence, KV for state). `--list-templates` prints them. In a terminal `init` asks for the template, the directory, whether to install dependencies and whether to use git (both default to yes); `-y` (`--yes`, `--accept-defaults`) takes every default, `--install` / `--no-install` and `--git` / `--no-git` decide the two steps, and without a terminal nothing runs that a flag did not ask for. `--git` makes a first commit and does nothing inside an existing repository. `init` without `--template` is the hello starter it always was. The starters are embedded in the CLI as text (`src/templates-embedded.ts`, about 90 KiB, rewritten by `bun run templates:embed`), so the compiled executable needs no network or files beside it.
