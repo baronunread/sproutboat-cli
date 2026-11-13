@@ -65,7 +65,7 @@ export const COMMAND_OPTIONS = {
     flag: ["--recent", "--sprout", "--no-follow"],
   },
   delete: { value: ["--name"], flag: ["--yes", "-y"] },
-  domains: {},
+  domains: { value: ["--account"] },
   // `secret` is the same command (surface.ts); `list | put | delete | bulk` share these, `--value` is put's.
   secrets: { value: ["--value", "--account"], flag: ["--no-deploy"] },
   kv: {

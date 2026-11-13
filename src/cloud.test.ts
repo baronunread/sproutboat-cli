@@ -625,6 +625,46 @@ describe("the CLI end to end", () => {
     }
   });
 
+  test("domains list shows the app's routes; add, verify and delete say an operator does that", async () => {
+    const cloud = startFakeCloud({ existingHosts: ["hello.acme.sproutboat.app", "risulta.dev", "risulta.dev/blog"] });
+    try {
+      const env = { SPROUTBOAT_API_URL: cloud.url, SPROUTBOAT_API_TOKEN: FAKE_KEY };
+      const listed = await run(["domains", "list", project], env);
+      expect(listed.stderr).toBe("");
+      expect(listed.code).toBe(0);
+      expect(listed.stdout.split("\n").filter(Boolean)).toEqual([
+        "built-in  hello.acme.sproutboat.app",
+        "custom    risulta.dev",
+        "custom    risulta.dev/blog",
+      ]);
+      expect((await run(["domains", project], env)).stdout).toBe(listed.stdout);
+      for (const verb of ["add", "verify", "delete"]) {
+        const refused = await run(["domains", verb, "risulta.dev", project], env);
+        expect(refused.code).toBe(1);
+        expect(refused.stderr).toContain("by a Sproutboat operator for now");
+        expect(refused.stderr).toContain("keeps every route it did not add itself");
+      }
+      // Nothing but reads reached the Cloud: no write, and none of Community's /api/projects routes.
+      expect(cloud.calls.filter((c) => c.method !== "GET" || c.path.startsWith("/api/"))).toEqual([]);
+    } finally {
+      cloud.stop();
+    }
+  });
+
+  test("domains list on an app that is not deployed says to deploy first", async () => {
+    const cloud = startFakeCloud();
+    try {
+      const out = await run(["domains", "list", project], {
+        SPROUTBOAT_API_URL: cloud.url,
+        SPROUTBOAT_API_TOKEN: FAKE_KEY,
+      });
+      expect(out.code).toBe(1);
+      expect(out.stderr).toContain("hello is not deployed yet");
+    } finally {
+      cloud.stop();
+    }
+  });
+
   test("deploy dry-run prints the plan and writes nothing", async () => {
     const cloud = startFakeCloud();
     try {
@@ -674,4 +714,79 @@ describe("the CLI end to end", () => {
       cloud.stop();
     }
   }, 30000);
+});
+
+describe("custom domains survive a deploy", () => {
+  let work: string;
+  let moduleFile: string;
+  const OPERATOR_ADDED = ["hello.acme.sproutboat.app", "risulta.dev", "risulta.dev/blog"];
+  beforeEach(async () => {
+    work = await mkdtemp(join(tmpdir(), "sb-hosts-"));
+    moduleFile = join(work, "app.so");
+    await writeFile(moduleFile, "module-bytes");
+  });
+  afterEach(() => rm(work, { recursive: true, force: true }));
+  const plan = (url: string): CloudDeployPlan => ({
+    apiUrl: url,
+    token: FAKE_KEY,
+    tokenFromEnv: false,
+    project: "hello",
+    hosts: [hostFor("hello", "acme")],
+    modulePath: moduleFile,
+    noWait: true,
+  });
+
+  test("an update keeps the routes an operator added and sends only the default host as an addition", async () => {
+    const cloud = startFakeCloud({ existingHosts: OPERATOR_ADDED });
+    try {
+      await deployToCloud(plan(cloud.url), fakeIo().io);
+      expect(cloud.spec.hosts).toEqual(OPERATOR_ADDED);
+      expect(cloud.written.at(-1)).toMatchObject({ hosts_patch: { add: ["hello.acme.sproutboat.app"] } });
+      expect(cloud.written.at(-1)).not.toHaveProperty("hosts");
+    } finally {
+      cloud.stop();
+    }
+  });
+
+  test("a first deploy routes the default host, and a deploy after someone removed it puts it back", async () => {
+    const cloud = startFakeCloud();
+    try {
+      await deployToCloud(plan(cloud.url), fakeIo().io);
+      expect(cloud.spec.hosts).toEqual(["hello.acme.sproutboat.app"]);
+    } finally {
+      cloud.stop();
+    }
+    const trimmed = startFakeCloud({ existingHosts: ["risulta.dev"] });
+    try {
+      await deployToCloud(plan(trimmed.url), fakeIo().io);
+      expect(trimmed.spec.hosts).toEqual(["risulta.dev", "hello.acme.sproutboat.app"]);
+    } finally {
+      trimmed.stop();
+    }
+  });
+
+  test("a Cloud without hosts_patch gets the live routes merged in on the client, and the deploy says so", async () => {
+    const cloud = startFakeCloud({ existingHosts: OPERATOR_ADDED.slice(1), legacyHosts: true });
+    try {
+      const { io, lines } = fakeIo();
+      await deployToCloud(plan(cloud.url), io);
+      expect(cloud.spec.hosts).toEqual(["risulta.dev", "risulta.dev/blog", "hello.acme.sproutboat.app"]);
+      expect(lines.some((line) => line.includes("no hosts_patch yet"))).toBe(true);
+      expect(cloud.written).toHaveLength(1); // the refused try was never stored
+    } finally {
+      cloud.stop();
+    }
+  });
+
+  test("any other refusal of the spec still fails the deploy with the Cloud's words", async () => {
+    const cloud = startFakeCloud();
+    try {
+      await expect(deployToCloud({ ...plan(cloud.url), hosts: ["Bad Host"] }, fakeIo().io)).rejects.toThrow(
+        "is not a valid route",
+      );
+      expect(cloud.written).toHaveLength(0);
+    } finally {
+      cloud.stop();
+    }
+  });
 });

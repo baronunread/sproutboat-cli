@@ -348,7 +348,7 @@ describe("what a deploy sends", () => {
         },
         io,
       );
-      expect(Object.keys(sentSpec(cloud.buildRequests[0]!.spec))).toEqual(["hosts"]);
+      expect(Object.keys(sentSpec(cloud.buildRequests[0]!.spec))).toEqual(["hosts_patch"]);
     });
   });
 });

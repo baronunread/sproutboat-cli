@@ -31,7 +31,13 @@ import {
 import { extractGlobalFlags, globalFlags, locateProject, setGlobalFlags } from "./global-flags";
 import { checkOptions, ENDPOINT_COMMANDS } from "./options";
 import { chooseTarget, TargetError, type Target } from "./target";
-import { configAccount, configMigrationsDir, parseProjectConfig } from "./account-field";
+import {
+  ASSETS_ONLY_MAIN,
+  assetsOnlySource,
+  configAccount,
+  configMigrationsDir,
+  parseProjectConfig,
+} from "./account-field";
 import { DATA_ERROR_STATUSES } from "./data-errors";
 import {
   cloudLogout,
@@ -92,6 +98,7 @@ import {
   putCloudSecret,
   readSecretsFile,
 } from "./cloud-secrets";
+import { cloudDomainsUnsupported, describeCloudRoutes, listCloudRoutes } from "./cloud-domains";
 import { parseBulkSecrets, type BulkPlan } from "./secrets-bulk";
 import {
   cloudTarget,
@@ -369,10 +376,20 @@ async function readProjectConfig(directory?: string) {
   };
 }
 
+/** What to call the entry in messages: its path, or "assets only" when the project has no `main`. */
+const entryLabel = (config: { main: string }) => (config.main === ASSETS_ONLY_MAIN ? "assets only" : config.main);
+
 /** Full build input: configuration plus entry point, resolved imports and checks. */
 async function readProject(directory?: string) {
   const project = await readProjectConfig(directory);
-  const sourcePath = resolve(project.directory, project.config.main);
+  let sourcePath = resolve(project.directory, project.config.main);
+  if (project.config.main === ASSETS_ONLY_MAIN) {
+    // A Worker with only static assets: there is no entry file, so the small one that hands every miss to the assets is written
+    // into .sproutboat/ (the local state folder) and bundled like any other.
+    sourcePath = resolve(project.directory, ".sproutboat", "assets-only.js");
+    await mkdir(dirname(sourcePath), { recursive: true });
+    await writeFile(sourcePath, assetsOnlySource(project.config.assets?.binding ?? "ASSETS"));
+  }
   let source: string;
   try {
     source = await readFile(sourcePath, "utf8");
@@ -408,7 +425,7 @@ async function init(args: string[]) {
 
 async function check(directory?: string) {
   const project = await readProject(directory);
-  console.log(ok(`check passed — ${project.config.name} (${project.config.main}, native-fetch)`));
+  console.log(ok(`check passed — ${project.config.name} (${entryLabel(project.config)}, native-fetch)`));
 }
 
 async function types(args: string[]) {
@@ -1282,7 +1299,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
   };
   if (fromSource) {
     const sourcePath = await emitStandaloneUnit(directory);
-    console.log(`  Bundling   ${cfg.main} (${formatKiB(Bun.file(sourcePath).size)})`);
+    console.log(`  Bundling   ${entryLabel(cfg)} (${formatKiB(Bun.file(sourcePath).size)})`);
     const controller = new AbortController();
     const interrupt = () => controller.abort();
     process.once("SIGINT", interrupt);
@@ -1611,9 +1628,24 @@ async function domains(args: string[]) {
     args[0] && !args[0].startsWith("-") && ["list", "add", "verify", "delete"].includes(args[0])
       ? args.shift()!
       : "list";
+  const flags = takeFlags(args, ["--account"] as const);
   const host = sub === "list" ? undefined : args.shift();
   if (sub !== "list" && !host)
     usageError(`domains ${sub}: missing <hostname>`, `domains ${sub} <hostname> [project-dir]`);
+  const { apiUrl: targetUrl } = await resolveApiUrl();
+  if ((await deployKind(targetUrl, false)) === "cloud") {
+    await guard(async () => {
+      if (host !== undefined) throw new CloudError(cloudDomainsUnsupported(sub, host));
+      const project = await readProjectConfig(args[0]);
+      const credentials = await cloudCredentials(targetUrl, flags["--account"] ?? project.account);
+      for (const line of describeCloudRoutes(
+        project.config.name,
+        await listCloudRoutes(credentials, project.config.name),
+      ))
+        console.log(line);
+    });
+    return;
+  }
   const [project, { apiUrl, token }] = await Promise.all([readProjectConfig(args[0]), apiCredentials()]);
   const base = `${apiUrl}/api/projects/${project.config.name}/domains`;
   const auth = { "x-api-key": token };
