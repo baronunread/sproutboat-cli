@@ -1,6 +1,6 @@
 // R2: S3-style object storage. The path is the key.
 //
-// Keep objects small: a request body is stored in one put. kitchen-sink moves large files in 1 MiB chunks.
+// Keep objects small: a request body is stored in one put. docs/r2-large-objects.md covers large files.
 
 export default {
   async fetch(request, env) {

@@ -1,6 +1,6 @@
 # ratelimit
 
-Rate limiting: `env.API.limit({ key })` allows 3 calls per 60 seconds per key (set in `sproutboat.jsonc`). The Workers API reports only `success`, so a refusal sends `Retry-After` with the whole period; Sproutboat also returns `resetAt` (kitchen-sink uses it) for an exact value.
+Rate limiting: `env.API.limit({ key })` allows 3 calls per 60 seconds per key (set in `sproutboat.jsonc`). The Workers API reports only `success`, so a refusal sends `Retry-After` with the whole period; Sproutboat also returns `resetAt` for an exact value.
 
 The handler is standard Workers code (`export default { fetch(request, env, ctx) }`, every binding call awaited), typed with `satisfies ExportedHandler<Env>`. `Env` comes from `worker-configuration.d.ts`, which `sproutboat types` writes from `sproutboat.jsonc`; run it again after you change the bindings.
 

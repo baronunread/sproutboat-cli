@@ -3,7 +3,7 @@
 ## Porffor pin bumps
 
 `bun bench/pin-compare.ts --baseline <dir> --candidate <dir>` builds
-examples/kitchen-sink and `../standalone-app` under both an already-patched
+dogfood/kitchen-sink and `../standalone-app` under both an already-patched
 Porffor source tree (e.g. the previous `~/.cache/sproutboat/porffor-<sha>`) and
 the new one, and compares binary size, compile time, cold start, and
 `/api/health` throughput. It hard-fails on a kitchen-sink conformance
@@ -35,12 +35,12 @@ gate.
 ## Recorded 2026-09-09
 
 Measured on macOS 15.3 (arm64), Bun 1.4.1, using `/usr/bin/time -p` and seven
-fresh CLI processes per revision. The fixture was `examples/kitchen-sink`, and
+fresh CLI processes per revision. The fixture was `dogfood/kitchen-sink`, and
 the command was:
 
 ```sh
 SPROUTBOAT_API_URL=http://127.0.0.1:1 SPROUTBOAT_TOKEN=bench \
-SPROUTBOAT_NO_UPDATE_CHECK=1 bun src/main.ts versions list examples/kitchen-sink
+SPROUTBOAT_NO_UPDATE_CHECK=1 bun src/main.ts versions list dogfood/kitchen-sink
 ```
 
 The refused loopback endpoint makes both revisions stop at the same API call;

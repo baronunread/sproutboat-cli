@@ -28,7 +28,7 @@ import {
   type Check,
   type Context,
 } from "./checks";
-import { buildWebUi } from "./kitchen-sink/build-web";
+import { buildWebUi } from "../dogfood/kitchen-sink/build-web";
 import { descendantPids, Harness, HarnessFailure } from "../test/fixtures/lib/harness";
 import { projectNames } from "../test/fixtures/lib/projects";
 import {
@@ -43,11 +43,11 @@ import {
 /** Examples that need another example running beside them, by name. */
 const COMPANIONS = new Map([
   ["service-bindings/caller", ["service-bindings/callee"]],
-  ["kitchen-sink", ["quote-service"]],
+  ["dogfood/kitchen-sink", ["dogfood/quote-service"]],
 ]);
 
 /** What an example needs built before it can run: kitchen-sink's dashboard is public/ copied to site/. */
-const PREPARE = new Map([["kitchen-sink", buildWebUi]]);
+const PREPARE = new Map([["dogfood/kitchen-sink", buildWebUi]]);
 
 const CHECKS_BY_NAME: Record<string, Check> = CHECKS;
 const all = projectNames();

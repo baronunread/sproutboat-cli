@@ -1,6 +1,6 @@
 # r2
 
-R2, S3-style object storage: `put`, `get` (with its etag and metadata), `list` and `delete`. Keep objects small here: a request body is stored in one put; `kitchen-sink` moves large files in 1 MiB chunks.
+R2, S3-style object storage: `put`, `get` (with its etag and metadata), `list` and `delete`. Keep objects small here: a request body is stored in one put; the large-object guide ([`docs/r2-large-objects.md`](../../docs/r2-large-objects.md)) moves large files in chunks.
 
 The handler is standard Workers code (`export default { fetch(request, env, ctx) }`, every binding call awaited), typed with `satisfies ExportedHandler<Env>`. `Env` comes from `worker-configuration.d.ts`, which `sproutboat types` writes from `sproutboat.jsonc`; run it again after you change the bindings.
 

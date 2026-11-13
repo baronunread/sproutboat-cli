@@ -14,8 +14,8 @@ them reads as machine-written.
 
 `bun test`, then both conformance harnesses:
 
-    bun examples/kitchen-sink/harness.ts             # broker backend
-    bun examples/kitchen-sink/harness-standalone.ts  # one binary
+    bun dogfood/kitchen-sink/harness.ts             # broker backend
+    bun dogfood/kitchen-sink/harness-standalone.ts  # one binary
 
 They exist because there are two implementations of the binding ops. A change
 that passes one and not the other is drift, not a flake.

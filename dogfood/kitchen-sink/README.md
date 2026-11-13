@@ -1,5 +1,7 @@
 # kitchen-sink
 
+> Internal: this app is deployed on Sproutboat Cloud and used to check every generation swap. It is not a public example (see [`dogfood/`](..)); for something to read, start with [`examples/`](../../examples).
+
 One Workers module that uses every Sproutboat binding, with a dashboard that
 calls each one for real, and the suite both backends are held to. It is a demo: the routes and vectors that exist only to test bindings live in [`test/fixtures/conformance`](../../test/fixtures/conformance).
 
