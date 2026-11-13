@@ -18,7 +18,6 @@ Small enough to read in a sitting. Every example is a standard Cloudflare Worker
 | [`waituntil`](waituntil) | — | `ctx.waitUntil()` |
 | [`outbound-fetch`](outbound-fetch) | — | `fetch()` to a public host, and the refusal of a private one |
 | [`service-bindings`](service-bindings) | Services | `env.GREETER.fetch()` from one app to another |
-| [`quote-service`](quote-service) | Services | a `WorkerEntrypoint` with an RPC method, the peer of `kitchen-sink` |
 
 This directory holds only what is meant to be read. Everything that exists for a test or a measurement is a fixture in [`test/fixtures`](../test/fixtures) (see "Fixtures" below), so nothing you read here is a conformance vector, a stress rig or a runtime comparison.
 

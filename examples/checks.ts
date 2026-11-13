@@ -1,5 +1,5 @@
 /**
- * What each public example is expected to do, as HTTP requests. One definition, two runtimes:
+ * What each example (and each dogfood app) is expected to do, as HTTP requests. One definition, two runtimes:
  *
  * - `smoke.ts` builds every example as a standalone binary and drives it;
  * - `workerd.ts` runs the same example, unchanged, under workerd (`wrangler dev`) and sends the same requests.
@@ -253,8 +253,8 @@ export const CHECKS = {
   },
 
   // The dashboard's API, its page and its chat room. kitchen-sink has its own, much longer, harnesses on both backends
-  // (kitchen-sink/harness.ts); these requests are what holds it to the Workers style on workerd.
-  "kitchen-sink": async (base, ok, { fetch, text }) => {
+  // (dogfood/kitchen-sink/harness.ts); these requests are what holds it to the Workers style on workerd.
+  "dogfood/kitchen-sink": async (base, ok, { fetch, text }) => {
     ok("the dashboard is the page", (await text(base + "/")).includes("<h1>Sproutboat Notes"));
     const health = await (await fetch(base + "/healthz")).json();
     ok("/healthz answers {ok: true}", health.ok === true, health);
@@ -311,7 +311,7 @@ export const CHECKS = {
     ok("the chat room answers a WebSocket with its history", JSON.parse(frame).type === "history", frame);
   },
 
-  "quote-service": async (base, ok, { fetch }) => {
+  "dogfood/quote-service": async (base, ok, { fetch }) => {
     const quote = await (await fetch(base + "/random")).json();
     ok("/random is a quote", Boolean(quote.content) && Boolean(quote.author), quote);
     const index = await (await fetch(base + "/")).json();
@@ -336,8 +336,8 @@ export const CHECKS = {
 /** Examples with no standalone binary: the standalone runner (smoke.ts) leaves them out. */
 export const STANDALONE_SKIPS = new Map([
   [
-    "kitchen-sink",
-    "it has its own harnesses (kitchen-sink/harness-standalone.ts) and a service binding a standalone binary cannot have",
+    "dogfood/kitchen-sink",
+    "it has its own harnesses (dogfood/kitchen-sink/harness-standalone.ts) and a service binding a standalone binary cannot have",
   ],
   ["service-bindings/caller", "a standalone binary has no edge to route a service binding through"],
 ]);
@@ -345,7 +345,7 @@ export const STANDALONE_SKIPS = new Map([
 /** Secret values for the examples that declare any: workerd reads them from .dev.vars, a binary from its environment. */
 export const SECRETS = new Map([
   ["vars-secrets", { API_KEY: "demo-key" }],
-  ["kitchen-sink", { ADMIN_TOKEN: "s3cr3t-admin" }],
+  ["dogfood/kitchen-sink", { ADMIN_TOKEN: "s3cr3t-admin" }],
 ]);
 
 /**
@@ -378,6 +378,9 @@ export const WORKERD_PARTIAL_SKIPS = new Map([
  * above: an entry says why the example cannot pass.
  */
 export const CLOUDFLARE_TYPES_SKIPS = new Map([
-  ["kitchen-sink", "its entry is JavaScript (see its README), so there is nothing to typecheck; workerd still runs it"],
+  [
+    "dogfood/kitchen-sink",
+    "its entry is JavaScript (see its README), so there is nothing to typecheck; workerd still runs it",
+  ],
   ["analytics", "env.EVENTS.query() is a Sproutboat extension and is not in Cloudflare's AnalyticsEngineDataset"],
 ]);

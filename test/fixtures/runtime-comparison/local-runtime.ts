@@ -13,7 +13,7 @@ const work = mkdtempSync(join(tmpdir(), "sb-comparison-local-"));
 try {
   cpSync(join(cli, "src"), join(work, "src"), { recursive: true });
   cpSync(join(cli, "package.json"), join(work, "package.json"));
-  for (const dir of ["examples", "test"]) {
+  for (const dir of ["examples", "test", "dogfood"]) {
     cpSync(join(cli, dir), join(work, dir), {
       recursive: true,
       filter: (path) => !["results", ".sproutboat", "dist", "node_modules"].includes(basename(path)),
@@ -77,8 +77,8 @@ try {
   if (process.argv.includes("--verify")) {
     for (const command of [
       ["test", "src/"],
-      ["examples/kitchen-sink/harness.ts"],
-      ["examples/kitchen-sink/harness-standalone.ts"],
+      ["dogfood/kitchen-sink/harness.ts"],
+      ["dogfood/kitchen-sink/harness-standalone.ts"],
       ["run", "examples"],
     ]) {
       const check = Bun.spawn([process.execPath, ...command], {

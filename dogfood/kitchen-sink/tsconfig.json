@@ -1,5 +1,5 @@
 {
-  "extends": "../tsconfig.base.json",
+  "extends": "../../examples/tsconfig.base.json",
   "compilerOptions": {
     // The worker is JavaScript (see README.md, "Notes"): the declarations are there for an editor, which reads
     // the JSDoc types of env. It is not type-checked.

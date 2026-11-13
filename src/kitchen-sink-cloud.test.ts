@@ -18,8 +18,8 @@ const CLOUD_UNSAFE_GLOBALS = [
   "MessageChannel",
 ];
 
-test("examples/kitchen-sink source stays buildable on a Cloud generation (no free node globals)", async () => {
-  const source = await readFile(join(import.meta.dir, "../examples/kitchen-sink/src/index.js"), "utf8");
+test("dogfood/kitchen-sink source stays buildable on a Cloud generation (no free node globals)", async () => {
+  const source = await readFile(join(import.meta.dir, "../dogfood/kitchen-sink/src/index.js"), "utf8");
   const code = source
     .split("\n")
     .filter((line) => !line.trim().startsWith("//"))

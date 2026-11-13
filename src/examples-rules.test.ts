@@ -15,7 +15,7 @@ import {
   WORKERD_PARTIAL_SKIPS,
   WORKERD_SKIPS,
 } from "../examples/checks";
-import { EXAMPLES_DIR, projectDir, projects } from "../test/fixtures/lib/projects";
+import { DOGFOOD_DIR, EXAMPLES_DIR, projectDir, projects } from "../test/fixtures/lib/projects";
 import { parseConfig } from "./config";
 import { checkTypes, parseTypesArgs, planTypes } from "./types-cmd";
 
@@ -26,7 +26,7 @@ const STANDARD_DATE = "2026-09-28";
 /** Examples that are not TypeScript, and why. Each is a promise to fix it or to keep the reason true. */
 const NOT_TYPESCRIPT = new Map<string, string>([
   [
-    "kitchen-sink",
+    "dogfood/kitchen-sink",
     "1,800 lines whose Code panels excerpt src/index.js between #region markers, run by a harness that compiles it unbundled",
   ],
 ]);
@@ -133,6 +133,28 @@ describe("no test-only code in examples", () => {
   }
 });
 
+describe("the dogfood apps", () => {
+  // The Cloud runbooks and the deployed apps know these by name, never by path: moving a directory must not rename one.
+  const DEPLOYED_NAMES = new Map([
+    ["dogfood/kitchen-sink", "kitchen-sink"],
+    ["dogfood/quote-service", "quote-service"],
+  ]);
+  for (const [project, deployed] of DEPLOYED_NAMES)
+    test(`${project} is still deployed as ${deployed}`, () => {
+      expect(read(project).name).toBe(deployed);
+    });
+
+  test("every dogfood app is listed in dogfood/README.md, which says they are internal", () => {
+    const readme = readFileSync(join(DOGFOOD_DIR, "README.md"), "utf8");
+    expect(readme).toMatch(/not examples/);
+    for (const { name, group } of all)
+      if (group === "dogfood") expect(readme, name).toContain(`[\`${name.replace("dogfood/", "")}\`]`);
+    expect([...DEPLOYED_NAMES.keys()].sort()).toEqual(
+      all.filter((project) => project.group === "dogfood").map((project) => project.name),
+    );
+  });
+});
+
 describe("the skip tables", () => {
   const tables = {
     STANDALONE_SKIPS,
@@ -162,8 +184,9 @@ describe("the skip tables", () => {
 
   test("the README lists the same Sproutboat-only exceptions as the tables", () => {
     const readme = readFileSync(join(EXAMPLES_DIR, "README.md"), "utf8");
-    // A fixture is not in the README; the examples are.
+    // Only the examples are in the README; a fixture or a dogfood app is not.
     for (const example of [...WORKERD_PARTIAL_SKIPS.keys(), ...CLOUDFLARE_TYPES_SKIPS.keys()])
-      if (!example.startsWith("fixtures/")) expect(readme, example).toContain(`\`${example}\``);
+      if (all.find((project) => project.name === example)?.group === "examples")
+        expect(readme, example).toContain(`\`${example}\``);
   });
 });

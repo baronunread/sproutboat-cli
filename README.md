@@ -299,7 +299,7 @@ files in the project and from its own `node_modules`, and may also export
 is a global, not a parameter. Binding calls are synchronous until the compatibility
 date that makes each one return a Promise, as on Workers (D1 from 2026-10-24, KV from
 2026-10-25, R2 from 2026-10-26); `await` works at every date, so always await them.
-[`examples/kitchen-sink/`](examples/kitchen-sink) uses every binding.
+[`examples/`](examples) has one small example per binding.
 
 For objects larger than one request, use resumable R2 multipart uploads. The
 [large-object guide](docs/r2-large-objects.md) covers part sizing, browser

@@ -12,7 +12,7 @@
  * SPROUTBOAT_PORFFOR_DIR, exactly as `sproutboat build` would use them.
  *
  * Two things get built and measured per pin:
- *  - examples/kitchen-sink, via harness-standalone.ts as a subprocess — the
+ *  - dogfood/kitchen-sink, via harness-standalone.ts as a subprocess — the
  *    existing conformance suite (every binding) is the correctness gate.
  *  - --app (default ../../standalone-app), a real compiled sproutboat app —
  *    compile time, binary size, cold start, and an HTTP throughput smoke
@@ -79,7 +79,7 @@ function listens(port: number): Promise<boolean> {
 /** Kitchen-sink's binding conformance suite, run against a standalone binary built under `porfforDir`. */
 function runKitchenSinkConformance(porfforDir: string) {
   const t0 = performance.now();
-  const result = Bun.spawnSync(["bun", join(CLI, "examples/kitchen-sink/harness-standalone.ts")], {
+  const result = Bun.spawnSync(["bun", join(CLI, "dogfood/kitchen-sink/harness-standalone.ts")], {
     cwd: CLI,
     env: { ...process.env, SPROUTBOAT_PORFFOR_DIR: porfforDir },
     stdout: "pipe",
