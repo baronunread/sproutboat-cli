@@ -1,107 +1,44 @@
 /**
- * The conformance checks: every binding, driven over HTTP against a running
- * kitchen-sink.
+ * The kitchen-sink demo's checks, driven over HTTP against a running app: the dashboard's API, what it protects
+ * itself with (rate limits, input caps, daily upload quotas, file expiry), the chat room and the cron jobs.
  *
- * Extracted from harness.ts so more than one backend can be held to it. The
- * broker-backed harness runs these against a host sprout plus an in-process
- * broker; the standalone harness runs the same list against a single binary
- * with its bindings compiled in. Two implementations of the binding ops is the
- * failure mode that argues against having a second backend at all — this file
- * is what makes `env.KV.get` mean one thing in both.
+ * The binding conformance checks (KV, D1, R2, queues, crypto, egress, the secret gate...) are in
+ * examples/conformance, which has its own worker for them. Both are held to both backends: the broker-backed
+ * harness runs these against a host sprout plus an in-process broker, the standalone harness against one binary.
  *
- * Deliberately free of any knowledge of how the app is running: it gets a base
- * URL and a trigger token, and asserts on responses.
+ * Deliberately free of any knowledge of how the app is running: it gets a base URL and a trigger token.
  */
-import { isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "../../src/json";
-import { request as httpRequest } from "node:http";
-import { egressRefusal } from "@sproutboat/runtime";
-import type { Harness } from "../lib/harness";
+import { isString, jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "../../src/json";
+import type { RunContext } from "../lib/backends";
 import { runR2RoundTrip } from "./r2-roundtrip";
 
 const obj = (value: JsonValue | undefined): JsonObject => jsonObject(value ?? null) ?? {};
 const arr = (value: JsonValue | undefined): JsonValue[] => (Array.isArray(value) ? value : []);
 
-async function rawGetFrom(
-  url: string,
-  headers: Record<string, string>,
-  signal?: AbortSignal,
-): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
-  return new Promise((resolve, reject) => {
-    const request = httpRequest(url, { headers, signal }, (response) => {
-      const chunks: Buffer[] = [];
-      response.on("data", (chunk: Buffer) => chunks.push(chunk));
-      response.on("end", () =>
-        resolve({
-          status: response.statusCode ?? 0,
-          headers: response.headers,
-          body: Buffer.concat(chunks).toString(),
-        }),
-      );
-    });
-    request.on("error", reject);
-    request.end();
-  });
-}
-
-export type CheckFn = (name: string, cond: boolean, detail?: JsonValue) => void;
-
-/**
- * Run every binding check against `base`. `token` is SB_BROKER_TOKEN, needed to
- * post the internal trigger requests (cron / queue) the broker would normally
- * send. `check` reports; it is expected to abort on failure.
- */
 export type ConformanceOptions = {
   /**
-   * Skip the checks that post an internal `x-sb-trigger` request. An embedded
-   * standalone binary runs its own cron and queue timers in-process, so there is
-   * no broker to impersonate — the behaviour is covered, just not reachable this
-   * way.
+   * Skip the checks that post an internal `x-sb-trigger` request. An embedded standalone binary runs its own cron
+   * and queue timers in-process, so there is no broker to impersonate: the behaviour is covered, just not
+   * reachable this way.
    */
   skipTriggers?: boolean;
-  /**
-   * Skip the service-binding check. A standalone binary has no edge to route a
-   * worker-to-worker call through, so the build refuses the binding outright.
-   */
+  /** The app has no service binding: a standalone binary has no edge to route a worker-to-worker call through. */
   skipServices?: boolean;
-  /** Broker-mode ticket URLs are handled by its separate transfer listener. */
-  skipDirectTransfer?: boolean;
-  /** The stub upstream's origin; its /redirect answers 302 to a private address. */
-  upstream?: string;
-  /**
-   * The harness that owns the child under test (#276). Every request then has a
-   * deadline, the current step is recorded before each group of checks, and a
-   * stalled response or a child that exits fails with a report instead of waiting.
-   */
-  harness?: Harness;
 };
 
-export async function runConformance(
-  base: string,
-  TOKEN: string,
-  check: CheckFn,
-  options: ConformanceOptions = {},
-): Promise<void> {
-  const harness = options.harness;
-  const step = (name: string) => harness?.step(name);
-  // The app keys its rate limits on the client address. Behind a proxy that is X-Forwarded-For,
-  // which the app believes when the TCP peer is a private address, as it is here. So each
-  // run gets its own address: a second run inside the same minute has a fresh budget, and a
-  // check that wants its own budget sends its own header.
+export async function runConformance(context: RunContext, options: ConformanceOptions = {}): Promise<void> {
+  const { base, token: TOKEN, check, harness } = context;
+  const step = (name: string) => harness.step(name);
+  // The app keys its rate limits on the client address. Behind a proxy that is X-Forwarded-For, which the app
+  // believes when the TCP peer is a private address, as it is here. So each run gets its own address: a second run
+  // inside the same minute has a fresh budget, and a check that wants its own budget sends its own header.
   const runAddress = `198.51.100.${20 + (Date.now() % 200)}`;
   const addressed = (init: RequestInit | undefined, address: string): RequestInit => {
     const headers = new Headers(init?.headers);
     if (!headers.has("x-forwarded-for")) headers.set("x-forwarded-for", address);
     return { ...init, headers };
   };
-  // Without a harness (a caller that does not own the child) requests are unbounded, as before.
-  const fetch = (url: string, init?: RequestInit): Promise<Response> =>
-    harness ? harness.fetch(url, addressed(init, runAddress)) : globalThis.fetch(url, addressed(init, runAddress));
-  const rawGet = (url: string, headers: Record<string, string>) =>
-    harness
-      ? harness.bounded("request-timeout", `GET ${new URL(url).pathname}`, harness.requestTimeoutMs, (signal) =>
-          rawGetFrom(url, { "x-forwarded-for": runAddress, ...headers }, signal),
-        )
-      : rawGetFrom(url, { "x-forwarded-for": runAddress, ...headers });
+  const fetch = (url: string, init?: RequestInit): Promise<Response> => harness.fetch(url, addressed(init, runAddress));
   /** A request from its own client address, for the checks that spend a whole budget. */
   const jfrom = async (address: string, p: string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
@@ -123,18 +60,19 @@ export async function runConformance(
       return { status: r.status, body: t };
     }
   };
+  const trigger = (cron: string, scheduledTime: number) =>
+    fetch(base + "/", {
+      method: "POST",
+      headers: { "x-sb-trigger": "scheduled", "x-sb-token": TOKEN, "content-type": "application/json" },
+      body: JSON.stringify({ cron, scheduledTime }),
+    });
 
-  console.log("\nbindings:");
+  console.log("\nthe dashboard:");
 
-  step("vars: GET / uses env.SITE_NAME");
-  // vars
-  check("vars: GET / uses env.SITE_NAME", String((await jget("/")).body).includes("Sproutboat Notes"));
-
-  step("static assets");
-  // static assets: env.ASSETS.fetch serves index.html; SPA fallback for unknown GET
+  step("the page");
   const home = await fetch(base + "/");
   check(
-    "assets: GET / serves index.html with html content-type",
+    "assets: GET / serves the dashboard with an html content-type",
     home.status === 200 &&
       (home.headers.get("content-type") || "").includes("text/html") &&
       (await home.text()).includes("<h1>Sproutboat Notes"),
@@ -144,224 +82,54 @@ export async function runConformance(
     "assets: unknown GET falls back to the SPA shell (200)",
     spa.status === 200 && (await spa.text()).includes("<h1>Sproutboat Notes"),
   );
-  // #176: a reserved x-sb-raw-body response header tells the C write path to
-  // pass an asset's bytes through untouched instead of re-encoding them as if
-  // they were a JS string a handler built (porf_native_fetch_read_raw_bytes).
-  const binaryAsset = new Uint8Array(await (await fetch(base + "/binary-fixture.bin")).arrayBuffer());
+
+  step("the API: info, KV, queue, quote and secrets tiles");
+  const info = obj((await jget("/api/info")).body);
+  const bindings = obj(info.bindings);
   check(
-    "assets: binary bytes are unchanged",
-    binaryAsset.length === 256 && binaryAsset.every((byte, index) => byte === index),
+    "info: /api/info says which bindings this build has",
+    bindings.kv === true &&
+      bindings.d1 === true &&
+      bindings.r2 === true &&
+      bindings.queue === true &&
+      bindings.durable_object === true &&
+      bindings.service === !options.skipServices,
+    info.bindings ?? null,
   );
-
-  step("KV: login and whoami");
-  // KV (login -> whoami)
-  const login = await jget("/login", { method: "POST" });
-  const token = String(obj(login.body).token);
-  check("KV: login issues a token", token.length > 10, login.body);
-  const who = await jget("/whoami", { headers: { authorization: "Bearer " + token } });
-  check("KV: whoami resolves the session", who.status === 200 && obj(who.body).user === "demo", who.body);
-
-  step("D1: create, list, unicode");
-  // D1 (create + list + get)
-  const created = await jget("/notes", { method: "POST", body: JSON.stringify({ title: "hello", body: "world" }) });
-  check("D1: POST /notes inserts", created.status === 201 && isSafeInteger(obj(created.body).id), created.body);
-  const noteId = Number(obj(created.body).id);
-  const list = await jget("/notes");
-  check("D1: GET /notes lists it", arr(list.body).length >= 1, list.body);
-  // baronunread/sproutboat#189: non-ASCII text used to come back as Latin-1 mojibake.
-  const unicodeTitle = "café 日本 😀";
-  await jget("/notes", { method: "POST", body: JSON.stringify({ title: unicodeTitle, body: "" }) });
-  const titles = arr((await jget("/notes")).body).map((row) => obj(row).title);
-  check("D1: non-ASCII text round-trips", titles.includes(unicodeTitle), titles);
-
-  step("Durable Object: view counter");
-  // Durable Object (view counter increments atomically)
-  const v1 = await jget(`/notes/${noteId}`);
-  const v2 = await jget(`/notes/${noteId}`);
-  check("DO: view count increments across requests", Number(obj(v2.body).views) === Number(obj(v1.body).views) + 1, {
-    v1: obj(v1.body).views,
-    v2: obj(v2.body).views,
+  const counter1 = obj((await jget("/api/kv/incr", { method: "POST" })).body);
+  const counter2 = obj((await jget("/api/kv/incr", { method: "POST" })).body);
+  check("KV: the counter tile increments across requests", Number(counter2.n) === Number(counter1.n) + 1, {
+    first: counter1.n,
+    second: counter2.n,
   });
-
-  step("R2: attach, fetch back, list");
-  // R2 (attach + fetch back + list)
-  const att = await jget(`/notes/${noteId}/attach`, { method: "POST", body: "the file contents" });
-  check("R2: attach stores a key", isString(obj(att.body).key), att.body);
-  const file = await fetch(base + `/attach/${encodeURIComponent(String(obj(att.body).key))}`);
+  const quoted = obj((await jget("/api/quote")).body);
+  if (options.skipServices)
+    check(
+      "service binding: a build without one says so",
+      quoted.ok === false && quoted.reason === "no-binding",
+      quoted,
+    );
+  else
+    check(
+      "service binding: the quote tile reaches the peer through env.PEER",
+      quoted.ok === true && isString(obj(quoted.quote).content),
+      quoted,
+    );
+  const secrets = arr(obj((await jget("/api/secrets")).body).secrets).map(obj);
   check(
-    "R2: GET /attach returns the body + etag",
-    (await file.text()) === "the file contents" && !!file.headers.get("etag"),
+    "secrets: the tile reports ADMIN_TOKEN as set, and never its value",
+    secrets.some((entry) => entry.name === "ADMIN_TOKEN" && entry.set === true) &&
+      !JSON.stringify(secrets).includes("s3cr3t-admin"),
+    secrets,
   );
-  const atts = await jget("/attachments");
-  check(
-    "R2: GET /attachments lists the object",
-    arr(atts.body).some((o) => obj(o).key === obj(att.body).key),
-    atts.body,
-  );
-
-  if (!options.skipDirectTransfer) {
-    // This exceeds the normal 1 MiB native-fetch Request limit. A standalone
-    // binary must stream the ticket PUT through the native bridge instead.
-    const direct = await jget("/r2/direct-upload", { method: "POST" });
-    const directInfo = obj(direct.body);
-    step("R2 direct upload: 2 MiB PUT through the ticket");
-    const largeBody = "x".repeat(2 * 1024 * 1024);
-    const directPut = await fetch(base + String(directInfo.url), { method: "PUT", body: largeBody });
-    check("R2 direct upload: native ticket accepts a 2 MiB body", directPut.status === 201, directPut.status);
-    step("R2 direct upload: read the published object back");
-    const directRead = await fetch(base + "/attach/" + encodeURIComponent(String(directInfo.key)));
-    check(
-      "R2 direct upload: published object reads back intact",
-      directRead.status === 200 && (await directRead.text()) === largeBody,
-      directRead.status,
-    );
-    step("R2 direct download: byte range 1024-2047");
-    const rangedTicket = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
-    const ranged = await rawGet(base + String(obj(rangedTicket.body).url), { Range: "bytes=1024-2047" });
-    check(
-      "R2 direct download: native ticket serves a byte range",
-      ranged.status === 206 &&
-        ranged.headers["content-range"] === `bytes 1024-2047/${largeBody.length}` &&
-        ranged.body === largeBody.slice(1024, 2048),
-      ranged.status,
-    );
-    step("R2 direct download: complete 2 MiB object");
-    const download = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
-    const directDownload = await fetch(base + String(obj(download.body).url));
-    check(
-      "R2 direct download: native ticket streams the complete object",
-      directDownload.status === 200 && (await directDownload.text()) === largeBody,
-      directDownload.status,
-    );
-    step("R2 direct download: If-None-Match");
-    const conditionalTicket = await jget("/r2/direct-download?key=" + encodeURIComponent(String(directInfo.key)));
-    const conditional = await rawGet(base + String(obj(conditionalTicket.body).url), { "If-None-Match": "*" });
-    check(
-      "R2 direct download: native ticket honors If-None-Match",
-      conditional.status === 304 && Boolean(conditional.headers.etag),
-      conditional.status,
-    );
+  await jget("/api/queue/enqueue", { method: "POST", body: JSON.stringify({ label: "conformance" }) });
+  let processed = 0;
+  for (let i = 0; i < 30; i++) {
+    processed = Number(obj(obj((await jget("/api/queue")).body).counts).processed || 0);
+    if (processed > 0) break;
+    await Bun.sleep(300);
   }
-
-  step("async handler");
-  // async handler: the prelude must return the handler's own promise untouched
-  const asyncRes = await jget("/async");
-  check(
-    "async: a promise-returning route resolves",
-    asyncRes.status === 200 && obj(asyncRes.body).async === true,
-    asyncRes.body,
-  );
-
-  step("outbound fetch");
-  // outbound fetch
-  const quote = await jget("/quote");
-  check(
-    "fetch: /quote proxies the upstream",
-    quote.status === 200 && isString(obj(quote.body).content) && String(obj(quote.body).author).length > 0,
-    quote.body,
-  );
-
-  step("egress refusals");
-  // #174 — fetch() never reaches a private address, and both backends refuse
-  // with the same words. The harness allows 127.0.0.1 only, for its stub.
-  const refusals: Array<[url: string, hostname: string, address: string]> = [
-    ["http://127.0.0.2:9/", "127.0.0.2", "127.0.0.2"],
-    ["http://169.254.169.254/latest/meta-data/", "169.254.169.254", "169.254.169.254"],
-    ["http://10.0.0.1/", "10.0.0.1", "10.0.0.1"],
-    ["http://[::1]:9/", "[::1]", "::1"],
-    ["http://[64:ff9b::7f00:2]:9/", "[64:ff9b::7f00:2]", "64:ff9b::7f00:2"],
-  ];
-  for (const [url, hostname, address] of refusals) {
-    const refused = await jget(`/egress?to=${encodeURIComponent(url)}`);
-    check(
-      `egress: fetch(${url}) is refused`,
-      obj(refused.body).error === `sproutboat fetch: ${egressRefusal(hostname, address, [])}`,
-      refused.body,
-    );
-  }
-  if (options.upstream) {
-    const hop = await jget(`/egress?to=${encodeURIComponent(`${options.upstream}/redirect`)}`);
-    check(
-      "egress: a redirect to a private address comes back unfollowed",
-      obj(hop.body).status === 302 && obj(hop.body).location === "http://127.0.0.2/",
-      hop.body,
-    );
-  }
-
-  step("secret gate");
-  // secret gate
-  const denied = await jget("/admin/stats", { headers: { "x-admin-token": "wrong" } });
-  check("secret: /admin/stats rejects a bad ADMIN_TOKEN", denied.status === 403);
-  const allowed = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
-  check(
-    "secret: /admin/stats accepts the real ADMIN_TOKEN",
-    allowed.status === 200 && obj(allowed.body).site === "Sproutboat Notes",
-    allowed.body,
-  );
-
-  step("analytics engine");
-  // analytics engine — env.METRICS.query() feeds the dashboard
-  check(
-    "analytics: METRICS.query reports data points",
-    Number(obj(allowed.body).analytics_points) > 0 && Array.isArray(obj(allowed.body).analytics_recent),
-    allowed.body,
-  );
-
-  // service binding (#48): env.PEER.fetch() reaches a second deployment through
-  // the edge, so a 200 here means the shim -> broker -> Host path works.
-  if (!options.skipServices) {
-    step("service binding: PEER.fetch");
-    const peer = await jget("/peer");
-    check(
-      "service binding: env.PEER.fetch reaches another deployment",
-      peer.status === 200 && Number(obj(peer.body).status) === 200 && String(obj(peer.body).body).includes("author"),
-      peer.body,
-    );
-  }
-
-  step("crypto.subtle and scrypt");
-  // crypto.subtle (#133): a known SHA-256 vector and an HMAC round-trip.
-  const h = obj((await jget("/hash")).body);
-  check(
-    "crypto.subtle: SHA-256 digest matches the known vector",
-    h.digest === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-    h.digest,
-  );
-  check(
-    "crypto.subtle: HMAC sign + verify round-trips, a tampered message fails",
-    isString(h.hmac) && h.hmac.length === 64 && h.verifyOk === true && h.verifyBad === false,
-    h,
-  );
-  const rounds = arr(h.rounds);
-  check(
-    "crypto.subtle: repeated HMAC uses raw digest bytes between rounds",
-    rounds[0] === "e94df4f03406bc36299dd6e6961b22b50fc963fbbf8aeb773f8d7960a77e741e" &&
-      rounds[1] === "1321aaf34d2ad833bd0c8af3ab6c3a91f2be090fd9631538c88ec3986b6eac28",
-    h.rounds,
-  );
-  check(
-    "crypto.scryptVerify: a matching hash verifies, a wrong password does not (#153)",
-    h.scryptOk === true && h.scryptBad === false,
-    h,
-  );
-
-  step("rate limiter");
-  // rate limiter (#69): a unique key gets `limit` successes then a failure, and
-  // every reply carries resetAt (epoch ms) so a 429 can send Retry-After.
-  const rlKey = "conf-" + Date.now();
-  const rl = [];
-  const rlResets = [];
-  for (let i = 0; i < 4; i++) {
-    const res = obj((await jget("/throttle?key=" + rlKey)).body);
-    rl.push(res.success);
-    rlResets.push(Number(res.resetAt));
-  }
-  check("ratelimit: THROTTLE allows 3 then blocks the 4th", JSON.stringify(rl) === "[true,true,true,false]", rl);
-  check(
-    "ratelimit: every reply carries resetAt within one period ahead",
-    rlResets.every((t) => t > Date.now() && t <= Date.now() + 61 * 1000),
-    rlResets,
-  );
+  check("queue: an enqueued job is consumed and recorded as an event", processed > 0, { processed });
 
   step("rate limits per client address");
   // Every route that writes has a per-address budget (WRITES, 30 a minute). The 31st call
@@ -369,10 +137,10 @@ export async function runConformance(
   // reads, are unaffected.
   const spender = `203.0.113.${20 + (Date.now() % 200)}`;
   const spent: number[] = [];
-  let last = await jfrom(spender, "/login", { method: "POST" });
+  let last = await jfrom(spender, "/api/kv/incr", { method: "POST" });
   spent.push(last.status);
   for (let i = 1; i < 31; i++) {
-    last = await jfrom(spender, "/login", { method: "POST" });
+    last = await jfrom(spender, "/api/kv/incr", { method: "POST" });
     spent.push(last.status);
   }
   check(
@@ -394,7 +162,7 @@ export async function runConformance(
     method: "POST",
     body: JSON.stringify({ name: "a", msg: "b" }),
   });
-  const otherAddress = await jfrom(`203.0.113.${220 + (Date.now() % 30)}`, "/login", { method: "POST" });
+  const otherAddress = await jfrom(`203.0.113.${220 + (Date.now() % 30)}`, "/api/kv/incr", { method: "POST" });
   const readStillOpen = await jfrom(spender, "/api/info");
   check(
     "ratelimit: the budget is per address and shared by every write route; reads have their own",
@@ -443,7 +211,8 @@ export async function runConformance(
   );
   // The first chunk of a declared 25 MB file is charged 25 MB. Four of them spend 100 MB, the next is
   // refused with the 429 a quota gives; that address has nothing left today, another address does.
-  const hoarder = `192.0.2.${20 + (Date.now() % 200)}`;
+  // 198.18.0.0/15 (benchmarking) is used by no other step, so no earlier upload in this hour can share the address.
+  const hoarder = `198.18.${Date.now() % 256}.1`;
   const spend = (id: string, address: string, total: number) =>
     jfrom(
       address,
@@ -464,7 +233,7 @@ export async function runConformance(
     const spent = [];
     for (let i = 1; i <= 4; i++) spent.push((await spend("a" + i, hoarder, piece)).status);
     const over = await spend("a5", hoarder, 2097152);
-    const fresh = await spend("b1", `192.0.2.${20 + ((Date.now() + 97) % 200)}`, piece);
+    const fresh = await spend("b1", `198.18.${Date.now() % 256}.2`, piece);
     check(
       "quota: an address that has uploaded its whole day gets a 429 with code quota and a Retry-After; another address does not",
       spent.every((s) => s === 200) &&
@@ -533,14 +302,10 @@ export async function runConformance(
     method: "POST",
     body: JSON.stringify({ label: "L".repeat(41) }),
   });
-  const notesBody = await jfrom(writer, "/notes", {
-    method: "POST",
-    body: JSON.stringify({ title: "t", body: "b".repeat(4001) }),
-  });
   check(
-    "input: the secret check, the queue label and a note body are capped too",
-    secretFlood.status === 400 && queueLabel.status === 400 && notesBody.status === 400,
-    [secretFlood.status, queueLabel.status, notesBody.status],
+    "input: the secret check and the queue label are capped too",
+    secretFlood.status === 400 && queueLabel.status === 400,
+    [secretFlood.status, queueLabel.status],
   );
 
   step("chat room limits");
@@ -603,43 +368,9 @@ export async function runConformance(
   for (const socket of sockets) socket.close();
   room.socket.close();
 
-  step("Durable Object alarm roll-up");
-  // DO alarms (#125): viewing a note debounces an alarm a second out, whose
-  // handler rolls the count up into D1. Poll, because the whole point is that
-  // it happens after the request that scheduled it has gone.
-  let rollups = 0;
-  for (let i = 0; i < 20; i++) {
-    const stats = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
-    rollups = Number(obj(stats.body).do_alarm_rollups || 0);
-    if (rollups > 0) break;
-    await Bun.sleep(300);
-  }
-  check("DO alarm: the debounced roll-up ran and wrote to D1", rollups > 0, { rollups });
-
-  step("queue consumer");
-  // queue: POST /notes enqueued an EMAILS job; the broker consumer delivers it
-  let emailLogged = 0;
-  for (let i = 0; i < 20; i++) {
-    const stats = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
-    emailLogged = Number(obj(stats.body).queue_emails_processed || 0);
-    if (emailLogged > 0) break;
-    await Bun.sleep(300);
-  }
-  check("queue: EMAILS job consumed -> email_log row", emailLogged > 0, { emailLogged });
-
-  // cron: fire the scheduled trigger the way the broker would. An embedded
-  // binary has no broker and no token, so it refuses external triggers by
-  // design (#15) and drives its own on a timer instead.
+  // cron: fire the scheduled trigger the way the broker would. An embedded binary has no broker and no token, so it
+  // refuses external triggers by design (#15) and drives its own on a timer instead.
   if (options.skipTriggers) return;
-  step("cron: scheduled trigger");
-  const sched = await fetch(base + "/", {
-    method: "POST",
-    headers: { "x-sb-trigger": "scheduled", "x-sb-token": TOKEN, "content-type": "application/json" },
-    body: JSON.stringify({ cron: "*/1 * * * *", scheduledTime: Date.now() }),
-  });
-  check("cron: scheduled() runs (204)", sched.status === 204, sched.status);
-  const afterCron = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
-  check("cron: heartbeat row written by scheduled()", Number(obj(afterCron.body).cron_heartbeats) > 0, afterCron.body);
 
   // The file sweep (*/15) deletes files whose hour is up. Its scheduledTime is its clock, so a run
   // "two hours from now" finds a file uploaded just now expired; one "now" leaves it alone.
@@ -653,12 +384,6 @@ export async function runConformance(
       body: "keep",
     },
   );
-  const trigger = (cron: string, scheduledTime: number) =>
-    fetch(base + "/", {
-      method: "POST",
-      headers: { "x-sb-trigger": "scheduled", "x-sb-token": TOKEN, "content-type": "application/json" },
-      body: JSON.stringify({ cron, scheduledTime }),
-    });
   const early = await trigger("*/15 * * * *", Date.now());
   const stillThere = await jfrom(sweeper, "/api/r2/file?name=sweep.txt");
   const late = await trigger("*/15 * * * *", Date.now() + 2 * 3600000);
@@ -673,24 +398,24 @@ export async function runConformance(
     { kept: kept.status, early: early.status, stillThere: stillThere.status, late: late.status, list: afterSweep.body },
   );
 
-  // The daily reset is its own cron (0 4 * * *), told apart by event.cron: it empties the bucket,
-  // goes back to the three seed guestbook rows and clears the chat history.
+  // The daily reset is its own cron (0 4 * * *), told apart by event.cron: it empties the bucket, goes back to the
+  // three seed guestbook rows, starts the KV counter over and clears the chat history.
   step("cron: the daily reset");
-  await jget("/notes/" + noteId + "/attach", { method: "POST", body: "to be reset" });
-  const reset = await fetch(base + "/", {
-    method: "POST",
-    headers: { "x-sb-trigger": "scheduled", "x-sb-token": TOKEN, "content-type": "application/json" },
-    body: JSON.stringify({ cron: "0 4 * * *", scheduledTime: Date.now() }),
+  const resetter = `192.0.2.${20 + ((Date.now() + 71) % 200)}`;
+  await jfrom(resetter, "/api/kv/incr", { method: "POST" });
+  await jfrom(resetter, "/api/guestbook", { method: "POST", body: JSON.stringify({ name: "x", msg: "to be reset" }) });
+  await jfrom(resetter, "/api/r2/chunk?name=reset.txt&id=00000000000000bb&n=0&count=1&total=4&type=text%2Fplain", {
+    method: "PUT",
+    body: "gone",
   });
+  const reset = await trigger("0 4 * * *", Date.now());
   check("cron: the daily reset runs (204)", reset.status === 204, reset.status);
-  const afterReset = await jget("/admin/stats", { headers: { "x-admin-token": "s3cr3t-admin" } });
-  const seeded = obj((await jget("/api/guestbook")).body);
+  const afterReset = await jfrom(resetter, "/api/r2");
+  const seeded = obj((await jfrom(resetter, "/api/guestbook")).body);
+  const counter = obj((await jfrom(resetter, "/api/kv")).body);
   check(
-    "cron: the daily reset empties R2, notes and sessions and goes back to the seed guestbook",
-    Number(obj(afterReset.body).r2_objects) === 0 &&
-      Number(obj(afterReset.body).d1_notes) === 0 &&
-      Number(obj(afterReset.body).kv_sessions) === 0 &&
-      Number(seeded.total) === 3,
-    { stats: afterReset.body, total: seeded.total },
+    "cron: the daily reset empties R2 and the KV counter and goes back to the seed guestbook",
+    arr(obj(afterReset.body).objects).length === 0 && Number(counter.n) === 0 && Number(seeded.total) === 3,
+    { objects: obj(afterReset.body).objects, counter: counter.n, total: seeded.total },
   );
 }

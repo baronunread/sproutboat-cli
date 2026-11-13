@@ -96,6 +96,29 @@ describe("each example", () => {
   }
 });
 
+describe("no test-only code in examples", () => {
+  // What exists only so a conformance check can drive it: vectors, internal triggers, the stats feed, fixtures.
+  const TEST_ONLY = ["scryptVerify", "h1-regression", "binary-fixture", "/admin/stats", "x-sb-trigger"];
+  const sources = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return entry.name === "fonts" ? [] : sources(path);
+      return /\.(?:[cm]?[jt]s|html)$/.test(entry.name) && !entry.name.endsWith(".d.ts") ? [path] : [];
+    });
+  for (const example of examples) {
+    test(`${example} has none`, () => {
+      for (const sub of ["src", "public"]) {
+        const dir = join(EXAMPLES_DIR, example, sub);
+        if (!existsSync(dir)) continue;
+        for (const file of sources(dir)) {
+          const text = readFileSync(file, "utf8");
+          for (const marker of TEST_ONLY) expect(text.includes(marker), `${file} mentions ${marker}`).toBe(false);
+        }
+      }
+    });
+  }
+});
+
 describe("the skip tables", () => {
   const tables = {
     STANDALONE_SKIPS,

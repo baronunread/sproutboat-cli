@@ -252,6 +252,65 @@ export const CHECKS = {
     ok("the background write landed", /^\d+$/.test(stored), stored);
   },
 
+  // The dashboard's API, its page and its chat room. kitchen-sink has its own, much longer, harnesses on both backends
+  // (kitchen-sink/harness.ts); these requests are what holds it to the Workers style on workerd.
+  "kitchen-sink": async (base, ok, { fetch, text }) => {
+    ok("the dashboard is the page", (await text(base + "/")).includes("<h1>Sproutboat Notes"));
+    const health = await (await fetch(base + "/healthz")).json();
+    ok("/healthz answers {ok: true}", health.ok === true, health);
+    const info = await (await fetch(base + "/api/info")).json();
+    ok(
+      "/api/info says which bindings this build has",
+      info.bindings?.kv === true &&
+        info.bindings?.d1 === true &&
+        info.bindings?.r2 === true &&
+        info.bindings?.durable_object === true,
+      info.bindings,
+    );
+    const first = await (await fetch(base + "/api/kv/incr", { method: "POST" })).json();
+    const second = await (await fetch(base + "/api/kv/incr", { method: "POST" })).json();
+    ok("the KV counter increments", second.n === first.n + 1, { first, second });
+    const signed = await fetch(base + "/api/guestbook", {
+      method: "POST",
+      body: JSON.stringify({ name: "Ada", msg: "hello from the check" }),
+    });
+    const guestbook = await signed.json();
+    ok("the guestbook takes a signature", signed.status === 201 && guestbook.rows?.[0]?.name === "Ada", guestbook);
+    const stored = await fetch(
+      base + "/api/r2/chunk?name=check.txt&id=00000000000000cc&n=0&count=1&total=5&type=text%2Fplain",
+      {
+        method: "PUT",
+        body: "hello",
+      },
+    );
+    ok("R2 takes a one-chunk file", stored.status === 201, stored.status);
+    ok("R2 serves it back", (await text(base + "/api/r2/file?name=check.txt")) === "hello");
+    await fetch(base + "/api/queue/enqueue", { method: "POST", body: JSON.stringify({ label: "check" }) });
+    let processed = 0;
+    for (let i = 0; i < 40 && processed === 0; i++) {
+      processed = Number((await (await fetch(base + "/api/queue")).json()).counts?.processed || 0);
+      if (processed === 0) await Bun.sleep(250);
+    }
+    ok("the queue consumer recorded the job", processed > 0, { processed });
+    const peer = await (await fetch(base + "/api/quote")).json();
+    ok("the quote tile reaches quote-service through the service binding", peer.ok === true, peer);
+    ok(
+      "a plain GET of the chat path says no upgrade was asked for (426)",
+      (await fetch(base + "/api/chat?probe=1")).status === 426,
+    );
+    const frame = await new Promise<string>((resolve, reject) => {
+      const socket = new WebSocket(base.replace("http", "ws") + "/api/chat");
+      const timer = setTimeout(() => reject(new Error("no history frame within 10 s")), 10_000);
+      socket.onmessage = (event) => {
+        clearTimeout(timer);
+        socket.close();
+        resolve(String(event.data));
+      };
+      socket.onerror = () => reject(new Error("the chat socket did not open"));
+    });
+    ok("the chat room answers a WebSocket with its history", JSON.parse(frame).type === "history", frame);
+  },
+
   "quote-service": async (base, ok, { fetch }) => {
     const quote = await (await fetch(base + "/random")).json();
     ok("/random is a quote", Boolean(quote.content) && Boolean(quote.author), quote);
@@ -276,22 +335,24 @@ export const CHECKS = {
 
 /** Examples with no standalone binary: the standalone runner (smoke.ts) leaves them out. */
 export const STANDALONE_SKIPS = new Map([
+  [
+    "kitchen-sink",
+    "it has its own harnesses (kitchen-sink/harness-standalone.ts) and a service binding a standalone binary cannot have",
+  ],
   ["service-bindings/caller", "a standalone binary has no edge to route a service binding through"],
 ]);
 
 /** Secret values for the examples that declare any: workerd reads them from .dev.vars, a binary from its environment. */
-export const SECRETS = new Map([["vars-secrets", { API_KEY: "demo-key" }]]);
+export const SECRETS = new Map([
+  ["vars-secrets", { API_KEY: "demo-key" }],
+  ["kitchen-sink", { ADMIN_TOKEN: "s3cr3t-admin" }],
+]);
 
 /**
  * Examples workerd does not run, with why. Empty means every public example runs there; an entry is a promise to
  * say why, and the README's rules name the same list.
  */
-export const WORKERD_SKIPS = new Map([
-  [
-    "kitchen-sink",
-    "its entry points still read env as a global and it carries conformance routes; the kitchen-sink split moves both and removes this entry",
-  ],
-]);
+export const WORKERD_SKIPS = new Map<string, string>();
 
 /**
  * Examples whose requests are only partly sent to workerd, where Sproutboat does something on purpose that Workers
@@ -317,5 +378,6 @@ export const WORKERD_PARTIAL_SKIPS = new Map([
  * above: an entry says why the example cannot pass.
  */
 export const CLOUDFLARE_TYPES_SKIPS = new Map([
+  ["kitchen-sink", "its entry is JavaScript (see its README), so there is nothing to typecheck; workerd still runs it"],
   ["analytics", "env.EVENTS.query() is a Sproutboat extension and is not in Cloudflare's AnalyticsEngineDataset"],
 ]);

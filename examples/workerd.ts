@@ -28,6 +28,7 @@ import {
   type Check,
   type Context,
 } from "./checks";
+import { buildWebUi } from "./kitchen-sink/build-web";
 import { descendantPids, Harness, HarnessFailure } from "./lib/harness";
 import { publicExamples } from "./lib/public-examples";
 import {
@@ -40,7 +41,13 @@ import {
 } from "./lib/workerd";
 
 /** Examples that need another example running beside them, by name. */
-const COMPANIONS = new Map([["service-bindings/caller", ["service-bindings/callee"]]]);
+const COMPANIONS = new Map([
+  ["service-bindings/caller", ["service-bindings/callee"]],
+  ["kitchen-sink", ["quote-service"]],
+]);
+
+/** What an example needs built before it can run: kitchen-sink's dashboard is public/ copied to site/. */
+const PREPARE = new Map([["kitchen-sink", buildWebUi]]);
 
 const CHECKS_BY_NAME: Record<string, Check> = CHECKS;
 const all = publicExamples();
@@ -112,6 +119,7 @@ async function runExample(name: string): Promise<Result> {
   try {
     const check = CHECKS_BY_NAME[name];
     if (!check) throw new Error(`checks.ts has no checks for ${name}`);
+    PREPARE.get(name)?.();
     const app = join(harness.workdir, "app");
     const config = writeWranglerProject(name, app, maxDate, secrets);
 

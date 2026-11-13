@@ -157,7 +157,8 @@ export async function runR2RoundTrip(
   const cap = Number(info?.max_upload_bytes) || 25 * MIB;
   // One response sends at most this much of a file; a bigger file is read in Range windows.
   const most = Number(info?.max_response_bytes) || 2 * MIB;
-  const fixture = new Uint8Array(await (await send(base + "/binary-fixture.bin")).arrayBuffer());
+  // Every byte value once: it catches UTF-8 decoding, replacement and truncation bugs.
+  const fixture = Uint8Array.from({ length: 256 }, (_, index) => index);
   check(
     "round trip: the fixture holds all 256 byte values",
     fixture.length === 256 && fixture.every((b, i) => b === i),

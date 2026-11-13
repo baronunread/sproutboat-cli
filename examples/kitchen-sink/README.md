@@ -1,15 +1,15 @@
 # kitchen-sink
 
 One Workers module that uses every Sproutboat binding, with a dashboard that
-calls each one for real, and the conformance suite both backends are held to.
+calls each one for real, and the suite both backends are held to. It is a demo: the routes and vectors that exist only to test bindings live in [`../conformance`](../conformance).
 
 ```
 src/index.js                    the worker: /api routes, ChatRoom Durable Object, scheduled and queue handlers
 public/                         the dashboard: index.html, app.css, app.js, fonts (no framework, no build step)
 build-web.ts                    public/ -> site/, plus site/build-info.json (sizes, config, code excerpts)
-conformance.ts                  the binding checks, run against the broker and standalone backends
+conformance.ts                  the demo's checks (API, limits, chat, cron), run against the broker and standalone backends
 r2-roundtrip.ts                 sha256 round trips of 5 MB and 25 MB files, run by conformance.ts or against a deployed app
-harness.ts                      broker backend: host sprout + in-process broker (105 checks)
+harness.ts                      broker backend: host sprout + in-process broker (77 checks)
 harness-standalone.ts           one binary with the bindings compiled in (same checks)
 worker.test.ts                  the worker in-process with a clock the test moves: file expiry, the daily quota, Content-Disposition, /healthz (`bun test`)
 serve.ts                        like harness.ts, but stays up for the browser
@@ -68,12 +68,12 @@ the page turns that into a countdown on the tile and pauses its buttons.
 
 | Routes | Limit | Binding and key |
 | --- | --- | --- |
-| Every route that writes: `POST /api/guestbook`, `POST /api/kv/incr`, `PUT` and `DELETE /api/r2`, `POST /api/queue/enqueue`; the conformance routes `POST /login`, `POST /notes`, `GET /notes/:id` (it counts a view), `POST /notes/:id/attach`, `POST /r2/direct-upload`; the calls that cost CPU or go out: `GET /api/quote`, `/quote`, `/peer`, `/egress`, `/hash`, `/throttle` | 30 a minute, all of them together | `WRITES`, `w:<address>` |
-| One chunk of a file upload (`PUT /api/r2/chunk`), instead of the line above; `POST /notes/:id/attach` and `POST /r2/direct-upload` count here as well as above | 60 a minute (a 25 MB file is 25 requests) | `BULK`, `b:<address>` |
+| Every route that writes: `POST /api/guestbook`, `POST /api/kv/incr`, `PUT` and `DELETE /api/r2`, `POST /api/queue/enqueue`; the call that goes out: `GET /api/quote` | 30 a minute, all of them together | `WRITES`, `w:<address>` |
+| One chunk of a file upload (`PUT /api/r2/chunk`), instead of the line above | 60 a minute (a 25 MB file is 25 requests) | `BULK`, `b:<address>` |
 | Bytes in an hour, per address: uploads (charged by the size a file says it has, when its first chunk arrives) and downloads (charged by what a response sends) | 100 MB up, 250 MB down | a row in D1 (`quota`), key `up:<address>:<hour>` / `down:<address>:<hour>`; a refusal is a 429 with `code: "quota"`, `window: "hour"` and the seconds to the next hour |
 | Bytes in a day, per address: uploads, charged the same way as above, from 04:00 UTC to 04:00 UTC (the daily reset's day, so the reset never hands out a second allowance) | 100 MB up (`MAX_UPLOAD_PER_DAY`) | a row in D1 (`quota`), key `upday:<address>:<day>`; a refusal is a 429 with `code: "quota"`, `window: "day"` and the seconds to 04:00 UTC |
 | The secret check (`POST /api/secrets/check`) and a wrong `x-admin-token` | 3 a minute | `THROTTLE`, `secret-check:<address>` and `admin-token:<address>` |
-| The dashboard's GET routes (`/api/*`, `/whoami`, `/notes`, `/attachments`, `/attach/:key`, `/r2/direct-download`) | 240 a minute | `READS`, `r:<address>` |
+| The dashboard's GET routes (`/api/*`) | 240 a minute | `READS`, `r:<address>` |
 | Opening the chat socket (`GET /api/chat`) | 30 a minute | `WRITES`, `ws:<address>` |
 | Chat frames, per connection | 3 a second and 12 per 10 s; 8 refusals close the socket (code 4008: a Durable Object socket may close with 1000 or 3000 to 4999 only) | counted in the `ChatRoom` object, in the socket attachment |
 | Chat connections | 5 per address, 60 in the room | counted in the `ChatRoom` object |
@@ -91,7 +91,7 @@ a public peer address as it is (a standalone binary reached directly), else the
 proxy in front), else one shared key, so the limits become a global cap rather than
 disappearing. IPv6 clients are keyed on their /64. `GET /api/info` returns
 `client_key` (`peer`, `x-forwarded-for`, `peer-private` or `none`) so a deployment can
-check which one it got. The conformance suite gives each run its own address with
+check which one it got. The suite gives each run its own address with
 that header, so runs never share a budget.
 
 ### Input caps
@@ -113,8 +113,6 @@ Every input is validated and answered with a `4xx` and a JSON `error`, never a `
 | Bytes per address and hour | 100 MB up, 250 MB down | 429 |
 | Bytes per address and day | 100 MB up | 429 |
 | How long a file lives | `FILE_TTL_SECONDS` (3600): after that it is not served (404) and is deleted | 404 |
-| Note title, body | 200 and 4,000 characters | 400 |
-| `?key=` of `/throttle`, `?to=` of `/egress`, `?key=` of `/r2/direct-download` | 64, 2,048 and 256 characters; `/egress` takes only `http://` and `https://` | 400 |
 
 Names and messages are tidied before they are stored: control characters become a
 space, bidirectional overrides and unpaired surrogates are dropped, runs of spaces
@@ -195,31 +193,13 @@ The demo data does not grow forever. The page says so: "Demo data resets daily a
 | What | How |
 | --- | --- |
 | Every 15 minutes (cron `*/15 * * * *`, told apart by `event.cron`) | `purgeExpired()` and `sweepChunks()`: files whose hour is up (manifest and chunks), and chunks over an hour old whose upload never finished. Its `scheduledTime` is its clock. |
-| Daily at 04:00 UTC (cron `0 4 * * *`, told apart from `*/1 * * * *` by `event.cron`) | `dailyReset()`: every R2 object (any prefix: manifests, chunks, attachments), every KV key (sessions and the counter), the guestbook back to its three seed rows, notes, email log, heartbeats, view roll-ups and the queue feed, and the chat history in the `ChatRoom` object (connected pages are sent an empty history), and the spent hourly and daily allowances. |
-| Between resets | guestbook 200 rows, notes 200, events 200, heartbeats 200, email log 200, view roll-ups 200; chat 30 messages; sessions expire after an hour and the `*/1` cron prunes them; files 50 and 200 MB, each deleted an hour after its upload; chunks of an upload nobody finished are deleted after an hour (the `*/15` cron), spent hourly allowances after two hours and daily ones after two days (the `*/1` cron). |
-| Not reset | Analytics Engine data points (the app can write them, not delete them) and the `ViewCounter` objects (a few bytes each, one per note id). |
+| Daily at 04:00 UTC (cron `0 4 * * *`, told apart from `*/1 * * * *` by `event.cron`) | `dailyReset()`: every R2 object (any prefix: manifests, chunks, attachments), every KV key (the counter), the guestbook back to its three seed rows, the queue feed, and the chat history in the `ChatRoom` object (connected pages are sent an empty history), and the spent hourly and daily allowances. |
+| Between resets | guestbook 200 rows, events 200; chat 30 messages; files 50 and 200 MB, each deleted an hour after its upload; chunks of an upload nobody finished are deleted after an hour (the `*/15` cron), spent hourly allowances after two hours and daily ones after two days (the `*/1` cron). |
+| Not reset | Analytics Engine data points (the app can write them, not delete them). |
 
 ## Routes
 
-The conformance routes are unchanged, and `conformance.ts` still checks them:
-
-```
-GET  /                     the dashboard (env.ASSETS), unknown GET paths fall back to it
-POST /login                -> { token }              (KV put)
-GET  /whoami               Bearer token              (KV get)
-POST /notes { title, body} -> { id }                 (D1 insert + EMAILS.send)
-GET  /notes                                          (D1 all)
-GET  /notes/:id            -> { note, views }        (D1 first + DO increment)
-POST /notes/:id/attach     raw body is the file      (R2 put + D1 update)
-GET  /attach/:key                                    (R2 get, sha256 httpEtag)
-GET  /attachments                                    (R2 list)
-GET  /quote                                          (outbound fetch)
-GET  /peer                                           (service binding)
-GET  /hash, /throttle, /egress, /async               crypto.subtle, rate limiter, egress refusals, async handler
-GET  /admin/stats          header x-admin-token      (secret gate; one number per binding)
-```
-
-Every route above, and every `/api` route below, answers `429` over its limit (see the table above). The dashboard adds these under `/api`:
+The root routes this app used to carry for testing (`/login`, `/notes`, `/hash`, `/egress`, `/admin/stats` and the rest) and their crypto vectors moved to [`../conformance`](../conformance), a fixture with its own worker, so this one is only what the dashboard uses. Every `/api` route answers `429` over its limit (see the table above):
 
 ```
 GET  /healthz                         { ok: true }: for an uptime monitor (below), no rate limit
@@ -289,20 +269,21 @@ and shows "Not in standalone". Everything else runs in the binary, including the
 WebSocket chat, the queue consumer and both cron timers. The rate limiters key on
 `x-forwarded-for` only when the peer is private, which is the case behind a proxy.
 
-`bun run kitchen-sink:standalone` (`harness-standalone.ts`) runs the same checks
+`bun run kitchen-sink:demo:standalone` (`harness-standalone.ts`) runs the same checks
 against a standalone binary, with the service binding dropped from the config in
-memory.
+memory. `bun run kitchen-sink:standalone` runs that and the conformance fixture
+(`bun run conformance:standalone`) one after the other.
 
 ## Notes
 
-- The tile handlers take `env` as an argument and use only Workers APIs, so they run on
-  Cloudflare Workers as they are. The entry points (`fetch(request)`, `scheduled(event)`,
-  `queue(batch)`) read the global `env`, because the broker harness compiles without a
-  compatibility date and so is not handed `env` as an argument.
-- The KV counter lives under the `counter:` prefix; the cron job that prunes
-  sessions skips that prefix.
-- The R2 tile sends the file as text. Large or binary files belong behind
-  `createUploadUrl` (see `POST /r2/direct-upload`), which the conformance suite covers.
+- The worker is standard Workers code: `fetch(request, env)`, `scheduled(controller, env)` and
+  `queue(batch, env)` take `env` as an argument, `ChatRoom` extends `DurableObject`, and the tables
+  are created once per process. It is JavaScript, not TypeScript, because the Code panels copy
+  excerpts of `src/index.js` between `#region` markers and the broker harness compiles it as it is;
+  `worker-configuration.d.ts` and the JSDoc `@param {Env}` on each entry point still give an editor the types of `env`.
+- The KV counter lives under the `counter:` prefix.
+- The R2 tile moves files in 1 MiB chunks. A direct transfer through `createUploadUrl` is covered by
+  the conformance fixture.
 - Hibernation (the worker is unloaded while a socket idles) is something sproutd
   does from compatibility date 2026-11-01. Locally the same API runs, and nothing hibernates.
 - The fonts are Figtree and JetBrains Mono, served from `public/fonts` under the SIL

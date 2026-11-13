@@ -26,7 +26,7 @@ Two larger ones:
 
 | | |
 | --- | --- |
-| [`kitchen-sink`](kitchen-sink) | every binding in one app, with a dashboard |
+| [`kitchen-sink`](kitchen-sink) | every binding in one app, with a dashboard; its checks cover only what the dashboard does |
 | [`stress`](stress) | the memory and throughput baseline in [`BASELINE.md`](stress/BASELINE.md) |
 
 ## Rules for examples
@@ -44,9 +44,9 @@ These two rules are what the examples are held to, in CI. A change that adds or 
 
 `bun run examples:workerd` enforces it (and so does `bun test`, which runs it): it translates each `sproutboat.jsonc` into a `wrangler.jsonc`, typechecks the entry against Cloudflare's own runtime types, runs it under workerd (`wrangler dev`) and sends the example's smoke requests. An example that only works on Sproutboat fails the build. An example that workerd cannot emulate locally may be skipped, but only by an entry in `WORKERD_SKIPS` in [`checks.ts`](checks.ts), with the reason; `bun test` fails if an example is neither checked nor listed.
 
-**2. No test-only code in examples.** An example is read, so it holds only what it demonstrates. Test vectors, routes that exist for a conformance check, fixtures that force an edge case and anything a harness needs but a reader does not go in a conformance fixture or in the harness, never in an example. If a check needs a route, the route belongs to the fixture.
+**2. No test-only code in examples.** An example is read, so it holds only what it demonstrates. Test vectors, routes that exist for a conformance check, fixtures that force an edge case and anything a harness needs but a reader does not go in a conformance fixture ([`conformance`](conformance)) or in the harness, never in an example. If a check needs a route, the route belongs to the fixture.
 
-Not examples, and exempt from both rules: the conformance fixtures, [`runtime-comparison`](runtime-comparison), [`stress`](stress), [`workers-verbatim`](workers-verbatim) and [`workers-contract`](workers-contract). They are fixtures.
+Not examples, and exempt from both rules: [`conformance`](conformance), [`runtime-comparison`](runtime-comparison), [`stress`](stress), [`workers-verbatim`](workers-verbatim) and [`workers-contract`](workers-contract). They are fixtures.
 
 ## Original Cloudflare Worker source
 

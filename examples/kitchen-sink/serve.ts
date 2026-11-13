@@ -55,7 +55,7 @@ const bindings: Bindings = {
   ratelimiters: c.ratelimiters ?? [],
   assets: c.assets?.binding ?? "",
 };
-const vars = { ...c.vars, QUOTE_URL: `http://${upstreamHost}/random` };
+const vars = { ...c.vars };
 
 const assetsDir = join(workdir, "assets");
 if (c.assets) {
@@ -155,15 +155,9 @@ for (let i = 0; i < 100; i++) {
 console.log(`\n  sprout   ${base}`);
 console.log(`  broker   127.0.0.1:${brokerServer.port}  (state: ${workdir})`);
 console.log(`\n  open ${base}/ in a browser for the UI, or:`);
-console.log(`    curl ${base}/`);
-console.log(
-  `    TOKEN=$(curl -s -XPOST ${base}/login | bun -e 'process.stdin.on("data",d=>console.log(JSON.parse(d).token))')`,
-);
-console.log(`    curl -H "authorization: Bearer $TOKEN" ${base}/whoami`);
-console.log(`    curl -XPOST ${base}/notes -d '{"title":"hi","body":"there"}'`);
-console.log(`    curl ${base}/notes`);
-console.log(`    curl ${base}/notes/1        # DO view counter, run twice`);
-console.log(`    curl ${base}/quote`);
-console.log(`    curl -H "x-admin-token: s3cr3t-admin" ${base}/admin/stats`);
+console.log(`    curl ${base}/healthz`);
+console.log(`    curl ${base}/api/info`);
+console.log(`    curl -XPOST ${base}/api/kv/incr`);
+console.log(`    curl ${base}/api/quote      # the stub quote service`);
 console.log(`\n  Ctrl-C to stop.`);
 await sprout.exited;

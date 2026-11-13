@@ -1,0 +1,31 @@
+{
+  // The conformance fixture: every binding, driven by conformance.ts on both backends. It is not an example
+  // (examples/README.md, "Rules for examples"): its routes and vectors exist for the checks, and nothing here is
+  // written to be read as a model.
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "conformance",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-18",
+  "vars": {
+    "SITE_NAME": "Sproutboat Notes",
+    "QUOTE_URL": "https://api.quotable.local/random",
+  },
+  "secrets": ["ADMIN_TOKEN"],
+  "kv_namespaces": ["SESSIONS"],
+  "d1_databases": ["DB"],
+  "r2_buckets": ["UPLOADS"],
+  "queues": ["EMAILS"],
+  "analytics_engine_datasets": ["METRICS"],
+  "durable_objects": { "VIEWS": "ViewCounter" },
+  // 3 a minute per key: conformance.ts spends it.
+  "ratelimiters": [{ "binding": "THROTTLE", "limit": 3, "period": 60 }],
+  // env.PEER.fetch() through the edge. The standalone harness drops it (a binary has no edge).
+  "services": [{ "binding": "PEER", "service": "quote-service" }],
+  "triggers": { "crons": ["*/1 * * * *"] },
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_sprout_first": true,
+  },
+}
