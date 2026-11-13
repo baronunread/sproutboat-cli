@@ -20,7 +20,7 @@ jobs:
       - run: bun run examples:types
       - run: bun test
 
-  # Every example under examples/ must run unchanged under workerd and typecheck against Cloudflare's types
+  # (comment-only throwaway) Every example under examples/ must run unchanged under workerd and typecheck against Cloudflare's types
   # (examples/workerd.ts). It is its own job so it runs beside `check` instead of inside `bun test`.
   examples-workerd:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
