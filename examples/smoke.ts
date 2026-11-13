@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Every small example, built and driven.
+ * Every small example (and each fixture that is plain Workers code), built and driven.
  *
  *   bun examples/smoke.ts          # all of them
  *   bun examples/smoke.ts kv d1    # just these
@@ -21,7 +21,8 @@
  */
 import { cpSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { descendantPids, Harness, HarnessFailure } from "./lib/harness";
+import { descendantPids, Harness, HarnessFailure } from "../test/fixtures/lib/harness";
+import { FIXTURES_DIR, projectDir } from "../test/fixtures/lib/projects";
 import { buildStandalone } from "../src/standalone-build";
 import { bundleHandler } from "../src/bundle";
 import { parseConfig } from "../src/config";
@@ -48,8 +49,8 @@ const text = async (url: string, init?: RequestInit) => (await fetch(url, init))
 
 const context: Context = { fetch, text, runtime: "standalone" };
 
-// The public examples share their requests with the workerd run (checks.ts). What is here is only for the fixtures that
-// are not examples. Each check is handed the runner's own request functions.
+// The examples share their requests with the workerd run (checks.ts). What is here is only for the verbatim and contract
+// fixtures, which are not examples. Each check is handed the runner's own request functions.
 type Verbatim = (base: string, ok: Ok) => Promise<void>;
 const FIXTURES = {
   "worker-return-json": async (base, ok) => {
@@ -116,7 +117,6 @@ function freePort(): number {
   }
 }
 
-const HERE = import.meta.dir;
 const wanted = process.argv.slice(2);
 for (const name of wanted) if (!isName(name)) throw new Error(`no such example: ${name}`);
 const names: Name[] = wanted.length
@@ -197,8 +197,10 @@ async function runExample(name: Name): Promise<Result> {
     // copy in its own temp dir so its build output never meets the plain example's.
     const [example, compatDate] = name.split("@");
     const source = example.startsWith("worker-")
-      ? join(HERE, "workers-verbatim", example.slice(7))
-      : join(HERE, example);
+      ? join(FIXTURES_DIR, "workers-verbatim", example.slice(7))
+      : example === "workers-contract"
+        ? join(FIXTURES_DIR, example)
+        : projectDir(example);
     const dir = compatDate ? join(workdir, "project") : source;
     if (compatDate) cpSync(source, dir, { recursive: true, filter: (path) => !path.includes("/.sproutboat") });
     const parsed = parseConfig(readFileSync(join(dir, "sproutboat.jsonc"), "utf8"));

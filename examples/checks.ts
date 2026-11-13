@@ -28,13 +28,13 @@ export const CHECKS = {
     ok("reads the query string", (await text(base + "/?name=sprout")) === "Hello, sprout!\n");
   },
 
-  "cf-json": async (base, ok, { fetch }) => {
+  "fixtures/cf-json": async (base, ok, { fetch }) => {
     const response = await fetch(base + "/");
     ok("returns a JSON content type", response.headers.get("content-type")?.includes("application/json") === true);
     ok("returns the JSON object", JSON.stringify(await response.json()) === '{"hello":"world"}');
   },
 
-  "cf-cookies": async (base, ok, { text }) => {
+  "fixtures/cf-cookies": async (base, ok, { text }) => {
     ok(
       "reads a named cookie",
       (await text(base + "/", { headers: { cookie: "other=1; __uid=abc=123" } })) === "abc=123",
@@ -45,7 +45,7 @@ export const CHECKS = {
     );
   },
 
-  "cf-redirects": async (base, ok, { fetch }) => {
+  "fixtures/cf-redirects": async (base, ok, { fetch }) => {
     const redirect = await fetch(base + "/old-guide?from=search", { redirect: "manual" });
     ok("redirects a mapped path", redirect.status === 301 && redirect.headers.get("location") === base + "/guide", {
       status: redirect.status,
@@ -54,7 +54,7 @@ export const CHECKS = {
     ok("does not redirect an unmapped path", (await fetch(base + "/unknown", { redirect: "manual" })).status === 404);
   },
 
-  "cf-headers": async (base, ok, { fetch }) => {
+  "fixtures/cf-headers": async (base, ok, { fetch }) => {
     const response = await fetch(base + "/");
     ok("returns the page", (await response.text()) === "Protected page");
     ok(
@@ -65,7 +65,7 @@ export const CHECKS = {
     );
   },
 
-  "cf-post": async (base, ok, { fetch, text }) => {
+  "fixtures/cf-post": async (base, ok, { fetch, text }) => {
     const json = await fetch(base + "/", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -171,7 +171,7 @@ export const CHECKS = {
     );
   },
 
-  upload: async (base, ok, { fetch, runtime }) => {
+  "fixtures/upload": async (base, ok, { fetch, runtime }) => {
     const encoder = new TextEncoder();
     const body = new ReadableStream({
       async start(controller) {
@@ -191,7 +191,7 @@ export const CHECKS = {
     );
   },
 
-  request: async (base, ok, { fetch }) => {
+  "fixtures/request": async (base, ok, { fetch }) => {
     const forwarded = await (
       await fetch(base + "/forward", { method: "POST", headers: { "x-from": "client" }, body: "hi é" })
     ).json();
@@ -368,7 +368,7 @@ export const WORKERD_PARTIAL_SKIPS = new Map([
     "refusing a private address (169.254.169.254) is Sproutboat's egress policy; workerd would try to connect",
   ],
   [
-    "upload",
+    "fixtures/upload",
     "the 200 ms spread between the first and last chunk is how this runtime paces a connection; workerd may coalesce them",
   ],
 ]);

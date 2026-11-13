@@ -25,7 +25,7 @@ website's support table links to these, so a broken one makes the table lie.
 It runs four at a time; `SMOKE_CONCURRENCY=1 bun run examples` runs them one
 by one.
 
-All three drive a native child through `examples/lib/harness.ts`, which gives
+All three drive a native child through `test/fixtures/lib/harness.ts`, which gives
 every HTTP and raw-socket operation a deadline and records the current step
 before it starts. A stalled response, a readiness failure, a slow build or a
 child that exits mid-request fails with the step, backend, runtime and

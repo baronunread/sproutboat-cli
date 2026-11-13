@@ -1,7 +1,7 @@
 # kitchen-sink
 
 One Workers module that uses every Sproutboat binding, with a dashboard that
-calls each one for real, and the suite both backends are held to. It is a demo: the routes and vectors that exist only to test bindings live in [`../conformance`](../conformance).
+calls each one for real, and the suite both backends are held to. It is a demo: the routes and vectors that exist only to test bindings live in [`test/fixtures/conformance`](../../test/fixtures/conformance).
 
 ```
 src/index.js                    the worker: /api routes, ChatRoom Durable Object, scheduled and queue handlers
@@ -199,7 +199,7 @@ The demo data does not grow forever. The page says so: "Demo data resets daily a
 
 ## Routes
 
-The root routes this app used to carry for testing (`/login`, `/notes`, `/hash`, `/egress`, `/admin/stats` and the rest) and their crypto vectors moved to [`../conformance`](../conformance), a fixture with its own worker, so this one is only what the dashboard uses. Every `/api` route answers `429` over its limit (see the table above):
+The root routes this app used to carry for testing (`/login`, `/notes`, `/hash`, `/egress`, `/admin/stats` and the rest) and their crypto vectors moved to [`test/fixtures/conformance`](../../test/fixtures/conformance), a fixture with its own worker, so this one is only what the dashboard uses. Every `/api` route answers `429` over its limit (see the table above):
 
 ```
 GET  /healthz                         { ok: true }: for an uptime monitor (below), no rate limit

@@ -8,7 +8,7 @@
  * drives one executable that carries the sprout, the assets and the bindings inside it. Both run `runConformance`
  * unchanged, which is the point: two backends, one definition of what the demo does.
  */
-import { runStandalone } from "../lib/backends";
+import { runStandalone } from "../../test/fixtures/lib/backends";
 import { buildWebUi } from "./build-web";
 import { runConformance } from "./conformance";
 

@@ -146,7 +146,7 @@ test("an artifact manifest from before compatibilityDate still validates", () =>
   // Verbatim shape of a v2 manifest as shipped before this field existed. If
   // this ever fails, every stored artifact from that era has become
   // undeployable and `rollback` is broken for real users.
-  const shipped = JSON.parse(readFileSync(resolve(root, "fixtures/manifest-pre-compat.json"), "utf8"));
+  const shipped = JSON.parse(readFileSync(resolve(root, "test/fixtures/manifest-pre-compat.json"), "utf8"));
   const result = validateManifest(shipped);
   expect(result.ok).toBe(true);
 });
@@ -160,7 +160,7 @@ test("a storage resource written by v0.1.0 is still readable", async () => {
   const resourceDir = join(dir, "resources");
   mkdirSync(resourceDir, { recursive: true });
   const store = new Database(join(resourceDir, `${id}.sqlite`), { create: true });
-  store.exec(readFileSync(resolve(root, "fixtures/store-kv-resource.sql"), "utf8"));
+  store.exec(readFileSync(resolve(root, "test/fixtures/store-kv-resource.sql"), "utf8"));
   store.close();
 
   const broker = createBroker({

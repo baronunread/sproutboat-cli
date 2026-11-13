@@ -3,13 +3,13 @@
  * itself with (rate limits, input caps, daily upload quotas, file expiry), the chat room and the cron jobs.
  *
  * The binding conformance checks (KV, D1, R2, queues, crypto, egress, the secret gate...) are in
- * examples/conformance, which has its own worker for them. Both are held to both backends: the broker-backed
+ * test/fixtures/conformance, which has its own worker for them. Both are held to both backends: the broker-backed
  * harness runs these against a host sprout plus an in-process broker, the standalone harness against one binary.
  *
  * Deliberately free of any knowledge of how the app is running: it gets a base URL and a trigger token.
  */
 import { isString, jsonObject, parseJsonValue, type JsonObject, type JsonValue } from "../../src/json";
-import type { RunContext } from "../lib/backends";
+import type { RunContext } from "../../test/fixtures/lib/backends";
 import { runR2RoundTrip } from "./r2-roundtrip";
 
 const obj = (value: JsonValue | undefined): JsonObject => jsonObject(value ?? null) ?? {};
