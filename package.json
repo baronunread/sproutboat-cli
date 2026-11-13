@@ -61,10 +61,10 @@
     "style": "bunx style-doctor@latest --quiet",
     "kitchen-sink": "bun run kitchen-sink:demo && bun run conformance",
     "kitchen-sink:demo": "bun examples/kitchen-sink/harness.ts",
-    "conformance": "bun examples/conformance/harness.ts",
+    "conformance": "bun test/fixtures/conformance/harness.ts",
     "kitchen-sink:standalone": "bun run kitchen-sink:demo:standalone && bun run conformance:standalone",
     "kitchen-sink:demo:standalone": "bun examples/kitchen-sink/harness-standalone.ts",
-    "conformance:standalone": "bun examples/conformance/harness-standalone.ts"
+    "conformance:standalone": "bun test/fixtures/conformance/harness-standalone.ts"
   },
   "dependencies": {
     "@sproutboat/artifact": "^0.3.0",

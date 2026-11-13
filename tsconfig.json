@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "examples/*.ts", "examples/lib/*.ts", "examples/conformance/*.ts"]
+  "include": ["src/**/*.ts", "examples/*.ts", "test/fixtures/lib/*.ts", "test/fixtures/conformance/*.ts"]
 }

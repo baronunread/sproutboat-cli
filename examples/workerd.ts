@@ -8,7 +8,7 @@
  *
  * An example is a standard Cloudflare Worker, and this is what holds it to that. For each one it
  *
- *   1. translates sproutboat.jsonc into a wrangler.jsonc (examples/lib/wrangler-config.ts);
+ *   1. translates sproutboat.jsonc into a wrangler.jsonc (test/fixtures/lib/wrangler-config.ts);
  *   2. typechecks the entry against the runtime types `wrangler types` generates, with no Sproutboat declaration in
  *      the program, so an API only Sproutboat has is a type error;
  *   3. runs it under workerd with `wrangler dev` and sends it the requests in checks.ts, the same ones smoke.ts
@@ -29,8 +29,8 @@ import {
   type Context,
 } from "./checks";
 import { buildWebUi } from "./kitchen-sink/build-web";
-import { descendantPids, Harness, HarnessFailure } from "./lib/harness";
-import { publicExamples } from "./lib/public-examples";
+import { descendantPids, Harness, HarnessFailure } from "../test/fixtures/lib/harness";
+import { projectNames } from "../test/fixtures/lib/projects";
 import {
   typecheckAgainstCloudflare,
   workerdCompatibilityDate,
@@ -38,7 +38,7 @@ import {
   stopTree,
   wranglerEnv,
   writeWranglerProject,
-} from "./lib/workerd";
+} from "../test/fixtures/lib/workerd";
 
 /** Examples that need another example running beside them, by name. */
 const COMPANIONS = new Map([
@@ -50,7 +50,7 @@ const COMPANIONS = new Map([
 const PREPARE = new Map([["kitchen-sink", buildWebUi]]);
 
 const CHECKS_BY_NAME: Record<string, Check> = CHECKS;
-const all = publicExamples();
+const all = projectNames();
 const wanted = process.argv.slice(2);
 for (const name of wanted) if (!all.includes(name)) throw new Error(`no such example: ${name}`);
 const names = wanted.length ? wanted : all;
@@ -107,7 +107,7 @@ async function runExample(name: string): Promise<Result> {
   const secrets = SECRETS.get(name) ?? {};
   const harness = new Harness({
     backend: `workerd:${name}`,
-    prefix: `sb-workerd-${name.replace("/", "-")}-`,
+    prefix: `sb-workerd-${name.replaceAll("/", "-")}-`,
     secrets: Object.values(secrets),
     handleSignals: false,
     readyTimeoutMs: 120_000,

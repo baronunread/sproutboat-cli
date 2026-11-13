@@ -7,10 +7,10 @@
  *   bun examples/kitchen-sink/harness.ts
  *
  * This is the local stand-in for the platform: the real supervisor spawns the same broker per deployment and passes
- * SB_BROKER_PORT / SB_BROKER_TOKEN / SB_SPROUT_URL to the sprout, as examples/lib/backends.ts does. The binding
- * conformance checks are examples/conformance/harness.ts.
+ * SB_BROKER_PORT / SB_BROKER_TOKEN / SB_SPROUT_URL to the sprout, as test/fixtures/lib/backends.ts does. The binding
+ * conformance checks are test/fixtures/conformance/harness.ts.
  */
-import { runBroker } from "../lib/backends";
+import { runBroker } from "../../test/fixtures/lib/backends";
 import { buildWebUi } from "./build-web";
 import { runConformance } from "./conformance";
 

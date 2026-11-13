@@ -17,17 +17,10 @@ Small enough to read in a sitting. Every example is a standard Cloudflare Worker
 | [`vars-secrets`](vars-secrets) | vars, secrets | settings baked in, secrets supplied at launch |
 | [`waituntil`](waituntil) | — | `ctx.waitUntil()` |
 | [`outbound-fetch`](outbound-fetch) | — | `fetch()` to a public host, and the refusal of a private one |
-| [`upload`](upload) | — | a streamed request body |
-| [`request`](request) | — | `new Request(request, init)` as in Workers |
 | [`service-bindings`](service-bindings) | Services | `env.GREETER.fetch()` from one app to another |
 | [`quote-service`](quote-service) | Services | a `WorkerEntrypoint` with an RPC method, the peer of `kitchen-sink` |
 
-Two larger ones:
-
-| | |
-| --- | --- |
-| [`kitchen-sink`](kitchen-sink) | every binding in one app, with a dashboard; its checks cover only what the dashboard does |
-| [`stress`](stress) | the memory and throughput baseline in [`BASELINE.md`](stress/BASELINE.md) |
+This directory holds only what is meant to be read. Everything that exists for a test or a measurement is a fixture in [`test/fixtures`](../test/fixtures) (see "Fixtures" below), so nothing you read here is a conformance vector, a stress rig or a runtime comparison.
 
 ## Rules for examples
 
@@ -44,25 +37,32 @@ These two rules are what the examples are held to, in CI. A change that adds or 
 
 `bun run examples:workerd` enforces it (and so does `bun test`, which runs it): it translates each `sproutboat.jsonc` into a `wrangler.jsonc`, typechecks the entry against Cloudflare's own runtime types, runs it under workerd (`wrangler dev`) and sends the example's smoke requests. An example that only works on Sproutboat fails the build. An example that workerd cannot emulate locally may be skipped, but only by an entry in `WORKERD_SKIPS` in [`checks.ts`](checks.ts), with the reason; `bun test` fails if an example is neither checked nor listed.
 
-**2. No test-only code in examples.** An example is read, so it holds only what it demonstrates. Test vectors, routes that exist for a conformance check, fixtures that force an edge case and anything a harness needs but a reader does not go in a conformance fixture ([`conformance`](conformance)) or in the harness, never in an example. If a check needs a route, the route belongs to the fixture.
+**2. No test-only code in examples.** An example is read, so it holds only what it demonstrates. Test vectors, routes that exist for a conformance check, fixtures that force an edge case and anything a harness needs but a reader does not go in a fixture ([`conformance`](../test/fixtures/conformance)) or in the harness, never in an example. If a check needs a route, the route belongs to the fixture.
 
-Not examples, and exempt from both rules: [`conformance`](conformance), [`runtime-comparison`](runtime-comparison), [`stress`](stress), [`workers-verbatim`](workers-verbatim) and [`workers-contract`](workers-contract). They are fixtures.
+## Fixtures
 
-## Original Cloudflare Worker source
+Everything else lives in [`test/fixtures`](../test/fixtures), exempt from rule 2 and, for the ones that are not plain Workers code, from rule 1 as well:
 
-The [`workers-verbatim`](workers-verbatim) fixtures build the JavaScript from Cloudflare's Return JSON, Cookie parsing, and Redirect examples without handler edits. The native smoke harness checks their responses, along with the separate [`workers-contract`](workers-contract) fixture for `(request, env, ctx)`. The cookie example uses the original `cookie` import.
+| Fixture | What it is for |
+| --- | --- |
+| [`conformance`](../test/fixtures/conformance) | the binding conformance suite's worker: routes and vectors that exist only for the checks |
+| [`stress`](../test/fixtures/stress) | the memory and throughput baseline in [`BASELINE.md`](../test/fixtures/stress/BASELINE.md) |
+| [`runtime-comparison`](../test/fixtures/runtime-comparison) | Sproutboat against other runtimes on one corpus |
+| [`workers-verbatim`](../test/fixtures/workers-verbatim), [`workers-contract`](../test/fixtures/workers-contract) | Cloudflare's own example source, unedited, and the `(request, env, ctx)` contract |
+| [`upload`](../test/fixtures/upload), [`request`](../test/fixtures/request) | a streamed request body, and `new Request(request, init)`: plain Workers code, checked on workerd with the examples, but test material rather than something to read |
+| [`lib`](../test/fixtures/lib) | the harnesses, the workerd runner's helpers and the project registry the runners share |
 
-## Cloudflare Workers pattern ports
+The Cloudflare pattern ports are plain Workers code too, and are checked on workerd and in the native smoke harness like the examples:
 
-These reproduce the behavior of selected [Cloudflare Workers examples](https://developers.cloudflare.com/workers/examples/). They are Workers code like the rest, checked on workerd and in the same native smoke harness as the binding examples.
-
-| Sproutboat example | Cloudflare example | What the native check covers |
+| Fixture | Cloudflare example | What the native check covers |
 | --- | --- | --- |
-| [`cf-json`](cf-json) | [Return JSON](https://developers.cloudflare.com/workers/examples/return-json/) | JSON body and content type |
-| [`cf-cookies`](cf-cookies) | [Cookie parsing](https://developers.cloudflare.com/workers/examples/extract-cookie-value/) | Named cookie and similar-name rejection |
-| [`cf-redirects`](cf-redirects) | [Bulk redirects](https://developers.cloudflare.com/workers/examples/bulk-redirects/) | Mapped path, Location header, and unmapped path |
-| [`cf-headers`](cf-headers) | [Set security headers](https://developers.cloudflare.com/workers/examples/security-headers/) | Security headers on a local response |
-| [`cf-post`](cf-post) | [Read POST](https://developers.cloudflare.com/workers/examples/read-post/) | JSON, text, invalid JSON, and unsupported content type |
+| [`cf-json`](../test/fixtures/cf-json) | [Return JSON](https://developers.cloudflare.com/workers/examples/return-json/) | JSON body and content type |
+| [`cf-cookies`](../test/fixtures/cf-cookies) | [Cookie parsing](https://developers.cloudflare.com/workers/examples/extract-cookie-value/) | Named cookie and similar-name rejection |
+| [`cf-redirects`](../test/fixtures/cf-redirects) | [Bulk redirects](https://developers.cloudflare.com/workers/examples/bulk-redirects/) | Mapped path, Location header, and unmapped path |
+| [`cf-headers`](../test/fixtures/cf-headers) | [Set security headers](https://developers.cloudflare.com/workers/examples/security-headers/) | Security headers on a local response |
+| [`cf-post`](../test/fixtures/cf-post) | [Read POST](https://developers.cloudflare.com/workers/examples/read-post/) | JSON, text, invalid JSON, and unsupported content type |
+
+The [`workers-verbatim`](../test/fixtures/workers-verbatim) fixtures build the JavaScript from Cloudflare's Return JSON, Cookie parsing, and Redirect examples without handler edits. The native smoke harness checks their responses. The cookie fixture uses the original `cookie` import.
 
 There are intentional differences. Cloudflare's bulk redirect example falls through to an origin fetch for unmapped paths; this port returns 404 because it has no origin. The security headers port sets headers on its own response instead of modifying a fetched origin response. The POST port covers JSON and text, not form data.
 
@@ -85,7 +85,7 @@ PORT=8080 ./dist/kv-example
 ## Checking them
 
 ```sh
-bun run examples                    # build each one as a standalone binary and drive it
+bun run examples                    # build each example (and the plain-Workers fixtures) as a standalone binary and drive it
 bun run examples kv d1              # just these
 SMOKE_CONCURRENCY=1 bun run examples  # one at a time (default: 4 at once)
 bun run examples:types              # every worker-configuration.d.ts is current, every example typechecks

@@ -1,7 +1,8 @@
 /**
- * The rules in examples/README.md that can be checked without running anything: every public example is written
- * in the standard Workers style, is registered with the runners that hold it to it, and has its generated types and
- * documentation. The runtime half (workerd, Cloudflare's types) is `bun run examples:workerd`.
+ * The rules in examples/README.md that can be checked without running anything: every example (and every fixture
+ * that is plain Workers code) is written in the standard Workers style, is registered with the runners that hold it
+ * to it, and has its generated types and documentation; examples/ holds nothing but examples. The runtime half
+ * (workerd, Cloudflare's types) is `bun run examples:workerd`.
  */
 import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -14,11 +15,12 @@ import {
   WORKERD_PARTIAL_SKIPS,
   WORKERD_SKIPS,
 } from "../examples/checks";
-import { EXAMPLES_DIR, FIXTURES, publicExamples } from "../examples/lib/public-examples";
+import { EXAMPLES_DIR, projectDir, projects } from "../test/fixtures/lib/projects";
 import { parseConfig } from "./config";
 import { checkTypes, parseTypesArgs, planTypes } from "./types-cmd";
 
-const examples = publicExamples();
+const all = projects();
+const examples = all.map((project) => project.name);
 const STANDARD_DATE = "2026-09-28";
 
 /** Examples that are not TypeScript, and why. Each is a promise to fix it or to keep the reason true. */
@@ -30,24 +32,34 @@ const NOT_TYPESCRIPT = new Map<string, string>([
 ]);
 
 const read = (example: string) => {
-  const parsed = parseConfig(readFileSync(join(EXAMPLES_DIR, example, "sproutboat.jsonc"), "utf8"));
+  const parsed = parseConfig(readFileSync(join(projectDir(example), "sproutboat.jsonc"), "utf8"));
   if (!parsed.ok) throw new Error(`${example}: ${parsed.errors.join("; ")}`);
   return parsed.value;
 };
 
 describe("which directories are examples", () => {
-  test("every directory with a sproutboat.jsonc is an example, unless it is a named fixture", () => {
-    const withConfig = readdirSync(EXAMPLES_DIR, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && existsSync(join(EXAMPLES_DIR, entry.name, "sproutboat.jsonc")))
-      .map((entry) => entry.name);
-    for (const name of withConfig) expect(FIXTURES.has(name) !== examples.includes(name), name).toBe(true);
+  /** What may sit beside the examples in examples/: the runners and the tsconfig they share. */
+  const RUNNERS = new Set(["checks.ts", "smoke.ts", "typecheck.ts", "workerd.ts", "README.md", "tsconfig.base.json"]);
+
+  test("examples/ holds only examples: every directory is one (or groups some), and the rest is the runners", () => {
+    for (const entry of readdirSync(EXAMPLES_DIR, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      if (entry.isDirectory()) {
+        const isExample = existsSync(join(EXAMPLES_DIR, entry.name, "sproutboat.jsonc"));
+        const groups = examples.some((example) => example.startsWith(`${entry.name}/`));
+        expect(
+          isExample || groups,
+          `examples/${entry.name} is neither an example nor a group of them; a fixture belongs in test/fixtures`,
+        ).toBe(true);
+      } else expect(RUNNERS.has(entry.name), `examples/${entry.name}`).toBe(true);
+    }
     expect(examples).toContain("service-bindings/caller");
   });
 
-  test("the fixtures that exist are not examples", () => {
-    for (const name of FIXTURES)
+  test("the fixtures that are not plain Workers code are not registered as projects", () => {
+    for (const name of ["conformance", "stress", "runtime-comparison", "workers-verbatim", "workers-contract"])
       expect(
-        examples.some((example) => example.split("/")[0] === name),
+        examples.some((example) => example.includes(name)),
         name,
       ).toBe(false);
   });
@@ -59,10 +71,10 @@ describe("each example", () => {
       const config = read(example);
 
       test("has a README and a tsconfig", () => {
-        expect(existsSync(join(EXAMPLES_DIR, example, "README.md")) || example.startsWith("service-bindings/")).toBe(
+        expect(existsSync(join(projectDir(example), "README.md")) || example.startsWith("service-bindings/")).toBe(
           true,
         );
-        if (!NOT_TYPESCRIPT.has(example)) expect(existsSync(join(EXAMPLES_DIR, example, "tsconfig.json"))).toBe(true);
+        if (!NOT_TYPESCRIPT.has(example)) expect(existsSync(join(projectDir(example), "tsconfig.json"))).toBe(true);
       });
 
       test("is TypeScript, and at a compatibility date with the Workers handler arguments", () => {
@@ -73,7 +85,7 @@ describe("each example", () => {
 
       test("has a worker-configuration.d.ts that is current", async () => {
         if (NOT_TYPESCRIPT.has(example)) return;
-        const dir = join(EXAMPLES_DIR, example);
+        const dir = projectDir(example);
         const parsed = parseTypesArgs([]);
         if ("error" in parsed) throw new Error(parsed.error);
         const plan = await planTypes(parsed, config, dir, dir);
@@ -86,7 +98,7 @@ describe("each example", () => {
 
       test("does not read env as a global or the body as a string", () => {
         if (WORKERD_SKIPS.has(example)) return; // said, with its reason, in checks.ts
-        const source = readFileSync(join(EXAMPLES_DIR, example, config.main.replace(/^\.\//, "")), "utf8");
+        const source = readFileSync(join(projectDir(example), config.main.replace(/^\.\//, "")), "utf8");
         // `env` is the handler's second argument, so a handler that only takes (request) cannot be using it.
         expect(source).not.toMatch(/\bfetch\(request\)\s*\{[^}]*\benv\./);
         expect(source).not.toMatch(/JSON\.parse\(\s*request\.body/);
@@ -105,10 +117,12 @@ describe("no test-only code in examples", () => {
       if (entry.isDirectory()) return entry.name === "fonts" ? [] : sources(path);
       return /\.(?:[cm]?[jt]s|html)$/.test(entry.name) && !entry.name.endsWith(".d.ts") ? [path] : [];
     });
-  for (const example of examples) {
+  // A fixture exists for a test, so it is where test-only code belongs.
+  for (const { name: example, group, dir: root } of all) {
+    if (group === "fixtures") continue;
     test(`${example} has none`, () => {
       for (const sub of ["src", "public"]) {
-        const dir = join(EXAMPLES_DIR, example, sub);
+        const dir = join(root, sub);
         if (!existsSync(dir)) continue;
         for (const file of sources(dir)) {
           const text = readFileSync(file, "utf8");
@@ -148,7 +162,8 @@ describe("the skip tables", () => {
 
   test("the README lists the same Sproutboat-only exceptions as the tables", () => {
     const readme = readFileSync(join(EXAMPLES_DIR, "README.md"), "utf8");
+    // A fixture is not in the README; the examples are.
     for (const example of [...WORKERD_PARTIAL_SKIPS.keys(), ...CLOUDFLARE_TYPES_SKIPS.keys()])
-      expect(readme, example).toContain(`\`${example}\``);
+      if (!example.startsWith("fixtures/")) expect(readme, example).toContain(`\`${example}\``);
   });
 });

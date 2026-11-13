@@ -25,7 +25,14 @@
   ],
   "overrides": [
     {
-      "files": ["examples/*/src/**", "examples/*/*/src/**"],
+      "files": [
+        "examples/*/src/**",
+        "examples/*/*/src/**",
+        "templates/*/src/**",
+        "templates/*/test/**",
+        "dogfood/*/src/**",
+        "test/fixtures/*/src/**"
+      ],
       "rules": { "anti-slop/require-safety-comment-for-type-assertion": "off" }
     }
   ],

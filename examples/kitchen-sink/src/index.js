@@ -15,7 +15,7 @@
 //
 // The routes under /api/ feed the dashboard in public/. Each tile's handler sits between `#region` markers:
 // build-web.ts copies those excerpts into the page's Code panels, so the code on screen is the code that runs.
-// Routes and vectors that exist only to test the bindings live in examples/conformance, not here.
+// Routes and vectors that exist only to test the bindings live in test/fixtures/conformance, not here.
 import { DurableObject } from "cloudflare:workers";
 
 // #region chat
