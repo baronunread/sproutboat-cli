@@ -15,7 +15,8 @@
     "tools/oxlint/anti-slop/**",
     "types/**",
     "**/worker-configuration.d.ts",
-    "vendor/**"
+    "vendor/**",
+    "src/templates-embedded.ts"
   ],
   "jsPlugins": [
     {
@@ -25,15 +26,30 @@
   ],
   "overrides": [
     {
-      "files": [
-        "examples/*/src/**",
-        "examples/*/*/src/**",
-        "templates/*/src/**",
-        "templates/*/test/**",
-        "dogfood/*/src/**",
-        "test/fixtures/*/src/**"
-      ],
+      "files": ["examples/*/src/**", "examples/*/*/src/**", "dogfood/*/src/**", "test/fixtures/*/src/**"],
       "rules": { "anti-slop/require-safety-comment-for-type-assertion": "off" }
+    },
+    {
+      // The starters are code for people to copy into their own projects, so they are written as standard Workers
+      // TypeScript (typeof checks on a parsed body, a Record for a JSON object), not in this repository's dialect.
+      "files": ["templates/**"],
+      "rules": {
+        "anti-slop/no-chained-type-assertions": "off",
+        "anti-slop/no-conditional-empty-object-spread": "off",
+        "anti-slop/no-known-value-widening": "off",
+        "anti-slop/no-module-mocking": "off",
+        "anti-slop/no-object-parameters": "off",
+        "anti-slop/no-reflect-apply": "off",
+        "anti-slop/no-reflect-get": "off",
+        "anti-slop/no-runtime-typeof": "off",
+        "anti-slop/no-shape-in-symbol-names": "off",
+        "anti-slop/no-unknown-parameters": "off",
+        "anti-slop/no-unknown-returns": "off",
+        "anti-slop/no-unknown-type-aliases": "off",
+        "anti-slop/no-unsafe-dictionary-type": "off",
+        "anti-slop/no-widen-then-assert": "off",
+        "anti-slop/require-safety-comment-for-type-assertion": "off"
+      }
     }
   ],
   "rules": {

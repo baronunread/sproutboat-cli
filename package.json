@@ -50,6 +50,7 @@
     "examples": "bun examples/smoke.ts",
     "examples:types": "bun examples/typecheck.ts",
     "examples:workerd": "bun examples/workerd.ts",
+    "templates:embed": "bun scripts/embed-templates.ts",
     "build:cli": "bun scripts/build-cli.ts",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",

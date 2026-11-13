@@ -20,7 +20,8 @@ them reads as machine-written.
 They exist because there are two implementations of the binding ops. A change
 that passes one and not the other is drift, not a flake.
 
-`bun run examples` builds all small examples and drives them. The
+`bun run examples` builds the examples, the starters in `templates/`, the dogfood apps and the plain-Workers
+fixtures, and drives them (each starter by running its own tests against the standalone binary). The
 website's support table links to these, so a broken one makes the table lie.
 It runs four at a time; `SMOKE_CONCURRENCY=1 bun run examples` runs them one
 by one.

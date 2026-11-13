@@ -103,7 +103,8 @@ test("every env var read in src/ is documented in ENV_VARS", () => {
   const documented = new Set(ENV_VARS.map((e) => e.name));
   const seen = new Set<string>();
   for (const file of readdirSync(srcDir)) {
-    if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
+    // The embedded starters are other people's project code (their tests read BASE_URL), not the CLI's.
+    if (!file.endsWith(".ts") || file.endsWith(".test.ts") || file === "templates-embedded.ts") continue;
     const text = readFileSync(resolve(srcDir, file), "utf8");
     for (const m of text.matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)) {
       const name = m[1];

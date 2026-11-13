@@ -20,6 +20,26 @@ describe("checkOptions", () => {
     expect(bad("deploy", ["--dry-run=yes"])).toBe("--dry-run takes no value");
   });
 
+  test("init takes the create-cloudflare switches, and dev takes --ip", () => {
+    expect(ok("init", ["blog", "--template=jobs", "--no-git", "--install", "-y", "--list-templates"])).toEqual([
+      "blog",
+      "--template",
+      "jobs",
+      "--no-git",
+      "--install",
+      "-y",
+      "--list-templates",
+    ]);
+    expect(ok("init", ["--accept-defaults", "--git", "--no-install"])).toEqual([
+      "--accept-defaults",
+      "--git",
+      "--no-install",
+    ]);
+    expect(bad("init", ["--templat", "jobs"])).toContain("did you mean --template?");
+    expect(bad("init", ["--git=false"])).toBe("--git takes no value");
+    expect(ok("dev", ["--ip=0.0.0.0"])).toEqual(["--ip", "0.0.0.0"]);
+  });
+
   test("an unknown flag is an error, with the nearest known one when it looks like a typo", () => {
     expect(bad("deploy", ["--bogus"])).toContain("unknown option --bogus");
     expect(bad("deploy", ["--dry-runn"])).toContain("did you mean --dry-run?");

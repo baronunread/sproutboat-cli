@@ -2,10 +2,10 @@
  * Helpers for running an example under workerd (`wrangler dev`) and for typechecking it against Cloudflare's own
  * runtime types. Used by `examples/workerd.ts`.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { parseConfig } from "../../../src/config";
-import { toWranglerConfig } from "./wrangler-config";
+import { toWranglerConfig, type WranglerConfig } from "./wrangler-config";
 import { descendantPids } from "./harness";
 import { projectDir, REPO } from "./projects";
 
@@ -38,7 +38,11 @@ export function writeWranglerProject(
   const { config, path } = readConfig(example);
   mkdirSync(dir, { recursive: true });
   const target = join(dir, "wrangler.jsonc");
-  writeFileSync(target, JSON.stringify(toWranglerConfig(config, path, maxDate), null, 2));
+  const wrangler = toWranglerConfig(config, path, maxDate);
+  // A project with a migrations/ folder says so, as Wrangler expects (its default folder is relative to the config).
+  const migrations = join(dirname(path), "migrations");
+  if (existsSync(migrations)) for (const database of wrangler.d1_databases ?? []) database.migrations_dir = migrations;
+  writeFileSync(target, JSON.stringify(wrangler, null, 2));
   const names = config.secrets ?? [];
   const lines = names.map((name) => {
     const value = secrets[name];
@@ -47,6 +51,29 @@ export function writeWranglerProject(
   });
   if (lines.length) writeFileSync(join(dir, ".dev.vars"), lines.join("\n") + "\n");
   return target;
+}
+
+/**
+ * `wrangler d1 migrations apply --local` for every database of the config that has a migrations folder, into the same
+ * state directory `wrangler dev --persist-to` will read. Returns wrangler's output when one fails, empty when all pass.
+ */
+export async function applyWranglerMigrations(config: string, cwd: string, state: string): Promise<string> {
+  // SAFETY: the file is the JSON writeWranglerProject wrote a moment ago, in WranglerConfig's shape.
+  const written = JSON.parse(readFileSync(config, "utf8")) as WranglerConfig;
+  for (const database of written.d1_databases ?? []) {
+    if (!database.migrations_dir) continue;
+    const child = Bun.spawn(
+      [WRANGLER, "d1", "migrations", "apply", database.database_name, "--local", "--persist-to", state, "-c", config],
+      { cwd, env: wranglerEnv(cwd), stdout: "pipe", stderr: "pipe", timeout: 120_000, killSignal: "SIGKILL" },
+    );
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    if (code !== 0) return `wrangler d1 migrations apply ${database.database_name} failed:\n${out}${err}`;
+  }
+  return "";
 }
 
 const alive = (pid: number) => {
@@ -132,6 +159,8 @@ export async function typecheckAgainstCloudflare(
         noEmit: true,
         skipLibCheck: true,
         isolatedModules: true,
+        // wrangler and esbuild both resolve "./room.ts", so a starter may spell its imports that way.
+        allowImportingTsExtensions: true,
       },
       files: [resolve(join(path, ".."), config.main), join(types, "worker-configuration.d.ts")],
     }),
