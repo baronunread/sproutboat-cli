@@ -31,6 +31,7 @@ import {
   ensurePorfforA21,
   SHARED_PRELUDE_FILE,
   STANDALONE_A21_COMPILE_FLAGS,
+  standaloneA21Channel,
   standaloneChannel,
   type StandaloneChannel,
 } from "@sproutboat/toolchain/a21";
@@ -67,16 +68,16 @@ export {
 const COMPILE_TIMEOUT_MS = Number(process.env.SPROUTBOAT_COMPILE_TIMEOUT_MS || 600_000);
 
 /**
- * The Porffor channel a native compile uses: `alpha-22` by default (the alpha 21 line's compiler with
- * the toolchain's alpha 19 server shim over its bridge; sproutd-alpha22-standalone-port.md), or
- * `alpha-19` (`SPROUTBOAT_PORFFOR_CHANNEL=alpha-19`: Porffor's native-fetch server, the fallback pin
- * kept for one release). The toolchain's `standaloneChannel()` decides, so the CLI and the runtime's
- * native tests agree on the default.
+ * The Porffor channel a native compile uses: `alpha-23` by default (the alpha 21 line's compiler with
+ * the toolchain's alpha 19 server shim over its bridge; sproutd-alpha22-standalone-port.md), `alpha-22`
+ * (`SPROUTBOAT_PORFFOR_CHANNEL=alpha-22`: the same line one Porffor release back), or `alpha-19`
+ * (`SPROUTBOAT_PORFFOR_CHANNEL=alpha-19`: Porffor's native-fetch server, the fallback pin kept for one release).
+ * The toolchain's `standaloneChannel()` decides, so the CLI and the runtime's native tests agree on the default.
  *
  * `--with-restore` stays on alpha 19: its restore objects are built against alpha 19's native-fetch
  * C API, which the alpha 22 bridge does not provide, so they do not link there. Unless the channel is
- * set explicitly, such a build uses the alpha 19 compiler; `SPROUTBOAT_PORFFOR_CHANNEL=alpha-22` with
- * `--with-restore` is an error rather than a link failure.
+ * set explicitly, such a build uses the alpha 19 compiler; `SPROUTBOAT_PORFFOR_CHANNEL=alpha-22` or
+ * `alpha-23` with `--with-restore` is an error rather than a link failure.
  */
 export type PorfforChannel = StandaloneChannel;
 export function porfforChannel(withRestore = false): PorfforChannel {
@@ -84,7 +85,7 @@ export function porfforChannel(withRestore = false): PorfforChannel {
   if (!withRestore || channel === "alpha-19") return channel;
   if (process.env.SPROUTBOAT_PORFFOR_CHANNEL)
     throw new Error(
-      "--with-restore is not available on Porffor alpha 22 yet: unset SPROUTBOAT_PORFFOR_CHANNEL or set it to alpha-19",
+      "--with-restore is not available on Porffor alpha 22 or 23 yet: unset SPROUTBOAT_PORFFOR_CHANNEL or set it to alpha-19",
     );
   return "alpha-19";
 }
@@ -396,7 +397,7 @@ export async function compileSprout(input: CompileInput): Promise<void> {
       })
     : [];
 
-  if (porfforChannel(input.withRestore) === "alpha-22") {
+  if (porfforChannel(input.withRestore) !== "alpha-19") {
     await compileSproutA21(input, {
       alpha19Root: porffor,
       generatedPath,
@@ -449,9 +450,9 @@ export async function compileSprout(input: CompileInput): Promise<void> {
 }
 
 /**
- * The alpha 22 channel's native compile (sproutd-alpha22-standalone-port.md): the generated module is
+ * The alpha 21 line's native compile, alpha 23 or alpha 22 (sproutd-alpha22-standalone-port.md): the generated module is
  * compiled in sproutd's worker shape (the toolchain composes `shared-prelude.js` from it: alpha 19
- * helper names, the alpha 19 web classes, the dispatch shim), the alpha 22 compiler renders the split
+ * helper names, the alpha 19 web classes, the dispatch shim), the line's compiler renders the split
  * C units, and the toolchain's build recipe compiles them with the native-fetch bridge and the alpha
  * 19 uWebSockets shim rewritten over flat data, then links with this build's native objects (SQLite,
  * BearSSL, the restore objects) and the uSockets this target already has. Same inputs, same outputs,
@@ -469,7 +470,8 @@ async function compileSproutA21(
     uwsVariant?: string;
   },
 ): Promise<void> {
-  const alpha22 = await ensurePorfforA21("alpha-22");
+  const a21Channel = standaloneA21Channel(porfforChannel(input.withRestore));
+  const a21 = await ensurePorfforA21(a21Channel);
   const dir = dirname(build.generatedPath);
   const composed = composeStandaloneA21(await readFile(build.generatedPath, "utf8"), build.alpha19Root);
   // beside sprout.generated.js (which stays the wrapped module, for emit-only, dev and the cache key)
@@ -482,7 +484,7 @@ async function compileSproutA21(
   const render = Bun.spawn(
     [
       ...build.launch,
-      resolve(alpha22, "runtime/index.js"),
+      resolve(a21, "runtime/index.js"),
       "c",
       entry,
       "-o",
@@ -496,7 +498,8 @@ async function compileSproutA21(
     new Response(render.stdout).text(),
     new Response(render.stderr).text(),
   ]);
-  if (code !== 0) throw new Error(`Porffor (alpha 22) render failed: ${(stderr || stdout).trim() || `exit ${code}`}`);
+  if (code !== 0)
+    throw new Error(`Porffor (${a21Channel}) render failed: ${(stderr || stdout).trim() || `exit ${code}`}`);
 
   const host = input.target === "host";
   const triple = host ? undefined : linuxTriple(input.target);
@@ -524,5 +527,5 @@ async function compileSproutA21(
     musl: !host,
     strip: true,
   });
-  if (!(await Bun.file(input.outPath).exists())) throw new Error("alpha 22 build produced no binary");
+  if (!(await Bun.file(input.outPath).exists())) throw new Error("alpha 21 line build produced no binary");
 }
