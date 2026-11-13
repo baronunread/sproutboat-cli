@@ -211,7 +211,8 @@ export async function runConformance(context: RunContext, options: ConformanceOp
   );
   // The first chunk of a declared 25 MB file is charged 25 MB. Four of them spend 100 MB, the next is
   // refused with the 429 a quota gives; that address has nothing left today, another address does.
-  const hoarder = `192.0.2.${20 + (Date.now() % 200)}`;
+  // 203.0.113.0/24 is used by no other step, so no earlier upload in this hour can share the address.
+  const hoarder = `203.0.113.${1 + (Date.now() % 250)}`;
   const spend = (id: string, address: string, total: number) =>
     jfrom(
       address,
@@ -232,7 +233,7 @@ export async function runConformance(context: RunContext, options: ConformanceOp
     const spent = [];
     for (let i = 1; i <= 4; i++) spent.push((await spend("a" + i, hoarder, piece)).status);
     const over = await spend("a5", hoarder, 2097152);
-    const fresh = await spend("b1", `192.0.2.${20 + ((Date.now() + 97) % 200)}`, piece);
+    const fresh = await spend("b1", `203.0.113.${1 + ((Date.now() + 97) % 250)}`, piece);
     check(
       "quota: an address that has uploaded its whole day gets a 429 with code quota and a Retry-After; another address does not",
       spent.every((s) => s === 200) &&
