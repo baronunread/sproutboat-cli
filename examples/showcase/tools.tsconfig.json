@@ -1,0 +1,14 @@
+{
+  // The build, preview and check scripts (bun). The Worker, the fleet app and the page each have their own.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["bun"]
+  },
+  "include": ["*.ts"]
+}

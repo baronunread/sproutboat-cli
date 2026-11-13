@@ -1,0 +1,10 @@
+{
+  // The same src/index.ts, run by workerd instead of Sproutboat: `bun run workerd`.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "showcase",
+  "main": "src/index.ts",
+  // workerd refuses a date newer than itself; Sproutboat's own date for the same source is in sproutboat.jsonc.
+  "compatibility_date": "2026-11-01",
+  "vars": { "EDITION": "cloudflare", "FLEET_STATE_URL": "", "FLEET_APP_URL": "" },
+  "assets": { "directory": "site", "binding": "ASSETS", "run_worker_first": ["/api/*", "/healthz"] },
+}

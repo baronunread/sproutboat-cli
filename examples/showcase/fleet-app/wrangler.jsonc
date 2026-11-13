@@ -1,0 +1,8 @@
+{
+  // The same src/index.ts under workerd: `bunx wrangler dev`.
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "showcase-fleet",
+  "main": "src/index.ts",
+  // workerd refuses a date newer than itself; Sproutboat's own date for the same source is in sproutboat.jsonc.
+  "compatibility_date": "2026-11-01",
+}

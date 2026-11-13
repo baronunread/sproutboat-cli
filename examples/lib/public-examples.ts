@@ -15,6 +15,7 @@ export const FIXTURES: ReadonlySet<string> = new Set([
   "lib",
   "node_modules",
   "runtime-comparison",
+  "showcase",
   "stress",
   "workers-contract",
   "workers-verbatim",

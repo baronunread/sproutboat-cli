@@ -1,0 +1,15 @@
+{
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "showcase",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-18",
+  "vars": {
+    "EDITION": "cloud",
+    // Where the Fleet section reads its state and reaches one app ("{i}" is the app's number).
+    // Empty: the section shows the dated benchmark and says it is not live. See DESIGN.md, "Platform work".
+    "FLEET_STATE_URL": "",
+    "FLEET_APP_URL": "",
+  },
+  // site/ is built from web/: run `bun run build`. The edge serves it without starting the app.
+  "assets": { "directory": "site", "binding": "ASSETS", "run_sprout_first": ["/api/*", "/healthz"] },
+}

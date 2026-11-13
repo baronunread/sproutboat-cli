@@ -60,7 +60,9 @@
     "prepublishOnly": "bun run typecheck && bun test",
     "style": "bunx style-doctor@latest --quiet",
     "kitchen-sink": "bun examples/kitchen-sink/harness.ts",
-    "kitchen-sink:standalone": "bun examples/kitchen-sink/harness-standalone.ts"
+    "kitchen-sink:standalone": "bun examples/kitchen-sink/harness-standalone.ts",
+    "showcase": "bun examples/showcase/harness.ts",
+    "showcase:workerd": "bun examples/showcase/harness.ts workerd"
   },
   "dependencies": {
     "@sproutboat/artifact": "^0.3.0",

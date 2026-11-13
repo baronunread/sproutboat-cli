@@ -1,0 +1,10 @@
+node_modules/
+site/
+.site-next/
+dist/
+.sproutboat/
+.wrangler/
+*.data/
+sproutboat.local.jsonc
+web/tokens.generated.css
+shots/

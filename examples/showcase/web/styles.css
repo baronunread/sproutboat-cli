@@ -1,0 +1,200 @@
+@import "tailwindcss";
+@import "@sproutboat/ikada/theme.css";
+@import "./tokens.generated.css";
+@source "../node_modules/@sproutboat/ikada/dist";
+
+@font-face {
+  font-family: "Figtree Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 900;
+  src: url("/fonts/figtree-latin-wght-normal.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url("/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+@theme inline {
+  --color-stage-ink: var(--stage-ink);
+  --color-stage-deep: var(--stage-deep);
+  --color-stage-shelf: var(--stage-shelf);
+  --color-stage-asleep: var(--stage-asleep);
+  --color-stage-alive: var(--stage-alive);
+  --color-stage-refused: var(--stage-refused);
+  --color-stage-line: var(--stage-line);
+  /* Display sizes: the dashboard scale stops at 28px, a stage needs more. */
+  --text-display: clamp(2.75rem, 1.2rem + 5.2vw, 5.5rem);
+  --text-display--line-height: 0.98;
+  --text-display--letter-spacing: -0.04em;
+  --text-display--font-weight: 600;
+  --text-title: clamp(2rem, 1.3rem + 2.4vw, 3.25rem);
+  --text-title--line-height: 1.04;
+  --text-title--letter-spacing: -0.032em;
+  --text-title--font-weight: 600;
+  --text-lede: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+  --text-lede--line-height: 1.5;
+  --text-lede--letter-spacing: -0.008em;
+  --text-lede--font-weight: 400;
+  --text-readout: clamp(2rem, 1.5rem + 1.6vw, 3rem);
+  --text-readout--line-height: 1;
+  --text-readout--letter-spacing: -0.04em;
+  --text-readout--font-weight: 500;
+  --text-label: 0.6875rem;
+  --text-label--line-height: 1rem;
+  --text-label--letter-spacing: 0.09em;
+  --text-label--font-weight: 500;
+}
+
+:root {
+  /* One content column for the whole page: every section's edges sit on these two lines. */
+  --gutter: clamp(1.25rem, 4.2vw, 4rem);
+  --nav-h: 3.5rem;
+}
+
+html {
+  background: var(--stage-ink);
+  color-scheme: dark;
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--stage-ink);
+  color: var(--sb-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: clip;
+}
+::selection {
+  background: color-mix(in oklch, var(--stage-alive) 35%, transparent);
+}
+
+@layer components {
+  .wrap {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 96rem;
+    padding-inline: var(--gutter);
+  }
+  /* A full-bleed act: one screen, its stage behind, its words on the content lines. */
+  .act {
+    position: relative;
+    min-height: 100svh;
+    isolation: isolate;
+  }
+  .label {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    line-height: var(--text-label--line-height);
+    letter-spacing: var(--text-label--letter-spacing);
+    font-weight: 500;
+    text-transform: uppercase;
+    color: var(--sb-fg-muted);
+  }
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "zero" 0;
+  }
+  /* A text link: the underline draws in from the start edge on hover and focus. */
+  .link {
+    position: relative;
+    color: var(--sb-fg);
+    text-decoration: none;
+    border-radius: 2px;
+    outline-offset: 4px;
+  }
+  .link::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: -2px;
+    height: 1px;
+    background: currentColor;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 240ms var(--stage-ease-out);
+  }
+  .link:hover::after,
+  .link:focus-visible::after {
+    transform: scaleX(1);
+  }
+  .link:focus-visible {
+    outline: 2px solid var(--sb-focus);
+  }
+}
+
+/* The one staged entrance on the page: the hero, once, on load. Nothing else enters on scroll. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+    filter: blur(6px);
+  }
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+.rise {
+  animation: rise var(--stage-entrance) var(--stage-ease-out) both;
+  animation-delay: calc(var(--stage-stagger) * var(--i, 0) + 80ms);
+}
+.appear {
+  animation: appear 1400ms ease-out both;
+  animation-delay: calc(var(--stage-stagger) * var(--i, 0));
+}
+/* The heartbeat of a live feed: played once per sample that arrives, by LiveChip. */
+@keyframes beat {
+  from {
+    transform: scale(2.6);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+@keyframes swap {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.swap {
+  animation: swap 360ms var(--stage-ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .rise,
+  .swap {
+    animation-name: appear;
+    animation-duration: 200ms;
+  }
+}
+[data-motion-paused] .rise,
+[data-motion-paused] .appear,
+[data-motion-paused] .swap {
+  animation: none;
+}
+
+/* Shiki's output inside a code panel. */
+.code pre {
+  margin: 0;
+  padding: 1rem 1.125rem;
+  background: transparent !important;
+  font-family: var(--font-mono);
+  font-size: 0.78125rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  tab-size: 2;
+}

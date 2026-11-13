@@ -46,7 +46,7 @@ These two rules are what the examples are held to, in CI. A change that adds or 
 
 **2. No test-only code in examples.** An example is read, so it holds only what it demonstrates. Test vectors, routes that exist for a conformance check, fixtures that force an edge case and anything a harness needs but a reader does not go in a conformance fixture or in the harness, never in an example. If a check needs a route, the route belongs to the fixture.
 
-Not examples, and exempt from both rules: the conformance fixtures, [`runtime-comparison`](runtime-comparison), [`stress`](stress), [`workers-verbatim`](workers-verbatim) and [`workers-contract`](workers-contract). They are fixtures.
+Not examples, and exempt from both rules: the conformance fixtures, [`runtime-comparison`](runtime-comparison), [`showcase`](showcase) (the public showcase page, which has its own checks), [`stress`](stress), [`workers-verbatim`](workers-verbatim) and [`workers-contract`](workers-contract). They are fixtures.
 
 ## Original Cloudflare Worker source
 
