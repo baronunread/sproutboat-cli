@@ -123,6 +123,7 @@ import {
   TAIL_USAGE as DEPLOYMENTS_TAIL_USAGE,
   tailSummary,
 } from "./deployments-cli";
+import { isIP } from "node:net";
 import { hostname as osHostname, platform as osPlatform, arch as osArch } from "node:os";
 import {
   CLI_NAME,
@@ -631,11 +632,13 @@ async function emitStandaloneUnit(directory: string | undefined): Promise<string
 }
 
 /** #62 — build for this machine, run it against a real broker, rebuild on save. */
-const DEV_USAGE = "dev [project-dir] [--port <n>] [--no-watch] [-e, --env <name>] [--env-file <file>]...";
+const DEV_USAGE =
+  "dev [project-dir] [--port <n>] [--ip <address>] [--no-watch] [-e, --env <name>] [--env-file <file>]...";
 
 async function dev(args: string[]) {
   let directory: string | undefined;
   let portArg: string | undefined;
+  let ipArg: string | undefined;
   // --env and --env-file are global flags, already taken out of `args` (global-flags.ts).
   const envName = globalFlags().env;
   const envFiles = globalFlags().envFiles.map((file) => resolve(file));
@@ -647,10 +650,18 @@ async function dev(args: string[]) {
       if (value === undefined || value.startsWith("--")) usageError(`${arg} needs a value`, DEV_USAGE);
       at += 1;
       portArg = value;
+    } else if (arg === "--ip") {
+      const value = args[at + 1];
+      if (value === undefined || value.startsWith("--")) usageError(`${arg} needs a value`, DEV_USAGE);
+      at += 1;
+      ipArg = value;
     } else if (!arg.startsWith("--") && directory === undefined) directory = arg;
   }
   const port = Number(portArg ?? 8787);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) usageError(`invalid --port: ${portArg}`, DEV_USAGE);
+  // Like `wrangler dev --ip`: the address the dev server listens on. Loopback unless asked.
+  const ip = ipArg ?? "127.0.0.1";
+  if (isIP(ip) === 0) usageError(`invalid --ip: ${ip} (an IPv4 or IPv6 address)`, DEV_USAGE);
   if (envName !== undefined && !/^[A-Za-z0-9_-]+$/.test(envName))
     usageError("--env takes a name (letters, digits, - and _)", DEV_USAGE);
   for (const file of envFiles) if (!existsSync(file)) fail(`env file not found: ${file}`);
@@ -663,6 +674,7 @@ async function dev(args: string[]) {
     sourcePath: project.sourcePath,
     source: project.bundle.code,
     port,
+    ip,
     envFiles,
     envName,
     watch: !args.includes("--no-watch"),

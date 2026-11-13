@@ -35,7 +35,7 @@ export const COMMAND_OPTIONS = {
     value: ["--env-interface", "--strict-vars", "--include-runtime", "--include-env"],
     flag: ["--check", "--no-strict-vars", "--no-include-runtime", "--no-include-env"],
   },
-  dev: { value: ["--port"], flag: ["--no-watch"] },
+  dev: { value: ["--port", "--ip"], flag: ["--no-watch"] },
   run: { value: ["--binary", "--port", "--data-dir", "--require"], flag: ["--check"] },
   build: {
     value: ["--target"],

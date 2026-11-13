@@ -32,6 +32,8 @@ export type DevInput = {
   /** The bundled module (#89) — already validated by the caller. */
   source: string;
   port: number;
+  /** Address the public dev port listens on. Default 127.0.0.1; the sprout and broker stay on loopback. */
+  ip?: string;
   watch: boolean;
   /** #275: `--env-file` paths (absolute), in order. Default: `.dev.vars`, else the `.env` files. */
   envFiles?: string[];
@@ -332,7 +334,7 @@ export async function runDev(input: DevInput): Promise<void> {
   let proxy: ReturnType<typeof Bun.serve>;
   try {
     proxy = Bun.serve<SocketRelay>({
-      hostname: "127.0.0.1",
+      hostname: input.ip ?? "127.0.0.1",
       port: input.port,
       maxRequestBodySize: 5 * 1024 * 1024 * 1024,
       websocket: socketRelay,
@@ -368,7 +370,7 @@ export async function runDev(input: DevInput): Promise<void> {
     throw error;
   }
   watchExit(running);
-  console.log(ok(`${input.config.name} running on ${leaf(`http://127.0.0.1:${input.port}`)}`));
+  console.log(ok(`${input.config.name} running on ${leaf(`http://${input.ip ?? "127.0.0.1"}:${input.port}`)}`));
   if (input.watch) console.log(dim("  watching for changes — ctrl-c to stop"));
 
   let watchers: FSWatcher[] = [];

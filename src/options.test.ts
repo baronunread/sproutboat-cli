@@ -17,6 +17,7 @@ describe("checkOptions", () => {
   test("--flag=value becomes --flag value, for value flags only", () => {
     expect(ok("deploy", ["--account=acme", "--dry-run", "site"])).toEqual(["--account", "acme", "--dry-run", "site"]);
     expect(ok("dev", ["--port=9000"])).toEqual(["--port", "9000"]);
+    expect(ok("dev", ["--ip=0.0.0.0", "site"])).toEqual(["--ip", "0.0.0.0", "site"]);
     expect(bad("deploy", ["--dry-run=yes"])).toBe("--dry-run takes no value");
   });
 

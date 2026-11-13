@@ -179,7 +179,7 @@ The everyday loop:
 | Command | What it does |
 | --- | --- |
 | `init [name]` | Scaffold `sproutboat.jsonc`, `src/index.js` and a `package.json` that pins `sproutboat` |
-| `dev [--port <n>]` | Run it here against a real broker, rebuilding on save |
+| `dev [--port <n>] [--ip <address>]` | Run it here against a real broker, rebuilding on save (`--ip 0.0.0.0` reaches it from your network) |
 | `deploy` | Build, provision bindings, upload, wait until the URL serves |
 | `tail [filters]` | Live request events, console output and exceptions, like `wrangler tail` |
 | `rollback <id>` | Re-activate a previous version |

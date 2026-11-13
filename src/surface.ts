@@ -121,7 +121,7 @@ export const COMMANDS: readonly Command[] = [
     group: "Develop",
     emoji: "⚡",
     short: "Run the app locally, rebuilding on save",
-    args: "[project-dir] [--port <n>] [--no-watch] [-e, --env <name>] [--env-file <file>]...",
+    args: "[project-dir] [--port <n>] [--ip <address>] [--no-watch] [-e, --env <name>] [--env-file <file>]...",
     brief: "[project-dir]",
     summary:
       "Run the project on this machine with local storage, rebuilding on save. Secrets come from .dev.vars or the .env files (never both), as in Wrangler; a declared secret with no value is a warning.",
