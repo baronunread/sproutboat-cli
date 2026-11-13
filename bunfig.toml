@@ -1,0 +1,5 @@
+[test]
+# The starters in templates/ ship tests that drive a running server. examples/smoke.ts runs them against a standalone
+# binary and examples/workerd.ts against workerd (bun run examples), and src/templates-run.test.ts against
+# `sproutboat dev`; a bare `bun test` at the root must not start them without one.
+pathIgnorePatterns = ["templates/**"]

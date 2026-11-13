@@ -19,7 +19,7 @@ export interface WranglerConfig {
   compatibility_date: string;
   vars?: Record<string, string>;
   kv_namespaces?: Array<{ binding: string; id: string }>;
-  d1_databases?: Array<{ binding: string; database_name: string; database_id: string }>;
+  d1_databases?: Array<{ binding: string; database_name: string; database_id: string; migrations_dir?: string }>;
   r2_buckets?: Array<{ binding: string; bucket_name: string }>;
   queues?: {
     producers: Array<{ binding: string; queue: string }>;

@@ -51,6 +51,18 @@ for (const { name, dir } of wanted.length ? all.filter((project) => wanted.inclu
     console.log(`  FAIL  ${name}\n${(out + err).trim().replace(/^/gm, "        ")}`);
     failed++;
   } else console.log(`  ok    ${name}`);
+  // A starter keeps its tests beside the Worker, with their own tsconfig (Node's types, which the Worker must not see).
+  if (existsSync(join(dir, "test/tsconfig.json"))) {
+    const tests = Bun.spawn([TSC, "-p", join(dir, "test")], { stdout: "pipe", stderr: "pipe" });
+    const [testOut, testErr] = await Promise.all([
+      new Response(tests.stdout).text(),
+      new Response(tests.stderr).text(),
+    ]);
+    if ((await tests.exited) !== 0) {
+      console.log(`  FAIL  ${name} (tests)\n${(testOut + testErr).trim().replace(/^/gm, "        ")}`);
+      failed++;
+    } else console.log(`  ok    ${name} (tests)`);
+  }
 }
 console.log(failed === 0 ? "\nevery project typechecks." : `\n${failed} project(s) failed.`);
 process.exit(failed === 0 ? 0 : 1);

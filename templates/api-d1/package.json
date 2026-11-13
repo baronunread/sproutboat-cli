@@ -1,0 +1,20 @@
+{
+  "name": "api-d1",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A JSON API on D1 with migrations and input validation",
+  "type": "module",
+  "scripts": {
+    "dev": "sproutboat dev",
+    "deploy": "sproutboat deploy",
+    "check": "sproutboat check",
+    "types": "sproutboat types",
+    "typecheck": "tsc -p . && tsc -p test",
+    "test": "node --test test/*.test.ts",
+    "db:migrate": "sproutboat d1 migrations apply DB --local"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}

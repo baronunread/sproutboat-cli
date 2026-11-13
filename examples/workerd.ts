@@ -32,6 +32,7 @@ import { buildWebUi } from "../dogfood/kitchen-sink/build-web";
 import { descendantPids, Harness, HarnessFailure } from "../test/fixtures/lib/harness";
 import { projectNames } from "../test/fixtures/lib/projects";
 import {
+  applyWranglerMigrations,
   typecheckAgainstCloudflare,
   workerdCompatibilityDate,
   WRANGLER,
@@ -138,6 +139,10 @@ async function runExample(name: string): Promise<Result> {
       } else lines.push("  ok    typechecks against Cloudflare's runtime types");
     }
 
+    // The same for wrangler: the migrations go into the state directory `wrangler dev` is about to read.
+    const state = join(harness.workdir, "state");
+    const migrated = await harness.build("applying migrations", () => applyWranglerMigrations(config, app, state));
+    if (migrated) throw new Error(migrated);
     const port = freePort();
     const command = [WRANGLER, "dev", "-c", config];
     for (const [at, companion] of (COMPANIONS.get(name) ?? []).entries())
@@ -151,7 +156,7 @@ async function runExample(name: string): Promise<Result> {
       "0",
       "--local",
       "--persist-to",
-      join(harness.workdir, "state"),
+      state,
     );
     wrangler = harness.spawn("wrangler dev", command, { cwd: app, env: wranglerEnv(harness.workdir) });
     const base = `http://127.0.0.1:${port}`;

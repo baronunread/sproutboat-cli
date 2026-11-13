@@ -1,0 +1,19 @@
+{
+  "name": "realtime-room",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A chat room with presence on Durable Objects and hibernating WebSockets",
+  "type": "module",
+  "scripts": {
+    "dev": "sproutboat dev",
+    "deploy": "sproutboat deploy",
+    "check": "sproutboat check",
+    "types": "sproutboat types",
+    "typecheck": "tsc -p . && tsc -p test",
+    "test": "node --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}

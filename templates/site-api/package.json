@@ -1,0 +1,19 @@
+{
+  "name": "site-api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A static site and its API routes in one Worker",
+  "type": "module",
+  "scripts": {
+    "dev": "sproutboat dev",
+    "deploy": "sproutboat deploy",
+    "check": "sproutboat check",
+    "types": "sproutboat types",
+    "typecheck": "tsc -p . && tsc -p test",
+    "test": "node --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}

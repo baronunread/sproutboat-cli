@@ -22,6 +22,7 @@
 import { cpSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { descendantPids, Harness, HarnessFailure } from "../test/fixtures/lib/harness";
+import { applyProjectMigrations } from "../test/fixtures/lib/migrations";
 import { FIXTURES_DIR, projectDir } from "../test/fixtures/lib/projects";
 import { buildStandalone } from "../src/standalone-build";
 import { bundleHandler } from "../src/bundle";
@@ -223,6 +224,8 @@ async function runExample(name: Name): Promise<Result> {
     });
     size = `${(built.bytes / 1_000_000).toFixed(1)} MB, built in ${seconds(performance.now() - started)}`;
 
+    // A starter whose schema is a migration (templates/api-d1) has it applied to the binary's data directory first.
+    await applyProjectMigrations(dir, config, join(workdir, "data"));
     const port = freePort();
     harness.spawn("standalone binary", [built.outPath], {
       env: { ...process.env, ...SECRETS.get(name), PORT: String(port), SB_DATA_DIR: join(workdir, "data") },

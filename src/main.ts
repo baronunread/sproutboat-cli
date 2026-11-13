@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { mkdir, open, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { existsSync, rmSync } from "node:fs";
+import { isIP } from "node:net";
 import { basename, dirname, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { isBoolean, isSafeInteger, isString, jsonObject, parseJsonValue, type JsonObject } from "./json";
@@ -136,7 +137,7 @@ import {
 import { notifyIfOutdated } from "./update-check";
 import { controlVersionWarning } from "./api-version";
 import { amber, bold, dim, leaf, ok, rose } from "./style";
-import { detectPackageManager, installCommand, planPackageJson, runScriptCommand } from "./init-package";
+import { InitError, parseInitArgs, runInit, terminalInitIo } from "./init";
 import { pathToFileURL } from "node:url";
 import { constants as osConstants } from "node:os";
 import { inspectToolchain } from "./toolchain";
@@ -317,28 +318,6 @@ function parseToken(source: string): string | undefined {
   return record && isString(record.token) ? record.token : undefined;
 }
 
-const starterConfig = (name: string) => `{
-  "$schema": "https://sproutboat.com/schema.json",
-  "name": "${name}",
-  "main": "src/index.js",
-  "compatibility_date": "2026-09-28"
-}
-`;
-const starterHandler = `export default {
-  fetch(request, env, ctx) {
-    return new Response("hello from Sproutboat");
-  }
-};
-`;
-// .sproutboat/ holds build output (dist/) and `dev`'s local broker state
-// (dev/, including its SQLite files) — neither belongs in version control.
-// .dev.vars carries secret values for `sproutboat dev`, same convention as
-// Wrangler's file of the same name.
-const starterGitignore = `.sproutboat/
-.dev.vars
-node_modules/
-`;
-
 /** An operational failure — the command was invoked correctly but could not complete. Exit 1. */
 function fail(message: string): never {
   console.error(`${rose("✗")} ${message}`);
@@ -416,63 +395,15 @@ async function readProject(directory?: string) {
   return { ...project, sourcePath, source, bundle };
 }
 
-async function init(name = "hello") {
-  if (!/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/.test(name))
-    fail("project name must be a 3–32 character lowercase slug");
-  const directory = resolve(process.cwd(), name);
-  const configPath = resolve(directory, "sproutboat.jsonc");
-  const handlerPath = resolve(directory, "src/index.js");
-  // Check both targets before writing either — `name` can collide with an
-  // unrelated existing directory, and a second `wx` write failing partway
-  // through used to crash with a raw EEXIST stack trace after already having
-  // created sproutboat.jsonc, leaving a half-scaffolded project behind.
-  for (const [path, label] of [
-    [configPath, "sproutboat.jsonc"],
-    [handlerPath, "src/index.js"],
-  ] as const) {
-    if (await Bun.file(path).exists()) fail(`${basename(directory)} already contains ${label}`);
-  }
-  // Plan package.json before writing anything, so an unreadable one stops init
-  // instead of leaving a half-scaffolded project.
-  const packagePath = resolve(directory, "package.json");
-  let existingPackage: string | undefined;
+async function init(args: string[]) {
+  const parsed = parseInitArgs(args);
+  if ("error" in parsed) usageError(parsed.error, usageOf("init"));
   try {
-    existingPackage = await readFile(packagePath, "utf8");
-  } catch {
-    existingPackage = undefined;
-  }
-  let packagePlan: ReturnType<typeof planPackageJson>;
-  try {
-    packagePlan = planPackageJson(name, existingPackage, CLI_VERSION);
+    await runInit(parsed, terminalInitIo(CLI_VERSION));
   } catch (cause) {
-    fail(`${basename(directory)}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    if (cause instanceof InitError) fail(cause.message);
+    throw cause;
   }
-  await mkdir(resolve(directory, "src"), { recursive: true });
-  await writeFile(configPath, starterConfig(name), { flag: "wx" });
-  await writeFile(handlerPath, starterHandler, { flag: "wx" });
-  console.log(`Created ${basename(directory)}/sproutboat.jsonc`);
-  console.log(`Created ${basename(directory)}/src/index.js`);
-  // Unlike the two files above, an existing .gitignore here is not a sign this
-  // isn't a fresh project (`name` can collide with an unrelated directory) —
-  // leave it alone rather than failing init or clobbering it.
-  const gitignorePath = resolve(directory, ".gitignore");
-  if (!(await Bun.file(gitignorePath).exists())) {
-    await writeFile(gitignorePath, starterGitignore, { flag: "wx" });
-    console.log(`Created ${basename(directory)}/.gitignore`);
-  }
-  if (packagePlan.created || packagePlan.addedDependency || packagePlan.addedScripts.length > 0) {
-    await writeFile(packagePath, packagePlan.text);
-    console.log(`${packagePlan.created ? "Created" : "Updated"} ${basename(directory)}/package.json`);
-  }
-  for (const script of packagePlan.skippedScripts)
-    console.log(
-      amber(
-        `  ! package.json already has a "${script}" script; left it as is (sproutboat's would be "sproutboat ${script}")`,
-      ),
-    );
-  const manager = detectPackageManager(directory);
-  console.log(`\nNext: cd ${basename(directory)} && ${installCommand(manager)} && ${runScriptCommand(manager, "dev")}`);
-  console.log(dim(`After "sproutboat login", ship it with ${runScriptCommand(manager, "deploy")}.`));
 }
 
 async function check(directory?: string) {
@@ -631,11 +562,13 @@ async function emitStandaloneUnit(directory: string | undefined): Promise<string
 }
 
 /** #62 — build for this machine, run it against a real broker, rebuild on save. */
-const DEV_USAGE = "dev [project-dir] [--port <n>] [--no-watch] [-e, --env <name>] [--env-file <file>]...";
+const DEV_USAGE =
+  "dev [project-dir] [--port <n>] [--ip <address>] [--no-watch] [-e, --env <name>] [--env-file <file>]...";
 
 async function dev(args: string[]) {
   let directory: string | undefined;
   let portArg: string | undefined;
+  let host: string | undefined;
   // --env and --env-file are global flags, already taken out of `args` (global-flags.ts).
   const envName = globalFlags().env;
   const envFiles = globalFlags().envFiles.map((file) => resolve(file));
@@ -647,10 +580,17 @@ async function dev(args: string[]) {
       if (value === undefined || value.startsWith("--")) usageError(`${arg} needs a value`, DEV_USAGE);
       at += 1;
       portArg = value;
+    } else if (arg === "--ip") {
+      const value = args[at + 1];
+      if (value === undefined || value.startsWith("--")) usageError(`${arg} needs a value`, DEV_USAGE);
+      at += 1;
+      host = value;
     } else if (!arg.startsWith("--") && directory === undefined) directory = arg;
   }
   const port = Number(portArg ?? 8787);
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) usageError(`invalid --port: ${portArg}`, DEV_USAGE);
+  if (host !== undefined && !isIP(host) && host !== "localhost")
+    usageError(`invalid --ip: ${host} (an IPv4 or IPv6 address, or localhost)`, DEV_USAGE);
   if (envName !== undefined && !/^[A-Za-z0-9_-]+$/.test(envName))
     usageError("--env takes a name (letters, digits, - and _)", DEV_USAGE);
   for (const file of envFiles) if (!existsSync(file)) fail(`env file not found: ${file}`);
@@ -663,6 +603,7 @@ async function dev(args: string[]) {
     sourcePath: project.sourcePath,
     source: project.bundle.code,
     port,
+    host,
     envFiles,
     envName,
     watch: !args.includes("--no-watch"),
@@ -2534,7 +2475,7 @@ if (!(command === "tail" && args.some((arg) => arg === "--file" || arg.startsWit
 
 switch (resolveCommand(command)) {
   case "init":
-    await init(args[0]);
+    await init(args);
     break;
   case "check":
     await check(args[0]);

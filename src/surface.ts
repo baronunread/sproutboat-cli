@@ -92,10 +92,10 @@ export const COMMANDS: readonly Command[] = [
     group: "Develop",
     emoji: "🌱",
     short: "Scaffold a new project",
-    args: "[name]",
+    args: "[name] [--template <name>] [--list-templates] [--git | --no-git] [--install | --no-install] [-y, --yes]",
     brief: "[name]",
     summary:
-      "Scaffold sproutboat.jsonc, src/index.js and package.json (sproutboat devDependency, dev, deploy and check scripts) in ./<name>.",
+      "Scaffold a project in ./<name> (the last path segment is the app's name), with the shape of `npm create cloudflare`. Without --template it writes sproutboat.jsonc, src/index.js and package.json (sproutboat devDependency, dev, deploy and check scripts). `--template <name>` writes a starter instead, standard Workers TypeScript with tests, a README and a current worker-configuration.d.ts: realtime-room (a chat room on Durable Objects and hibernating WebSockets), api-d1 (a JSON API on D1 with migrations and validation), site-api (a static site and its API in one Worker) or jobs (a cron trigger, a queue and KV); `--list-templates` prints them with their descriptions. In a terminal it asks for the template, the directory, whether to install dependencies and whether to use git (both default to yes); `-y` takes every default without asking, and anywhere else nothing runs that a flag did not ask for. `--install` runs the project's package manager (npm, pnpm, yarn or bun, by lockfile, else the tool that launched the CLI); `--git` runs `git init` and makes a first commit, and does nothing inside an existing repository. It never overwrites a file.",
   },
   {
     name: "check",
@@ -121,10 +121,10 @@ export const COMMANDS: readonly Command[] = [
     group: "Develop",
     emoji: "⚡",
     short: "Run the app locally, rebuilding on save",
-    args: "[project-dir] [--port <n>] [--no-watch] [-e, --env <name>] [--env-file <file>]...",
+    args: "[project-dir] [--port <n>] [--ip <address>] [--no-watch] [-e, --env <name>] [--env-file <file>]...",
     brief: "[project-dir]",
     summary:
-      "Run the project on this machine with local storage, rebuilding on save. Secrets come from .dev.vars or the .env files (never both), as in Wrangler; a declared secret with no value is a warning.",
+      "Run the project on this machine with local storage, rebuilding on save. It listens on 127.0.0.1 unless `--ip` names another address (`--ip 0.0.0.0` is reachable from other machines on the network, as in Wrangler). Secrets come from .dev.vars or the .env files (never both), as in Wrangler; a declared secret with no value is a warning.",
   },
   {
     name: "run",

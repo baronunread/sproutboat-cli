@@ -1,0 +1,10 @@
+{
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "jobs",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-18",
+  "kv_namespaces": ["STATE"],
+  "queues": ["JOBS"],
+  // Every hour, on the hour (UTC).
+  "triggers": { "crons": ["0 * * * *"] },
+}

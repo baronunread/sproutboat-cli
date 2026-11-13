@@ -54,6 +54,20 @@ npm install
 npm run dev                # runs it right here, no control plane needed
 ```
 
+Want a starting point with more in it? `init` has four starters, each standard Workers TypeScript with a README,
+tests and a current `worker-configuration.d.ts`, and each one runs unchanged on Cloudflare:
+
+```sh
+npx sproutboat init --list-templates
+npx sproutboat init chat --template realtime-room   # Durable Object, hibernating WebSockets, presence
+npx sproutboat init tasks --template api-d1         # JSON API on D1 with migrations and validation
+npx sproutboat init site  --template site-api       # static site and its API routes in one Worker
+npx sproutboat init nightly --template jobs         # cron enqueues, a queue consumer works, KV holds state
+```
+
+In a terminal `init` asks for the template, the directory, whether to install and whether to use git, the way
+`npm create cloudflare` does; `-y` takes the defaults and `--no-install` / `--no-git` skip a step.
+
 Happy with it? Log in once, then ship it:
 
 ```sh
@@ -178,8 +192,8 @@ The everyday loop:
 
 | Command | What it does |
 | --- | --- |
-| `init [name]` | Scaffold `sproutboat.jsonc`, `src/index.js` and a `package.json` that pins `sproutboat` |
-| `dev [--port <n>]` | Run it here against a real broker, rebuilding on save |
+| `init [name] [--template <name>]` | Scaffold a project: the hello starter, or one of four TypeScript starters with tests (`--list-templates`) |
+| `dev [--port <n>] [--ip <address>]` | Run it here against a real broker, rebuilding on save; `--ip 0.0.0.0` makes it reachable on your network |
 | `deploy` | Build, provision bindings, upload, wait until the URL serves |
 | `tail [filters]` | Live request events, console output and exceptions, like `wrangler tail` |
 | `rollback <id>` | Re-activate a previous version |

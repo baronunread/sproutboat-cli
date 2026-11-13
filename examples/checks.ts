@@ -10,6 +10,7 @@
  * `WORKERD_SKIPS`. Each has its reason, and `src/examples-rules.test.ts` fails when an entry names no example.
  */
 import type { JsonValue } from "../src/json";
+import { projectDir } from "../test/fixtures/lib/projects";
 
 export type Runtime = "standalone" | "workerd";
 export type Ok = (name: string, cond: boolean, detail?: JsonValue) => void;
@@ -21,7 +22,31 @@ export type Context = {
 };
 export type Check = (base: string, ok: Ok, context: Context) => Promise<void>;
 
-/** Every public example, by its directory under examples/. */
+/**
+ * A starter is checked by its own tests, run against the server this runner started: Bun's test runner runs the same
+ * `node:test` files that `npm test` runs with Node, here with BASE_URL pointing at the standalone binary or at
+ * workerd. So what a starter's tests assert is proven on all three runtimes, not just on `sproutboat dev`.
+ */
+const ownTests =
+  (name: string): Check =>
+  async (base, ok) => {
+    const child = Bun.spawn([process.execPath, "test", "test/"], {
+      cwd: projectDir(name),
+      env: { ...process.env, BASE_URL: base, NO_COLOR: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 240_000,
+      killSignal: "SIGKILL",
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    ok("its own tests pass against this server", code === 0, code === 0 ? undefined : (out + err).trim().slice(-3000));
+  };
+
+/** Every example, fixture and app that has requests to send, by its name (see test/fixtures/lib/projects.ts). */
 export const CHECKS = {
   hello: async (base, ok, { text }) => {
     ok("greets the world", (await text(base + "/")) === "Hello, world!\n");
@@ -318,6 +343,11 @@ export const CHECKS = {
     ok("/ says what the service is", index.service === "quote-service", index);
     ok("an unknown path is a 404", (await fetch(base + "/nope")).status === 404);
   },
+
+  "templates/realtime-room": ownTests("templates/realtime-room"),
+  "templates/api-d1": ownTests("templates/api-d1"),
+  "templates/site-api": ownTests("templates/site-api"),
+  "templates/jobs": ownTests("templates/jobs"),
 
   "service-bindings/callee": async (base, ok, { text }) => {
     ok("greets by name", (await text(base + "/?name=sprout")) === "hello, sprout, from the callee\n");

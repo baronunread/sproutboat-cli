@@ -28,14 +28,19 @@ export type Options = {
 };
 
 export const COMMAND_OPTIONS = {
-  init: {},
+  // As in create-cloudflare: --template picks a starter, --git and --install (and their --no-) decide the two steps
+  // after scaffolding, -y takes every default. --list-templates prints the starters and exits.
+  init: {
+    value: ["--template"],
+    flag: ["--list-templates", "--git", "--no-git", "--install", "--no-install", "--yes", "-y", "--accept-defaults"],
+  },
   check: {},
   // The booleans take `--strict-vars=false` as in Wrangler (types-cmd.ts reads the pair); `--no-...` is the short way.
   types: {
     value: ["--env-interface", "--strict-vars", "--include-runtime", "--include-env"],
     flag: ["--check", "--no-strict-vars", "--no-include-runtime", "--no-include-env"],
   },
-  dev: { value: ["--port"], flag: ["--no-watch"] },
+  dev: { value: ["--port", "--ip"], flag: ["--no-watch"] },
   run: { value: ["--binary", "--port", "--data-dir", "--require"], flag: ["--check"] },
   build: {
     value: ["--target"],

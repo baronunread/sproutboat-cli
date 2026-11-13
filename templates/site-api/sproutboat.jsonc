@@ -1,0 +1,14 @@
+{
+  "$schema": "https://sproutboat.com/schema.json",
+  "name": "site-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-18",
+  "kv_namespaces": ["SUBSCRIBERS"],
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    // The handler goes first for /api/*, so a route is never shadowed by a file. Everything else is a file.
+    "run_sprout_first": ["/api/*"],
+    "not_found_handling": "404-page",
+  },
+}
