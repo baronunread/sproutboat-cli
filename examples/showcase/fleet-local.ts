@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { totalmem } from "node:os";
 import { join } from "node:path";
-import type { FleetSnapshot } from "./fleet-contract";
+import type { FleetAppFacts, FleetRequest, FleetSnapshot } from "./fleet-contract";
 
 const HERE = import.meta.dir;
 const APP_DIR = join(HERE, "fleet-app");
@@ -22,7 +22,7 @@ const CLI = join(HERE, "../../src/main.ts");
 /** Hard limits. The page shows them; the storyboard in DESIGN.md is designed around them. */
 export const FLEET_LIMITS = {
   /** Slots in the grid. */
-  apps: Number(process.env.FLEET_APPS) || 400,
+  apps: Number(process.env.FLEET_APPS) || 1000,
   /** Processes alive at once. A wake past this is refused with 503 `full`. */
   maxAwake: 120,
   /** A process with no request for this long is stopped. */
@@ -46,6 +46,8 @@ type Slot = {
   /** A start in progress: everyone who asks meanwhile waits for the same one. */
   starting: Promise<Started> | null;
   lastUsed: number;
+  /** When the running process was started (epoch ms). */
+  startedAt: number;
   reaper: ReturnType<typeof setTimeout> | null;
 };
 
@@ -68,10 +70,14 @@ export function createLocalFleet(basePort: number, dataRoot: string) {
     port: basePort + i,
     starting: null,
     lastUsed: 0,
+    startedAt: 0,
     reaper: null,
   }));
   let awake = 0;
   let usedKiB = 0;
+  const recent: FleetRequest[] = [];
+  /** Resident memory per process id, from the last sample. */
+  let rss = new Map<number, number>();
   const buckets = new Map<string, { tokens: number; at: number }>();
   mkdirSync(dataRoot, { recursive: true });
 
@@ -86,6 +92,7 @@ export function createLocalFleet(basePort: number, dataRoot: string) {
       stderr: "pipe",
     });
     slot.child = child;
+    slot.startedAt = Date.now();
     awake++;
     void child.exited.then(() => {
       if (slot.child !== child) return;
@@ -128,8 +135,8 @@ export function createLocalFleet(basePort: number, dataRoot: string) {
     return true;
   }
 
-  const reply = (body: FleetSnapshot | Refusal, status: number, retryAfter?: number) => {
-    const headers = new Headers({ "cache-control": "no-store" });
+  const reply = (body: FleetSnapshot | FleetAppFacts | Refusal, status: number, retryAfter?: number) => {
+    const headers = new Headers({ "cache-control": "no-store", "access-control-allow-origin": "*" });
     if (retryAfter) headers.set("retry-after", String(retryAfter));
     return Response.json(body, { status, headers });
   };
@@ -159,13 +166,34 @@ export function createLocalFleet(basePort: number, dataRoot: string) {
       }
     }
     touch(slot);
-    const headers = new Headers({ "content-type": "application/json", "cache-control": "no-store" });
+    // #region receipt
+    // What the platform adds to every answer, so a request can be checked from a terminal: which process
+    // answered, when that process started, and an id that then shows up in the public tail.
+    const id = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+    const headers = new Headers({
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "access-control-allow-origin": "*",
+      "access-control-expose-headers": "server-timing, x-sproutboat-request-id, x-sproutboat-pid, x-sproutboat-started",
+      "x-sproutboat-request-id": id,
+      "x-sproutboat-pid": String(slot.child?.pid ?? ""),
+      "x-sproutboat-started": new Date(slot.startedAt).toISOString(),
+    });
+    recent.push({
+      id,
+      i,
+      at: Date.now(),
+      cold: started !== null,
+      wakeMs: started ? Number(started.ms.toFixed(1)) : null,
+    });
+    if (recent.length > 12) recent.shift();
     // The caller whose request started the process gets that first answer, and how long the start took
     // (Server-Timing is the standard header for telling a browser what the server side cost).
     if (started) {
       headers.set("server-timing", `wake;dur=${started.ms.toFixed(1)}`);
       return new Response(started.body, { headers });
     }
+    // #endregion
     try {
       const upstream = await fetch(`http://127.0.0.1:${slot.port}/`);
       return new Response(await upstream.arrayBuffer(), { status: upstream.status, headers });
@@ -179,15 +207,18 @@ export function createLocalFleet(basePort: number, dataRoot: string) {
     const pids = slots.flatMap((slot) => (slot.child ? [slot.child.pid] : []));
     if (pids.length === 0) {
       usedKiB = 0;
+      rss = new Map();
       return;
     }
-    const ps = Bun.spawn(["ps", "-o", "rss=", "-p", pids.join(",")], { stdout: "pipe", stderr: "ignore" });
+    const ps = Bun.spawn(["ps", "-o", "pid=,rss=", "-p", pids.join(",")], { stdout: "pipe", stderr: "ignore" });
     void new Response(ps.stdout).text().then((text) => {
-      usedKiB = text
-        .split("\n")
-        .map((line) => Number(line.trim()))
-        .filter((value) => Number.isFinite(value))
-        .reduce((sum, value) => sum + value, 0);
+      const next = new Map<number, number>();
+      for (const line of text.split("\n")) {
+        const [pid, kib] = line.trim().split(/\s+/).map(Number);
+        if (pid && Number.isFinite(kib)) next.set(pid, kib ?? 0);
+      }
+      rss = next;
+      usedKiB = [...next.values()].reduce((sum, value) => sum + value, 0);
     });
   }, 400);
 
@@ -197,12 +228,13 @@ export function createLocalFleet(basePort: number, dataRoot: string) {
     return {
       v: 1,
       mode: "local",
-      label: `local preview: ${limits.apps} copies of one standalone binary on this machine, not sproutd`,
+      label: `local preview: ${limits.apps.toLocaleString("en")} slots for one standalone binary on this machine, not sproutd`,
       at: Date.now(),
       apps: limits.apps,
       states,
       awake,
       memory: { usedKiB, hostKiB: Math.round(totalmem() / 1024), source: "sum of RSS from ps, every 400 ms" },
+      recent,
       limits: { maxAwake: limits.maxAwake, idleMs: limits.idleMs, perSecond: limits.perSecond },
       pollMs: 400,
     };
@@ -216,5 +248,23 @@ export function createLocalFleet(basePort: number, dataRoot: string) {
     }
   }
 
-  return { request, snapshot, stop, state: () => reply(snapshot(), 200) };
+  /** GET /state/<i>: one app's process as this machine sees it. */
+  function facts(i: number): Response {
+    const slot = slots[i];
+    if (!slot) return reply({ error: "no such app", code: "not_found" }, 404);
+    const pid = slot.child?.pid ?? null;
+    return reply(
+      {
+        i,
+        state: slot.child ? (slot.starting ? "w" : "a") : "z",
+        pid,
+        startedAt: pid === null ? null : slot.startedAt,
+        memoryKiB: pid === null ? null : (rss.get(pid) ?? null),
+        source: "RSS from ps, every 400 ms",
+      },
+      200,
+    );
+  }
+
+  return { request, facts, snapshot, stop, state: () => reply(snapshot(), 200) };
 }

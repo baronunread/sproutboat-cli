@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { fleet } from "./fleet/store";
+import { Compared } from "./sections/compared";
 import { Fleet } from "./sections/fleet";
-import { Hero } from "./sections/hero";
 import { Upcoming } from "./sections/upcoming";
 import { Footer, Nav } from "./system/chrome";
 
@@ -10,9 +10,9 @@ function Page() {
     <>
       <Nav />
       <main>
-        <Hero />
         <Fleet />
         <Upcoming />
+        <Compared />
       </main>
       <Footer />
     </>

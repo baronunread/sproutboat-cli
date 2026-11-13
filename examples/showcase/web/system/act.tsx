@@ -19,6 +19,26 @@ export function Eyebrow({ number, children }: { number: string; children: ReactN
   );
 }
 
+/**
+ * The app mark (system/sprout.ts) as an inline picture, for a legend or a sentence: a seed on its waterline,
+ * or a light lifted off it on a stem.
+ */
+export function SproutGlyph({ awake = false }: { awake?: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" className="size-4 shrink-0" aria-hidden="true">
+      <path d="M2 12.5h12" stroke="var(--stage-line)" strokeOpacity="0.28" />
+      {awake ? (
+        <>
+          <path d="M8 5.5v7" stroke="var(--stage-alive)" strokeOpacity="0.55" />
+          <circle cx="8" cy="5" r="2.6" fill="var(--stage-alive)" />
+        </>
+      ) : (
+        <circle cx="8" cy="12.5" r="1.7" fill="var(--stage-asleep)" />
+      )}
+    </svg>
+  );
+}
+
 /** One measured value with its name above and its unit beside. */
 export function Readout({ name, unit, children }: { name: string; unit?: ReactNode; children: ReactNode }) {
   return (
@@ -73,7 +93,7 @@ export function HowItWorks({ panel, title, children }: { panel: string; title: s
   const [blocks, setBlocks] = useState<Block[] | null>(null);
   const load = (open: boolean) => {
     if (!open || blocks) return;
-    void fetch("/code.json")
+    void fetch("code.json")
       .then((response) => response.json())
       .then((code: { panels: Record<string, Block[]> }) => setBlocks(code.panels[panel] ?? []));
   };

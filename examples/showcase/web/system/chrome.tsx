@@ -2,7 +2,7 @@
 import { buttonStyles } from "@sproutboat/ikada/button";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Feed, FeedStatus } from "./feed";
-import { motionPaused, setMotionPaused } from "./motion";
+import { motionOff, motionPaused, setMotionPaused } from "./motion";
 
 /** The Afloat mark: two leaves cut by a waterline. */
 export function Mark({ className }: { className?: string }) {
@@ -18,10 +18,12 @@ export function Mark({ className }: { className?: string }) {
 
 export const ACTS = [
   { id: "fleet", number: "01", name: "Fleet" },
-  { id: "arena", number: "02", name: "Crash arena" },
-  { id: "pocket", number: "03", name: "Pocket server" },
-  { id: "crowd", number: "04", name: "Sleeping crowd" },
+  { id: "pocket", number: "02", name: "Pocket server" },
+  { id: "selfhost", number: "03", name: "Self-host" },
 ] as const;
+
+/** What the nav lists: the three acts, then the comparison they all point to. */
+const SECTIONS = [...ACTS, { id: "compared", number: "04", name: "Compared" }] as const;
 
 export function Nav() {
   const [current, setCurrent] = useState<string>("");
@@ -33,7 +35,7 @@ export function Nav() {
       },
       { rootMargin: "-45% 0px -45% 0px" },
     );
-    for (const id of ["top", ...ACTS.map((act) => act.id)]) {
+    for (const id of ["top", ...SECTIONS.map((act) => act.id)]) {
       const element = document.getElementById(id);
       if (element) seen.observe(element);
     }
@@ -49,8 +51,8 @@ export function Nav() {
           <Mark className="size-6" />
           <span className="text-[0.9375rem] font-semibold tracking-[-0.015em]">Sproutboat</span>
         </a>
-        <ol className="ms-auto hidden items-center gap-1 md:flex">
-          {ACTS.map((act) => (
+        <ol className="ms-auto hidden items-center gap-1 lg:flex">
+          {SECTIONS.map((act) => (
             <li key={act.id}>
               <a
                 href={`#${act.id}`}
@@ -72,7 +74,7 @@ export function Nav() {
             setMotionPaused(!paused);
             setPaused(!paused);
           }}
-          className="ms-auto grid size-9 place-items-center rounded-md text-fg-muted outline-offset-2 transition-[color,background-color,scale] duration-150 hover:bg-stage-line/8 hover:text-fg focus-visible:outline-2 focus-visible:outline-focus active:scale-[0.96] md:ms-0"
+          className="ms-auto grid size-9 place-items-center rounded-md text-fg-muted outline-offset-2 transition-[color,background-color,scale] duration-150 hover:bg-stage-line/8 hover:text-fg focus-visible:outline-2 focus-visible:outline-focus active:scale-[0.96] lg:ms-0"
         >
           <span className="sr-only">{paused ? "Resume motion" : "Pause motion"}</span>
           <svg viewBox="0 0 16 16" className="size-4" aria-hidden="true" fill="currentColor">
@@ -116,7 +118,7 @@ export function LiveChip({
       feed.onSample(() => {
         setStatus(feed.status);
         setLabel(feed.label);
-        if (feed.status === "live" && !motionPaused())
+        if (feed.status === "live" && !motionOff())
           beat.current?.animate(
             [
               { transform: "scale(1)", opacity: 0.5 },

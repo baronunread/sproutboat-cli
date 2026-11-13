@@ -19,6 +19,9 @@ export default {
           // The page calls each app from the visitor's browser.
           "access-control-allow-origin": "*",
           "timing-allow-origin": "*",
+          // The platform adds these to every answer; a browser hides them from a page unless the app says otherwise.
+          "access-control-expose-headers":
+            "server-timing, x-sproutboat-request-id, x-sproutboat-pid, x-sproutboat-started",
         },
       },
     );

@@ -1,0 +1,431 @@
+{
+  "readOn": "2026-11-13",
+  "note": "Every cell is one of three kinds. published: the platform's own figure, with the page it is on. measured: our own measurement, with what it ran on. unpublished: we could not find a figure on the pages named in RESEARCH.md, and we do not guess one. showcase.test.ts fails when a cell has no kind, a published cell has no URL, or a measured cell does not say what it ran on.",
+  "fleet": {
+    "apps": 1000,
+    "hostMiB": 2048,
+    "rows": [
+      {
+        "name": "Sproutboat",
+        "ours": true,
+        "perAppMiB": 1.28,
+        "kind": "measured",
+        "by": "sproutd benchmark gc-limit, 1,000 apps on one Linux host, 2026-11-12"
+      },
+      {
+        "name": "Node.js, a process each",
+        "perAppMiB": 48.5,
+        "kind": "measured",
+        "by": "a bare node:http server, Node 26.5.1 on macOS arm64, one run, 2026-11-13: 48.5 MiB resident"
+      }
+    ]
+  },
+  "groups": [
+    {
+      "id": "own",
+      "title": "On a server you run",
+      "question": "The memory is yours, so the question is how much one idle app holds.",
+      "columns": [
+        {
+          "key": "idle",
+          "label": "One idle app holds"
+        },
+        {
+          "key": "cold",
+          "label": "Cold start"
+        },
+        {
+          "key": "runs",
+          "label": "What runs"
+        }
+      ],
+      "rows": [
+        {
+          "name": "Sproutboat",
+          "ours": true,
+          "cells": {
+            "idle": {
+              "value": "1.28 MiB",
+              "kind": "measured",
+              "by": "host memory per app with 1,000 apps idle; sproutd benchmark gc-limit, 2026-11-12"
+            },
+            "cold": {
+              "value": "7 ms",
+              "kind": "measured",
+              "by": "a standalone binary, process start to first answer; the grid above measures it live"
+            },
+            "runs": {
+              "value": "A native Linux process per app, compiled ahead of time from Workers code",
+              "kind": "fact"
+            }
+          },
+          "gives": "Not yet: more than one region, the whole of JavaScript and npm (the compiler takes a subset), more than 32 MiB per app."
+        },
+        {
+          "name": "Node.js or a container of it",
+          "cells": {
+            "idle": {
+              "value": "48.5 MiB",
+              "kind": "measured",
+              "by": "a bare node:http server, resident memory; Node 26.5.1, macOS arm64, one run, 2026-11-13. Not Linux, not in a container"
+            },
+            "cold": {
+              "value": "31 to 38 ms",
+              "kind": "measured",
+              "by": "spawn to first HTTP answer, same machine, three runs, 2026-11-13. A container adds its own start, which we did not measure"
+            },
+            "runs": {
+              "value": "A V8 process per app",
+              "kind": "fact"
+            }
+          },
+          "gives": "Every npm package, a JIT for long hot loops, as much memory as you give it, and the tooling of the whole Node ecosystem."
+        },
+        {
+          "name": "OpenOrange, self-hosted",
+          "cells": {
+            "idle": {
+              "value": "Not published",
+              "kind": "unpublished",
+              "by": "They publish no figure for an idle Worker. For an idle WebSocket, see the last table"
+            },
+            "cold": {
+              "value": "Not published",
+              "kind": "unpublished",
+              "by": "Rivet quotes 4.99 ms p99 for its own Actors, a different runtime",
+              "url": "https://rivet.dev"
+            },
+            "runs": {
+              "value": "Your Worker in a Node.js process; each Durable Object is a Rivet Actor",
+              "kind": "published",
+              "url": "https://openorange.dev/docs/architecture/"
+            }
+          },
+          "gives": "Stock Node.js, no memory cap, 21 Cloudflare bindings, three clouds or a managed one, Apache 2.0."
+        }
+      ]
+    },
+    {
+      "id": "hosted",
+      "title": "On someone else's servers",
+      "question": "Idle memory is the provider's problem and mostly unpublished. What you can compare is the limit, the cold start and the bill while nothing happens.",
+      "columns": [
+        {
+          "key": "limit",
+          "label": "Memory an app gets"
+        },
+        {
+          "key": "cold",
+          "label": "Cold start"
+        },
+        {
+          "key": "idle",
+          "label": "Price while idle"
+        },
+        {
+          "key": "runs",
+          "label": "Where it runs"
+        }
+      ],
+      "rows": [
+        {
+          "name": "Sproutboat Cloud",
+          "ours": true,
+          "cells": {
+            "limit": {
+              "value": "32 MiB",
+              "kind": "fact",
+              "by": "a cgroup per app"
+            },
+            "cold": {
+              "value": "4 to 60 ms",
+              "kind": "measured",
+              "by": "wake of an app holding hibernated sockets, by socket count; sproutd #111, 2026-11"
+            },
+            "idle": {
+              "value": "Not announced",
+              "kind": "unpublished",
+              "by": "Cloud pricing is not public yet"
+            },
+            "runs": {
+              "value": "One region today, a process per app",
+              "kind": "fact"
+            }
+          },
+          "gives": "Not yet: an edge network, a published price, a track record."
+        },
+        {
+          "name": "Cloudflare Workers",
+          "cells": {
+            "limit": {
+              "value": "128 MB",
+              "kind": "published",
+              "by": "per isolate. A loaded isolate was \"around 3 MB\" in 2018",
+              "url": "https://developers.cloudflare.com/workers/platform/limits/",
+              "more": "https://blog.cloudflare.com/cloud-computing-without-containers/"
+            },
+            "cold": {
+              "value": "5 ms, often zero",
+              "kind": "published",
+              "by": "isolates \"start in 5 milliseconds\"; loaded during the TLS handshake (2020)",
+              "url": "https://blog.cloudflare.com/eliminating-cold-starts-with-cloudflare-workers/"
+            },
+            "idle": {
+              "value": "$0",
+              "kind": "published",
+              "by": "no charge for duration; the paid plan is $5 a month per account",
+              "url": "https://developers.cloudflare.com/workers/platform/pricing/"
+            },
+            "runs": {
+              "value": "V8 isolates in 335+ cities",
+              "kind": "published",
+              "url": "https://workers.cloudflare.com"
+            }
+          },
+          "gives": "The edge: your code near every user, four times the memory, the whole of JavaScript, and nothing to operate."
+        },
+        {
+          "name": "AWS Lambda",
+          "cells": {
+            "limit": {
+              "value": "128 MB to 10 GB",
+              "kind": "published",
+              "by": "configured per function",
+              "url": "https://docs.aws.amazon.com/lambda/latest/dg/configuration-memory.html"
+            },
+            "cold": {
+              "value": "Under 100 ms to over 1 s",
+              "kind": "published",
+              "by": "\"in under 1% of invocations\"",
+              "url": "https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html"
+            },
+            "idle": {
+              "value": "$0",
+              "kind": "published",
+              "by": "$0.0000166667 per GB-second while running",
+              "url": "https://aws.amazon.com/lambda/pricing/"
+            },
+            "runs": {
+              "value": "A Firecracker microVM per environment, in AWS regions",
+              "kind": "published",
+              "url": "https://firecracker-microvm.github.io"
+            }
+          },
+          "gives": "Any runtime, hardware isolation, up to 10 GB of memory, and the rest of AWS next door."
+        },
+        {
+          "name": "Fly Machines",
+          "cells": {
+            "limit": {
+              "value": "256 MB and up",
+              "kind": "published",
+              "by": "the smallest Machine",
+              "url": "https://fly.io/docs/about/pricing/"
+            },
+            "cold": {
+              "value": "About 2 s; a few hundred ms from suspend",
+              "kind": "published",
+              "url": "https://fly.io/docs/reference/suspend-resume/"
+            },
+            "idle": {
+              "value": "$0.15 per GB of disk a month",
+              "kind": "published",
+              "by": "stopped or suspended; $2.19 a month if left running",
+              "url": "https://fly.io/docs/about/pricing/"
+            },
+            "runs": {
+              "value": "A Firecracker microVM, in 18 regions",
+              "kind": "published",
+              "url": "https://fly.io"
+            }
+          },
+          "gives": "A whole Linux machine: any language, any image, a disk, hardware isolation."
+        },
+        {
+          "name": "Vercel Functions, Fluid",
+          "cells": {
+            "limit": {
+              "value": "2 GB, up to 4 GB",
+              "kind": "published",
+              "url": "https://vercel.com/docs/functions/limitations"
+            },
+            "cold": {
+              "value": "Not published",
+              "kind": "unpublished",
+              "by": "\"pre-warmed\" with \"bytecode caching\", no figure",
+              "url": "https://vercel.com/docs/fluid-compute"
+            },
+            "idle": {
+              "value": "$0 with no instance",
+              "kind": "published",
+              "by": "memory is billed \"for the entire instance lifetime\"; the rate \"varies by region\"",
+              "url": "https://vercel.com/docs/fluid-compute/pricing"
+            },
+            "runs": {
+              "value": "Shared instances, many requests each",
+              "kind": "published",
+              "url": "https://vercel.com/fluid"
+            }
+          },
+          "gives": "Next.js and the frameworks, a preview for every commit, a CDN in front."
+        },
+        {
+          "name": "Deno Deploy",
+          "cells": {
+            "limit": {
+              "value": "512 MB",
+              "kind": "published",
+              "url": "https://docs.deno.com/deploy/pricing_and_limits/"
+            },
+            "cold": {
+              "value": "Not published",
+              "kind": "unpublished"
+            },
+            "idle": {
+              "value": "Plans at $0, $20, $200",
+              "kind": "published",
+              "url": "https://deno.com/deploy/pricing"
+            },
+            "runs": {
+              "value": "Being shut down in April 2027",
+              "kind": "published",
+              "url": "https://deno.com/blog/cloudflare"
+            }
+          },
+          "gives": "Deno and npm compatibility in many regions, until it closes."
+        }
+      ]
+    },
+    {
+      "id": "sockets",
+      "title": "Holding a connection for someone who says nothing",
+      "question": "A chat room or a shared cursor is mostly silence. This is what one idle WebSocket costs the server that holds it.",
+      "columns": [
+        {
+          "key": "socket",
+          "label": "One idle socket holds"
+        },
+        {
+          "key": "wake",
+          "label": "Wake on a message"
+        },
+        {
+          "key": "runs",
+          "label": "How"
+        }
+      ],
+      "rows": [
+        {
+          "name": "Sproutboat",
+          "ours": true,
+          "cells": {
+            "socket": {
+              "value": "5 to 9 KiB",
+              "kind": "measured",
+              "by": "sproutd benchmark ws-idle, 2026-11-13 (sproutd #110)"
+            },
+            "wake": {
+              "value": "4 to 60 ms",
+              "kind": "measured",
+              "by": "by socket count; sproutd #111, 2026-11"
+            },
+            "runs": {
+              "value": "The platform keeps the socket; the app's process is gone until a message arrives",
+              "kind": "fact"
+            }
+          },
+          "gives": "Not yet: sockets that follow an app to another machine."
+        },
+        {
+          "name": "OpenOrange, self-hosted",
+          "cells": {
+            "socket": {
+              "value": "About 1 MB",
+              "kind": "measured",
+              "by": "per Durable Object holding one hibernated socket, in the same benchmark (ws-idle, 2026-11-13). They publish no figure"
+            },
+            "wake": {
+              "value": "Not published",
+              "kind": "unpublished"
+            },
+            "runs": {
+              "value": "A Rivet Actor per Durable Object, in a Node.js process",
+              "kind": "published",
+              "url": "https://openorange.dev/docs/architecture/"
+            }
+          },
+          "gives": "The full Durable Objects API with SQLite storage on S3, on three clouds."
+        },
+        {
+          "name": "Cloudflare Durable Objects",
+          "cells": {
+            "socket": {
+              "value": "Not published",
+              "kind": "unpublished",
+              "by": "a hibernated object is not billed for duration",
+              "url": "https://developers.cloudflare.com/durable-objects/platform/pricing/"
+            },
+            "wake": {
+              "value": "Not published",
+              "kind": "unpublished"
+            },
+            "runs": {
+              "value": "The object leaves memory; the socket stays open at the edge",
+              "kind": "published",
+              "url": "https://durable-objects-playground.amini-labs-demo.workers.dev"
+            }
+          },
+          "gives": "Sockets that end near every user, and objects that live near whoever uses them."
+        }
+      ]
+    }
+  ],
+  "coldStart": {
+    "note": "Published cold-start figures beside the one this page measures. fromMs and toMs place a mark on the page's scale and are set only where the source gives a number; open means the source says \"over\".",
+    "rows": [
+      {
+        "name": "Cloudflare Workers",
+        "value": "5 ms, often zero",
+        "fromMs": 5,
+        "toMs": 5,
+        "kind": "published",
+        "by": "Cloudflare blog, 2020-07-30",
+        "url": "https://blog.cloudflare.com/eliminating-cold-starts-with-cloudflare-workers/"
+      },
+      {
+        "name": "Node.js process",
+        "value": "31 to 38 ms",
+        "fromMs": 31,
+        "toMs": 38,
+        "kind": "measured",
+        "by": "spawn to first HTTP answer, Node 26.5.1, macOS arm64, three runs, 2026-11-13"
+      },
+      {
+        "name": "AWS Lambda",
+        "value": "under 100 ms to over 1 s",
+        "fromMs": 100,
+        "toMs": 1000,
+        "open": true,
+        "kind": "published",
+        "by": "AWS docs",
+        "url": "https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html"
+      },
+      {
+        "name": "Fly Machines",
+        "value": "about 2 s; less from suspend",
+        "fromMs": 2000,
+        "toMs": 2000,
+        "kind": "published",
+        "by": "Fly docs: \"~2+ seconds for common apps\", \"a few hundred ms\" from suspend",
+        "url": "https://fly.io/docs/reference/suspend-resume/"
+      },
+      {
+        "name": "Vercel Fluid",
+        "value": "not published",
+        "kind": "unpublished",
+        "by": "\"pre-warmed\", no figure",
+        "url": "https://vercel.com/docs/fluid-compute"
+      }
+    ]
+  }
+}

@@ -39,6 +39,13 @@ export const PANELS = {
       note: "What a sweep or a wave sends, once per dot.",
     },
     {
+      label: "The receipt",
+      file: "fleet-local.ts",
+      region: "receipt",
+      lang: "ts",
+      note: "The headers on every answer: which process, since when, and the id that shows up in the tail. In this preview serve.ts adds them; on Sproutboat Cloud the platform does.",
+    },
+    {
       label: "Local preview only",
       file: "fleet-local.ts",
       region: "supervisor",

@@ -95,8 +95,14 @@ const proxy = Bun.serve({
   port,
   async fetch(request, server) {
     const url = new URL(request.url);
+    // The page is built to live under a path (sproutboat.com/demo): every URL it asks for is relative. Serving it
+    // at /demo/ as well as at / is the check that it stays that way.
+    if (url.pathname === "/demo") return Response.redirect(`${url.origin}/demo/`, 302);
+    if (url.pathname.startsWith("/demo/")) url.pathname = url.pathname.slice(5);
     const address = server.requestIP(request)?.address ?? "unknown";
     if (url.pathname === "/fleet/state") return fleet.state();
+    const facts = /^\/fleet\/state\/(\d+)$/.exec(url.pathname);
+    if (facts) return fleet.facts(Number(facts[1]));
     const slot = /^\/fleet\/app\/(\d+)$/.exec(url.pathname);
     if (slot) return fleet.request(Number(slot[1]), address);
     if (url.pathname.startsWith("/api/") || url.pathname === "/healthz") {
@@ -146,7 +152,7 @@ const stop = () => {
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 console.log(
-  `\n  showcase  http://${lan}:${port}   (pid ${process.pid})\n  The page is rebuilt on save. The Worker (/api) compiles on first start and needs a restart to change.\n  Ctrl-C to stop.\n`,
+  `\n  showcase  http://${lan}:${port}/demo/   (pid ${process.pid})\n  The page is rebuilt on save. The Worker (/api) compiles on first start and needs a restart to change.\n  Ctrl-C to stop.\n`,
 );
 await app.exited;
 stop();

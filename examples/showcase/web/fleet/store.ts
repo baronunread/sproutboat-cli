@@ -7,7 +7,7 @@
  * Scenes never invent a transition: a dot lights when a snapshot or an answer says its app is running, and
  * dims when a snapshot says it stopped.
  */
-import type { FleetSnapshot } from "../../fleet-contract";
+import type { FleetAppFacts, FleetRequest, FleetSnapshot } from "../../fleet-contract";
 import type { Feed, FeedStatus } from "../system/feed";
 
 export const ASLEEP = 0;
@@ -30,6 +30,22 @@ export type Source = "visit" | "sweep" | "wave";
 
 type Info = { edition: string; fleet: { stateUrl: string; appUrl: string } | null };
 
+/** The last answer this page got from one app, kept as it arrived: what the inspector prints. */
+export type Receipt = {
+  i: number;
+  /** When it arrived (epoch ms). */
+  at: number;
+  status: number;
+  /** Round trip in this browser. */
+  ms: number;
+  /** The headers the platform added, in the order it sent them. */
+  headers: [name: string, value: string][];
+  body: string;
+};
+
+/** The response headers that say which process answered. A browser shows a page only the ones the server exposes. */
+const RECEIPT_HEADERS = ["server-timing", "x-sproutboat-pid", "x-sproutboat-started", "x-sproutboat-request-id"];
+
 /** The page's own budget, kept under the server's so a sweep degrades by skipping, not by being refused. */
 const BUDGET = { burst: 70, perSecond: 30 };
 
@@ -44,7 +60,15 @@ class FleetStore implements Feed {
   /** The platform's last refusal, for the line that explains it. */
   lastRefused: { code: string; at: number } | null = null;
   info: Info | null = null;
+  /** The app the inspector shows, -1 before the first one is picked. */
+  selected = -1;
+  /** The selected app's process, as the host reports it. */
+  facts: FleetAppFacts | null = null;
+  readonly receipts = new Map<number, Receipt>();
+  /** Ids of the requests this page sent, to mark them in the tail. */
+  readonly mine = new Set<string>();
 
+  private factsAt = 0;
   private readonly eventListeners = new Set<(event: FleetEvent) => void>();
   private readonly changeListeners = new Set<() => void>();
   private lastRequestAt = new Float64Array(0);
@@ -79,6 +103,47 @@ class FleetStore implements Feed {
   get apps(): number {
     return this.snapshot?.apps ?? 0;
   }
+  get recent(): readonly FleetRequest[] {
+    return this.snapshot?.recent ?? [];
+  }
+
+  /** App i's own address: the thing to open in a tab or hand to curl. */
+  appUrl(i: number): string {
+    const pattern = this.info?.fleet?.appUrl;
+    return pattern ? new URL(pattern.replace("{i}", String(i)), location.href).href : "";
+  }
+  /** The feed this page polls, for anyone who would rather read it raw. */
+  get stateUrl(): string {
+    const url = this.info?.fleet?.stateUrl;
+    return url ? new URL(url, location.href).href : "";
+  }
+
+  /** Pick the app the inspector shows. */
+  select(i: number): void {
+    if (i < 0 || i >= this.apps || i === this.selected) return;
+    this.selected = i;
+    this.facts = null;
+    this.factsAt = 0;
+    void this.readFacts();
+    this.emit({ type: "sample" });
+  }
+
+  /** The selected app's process facts, at most about once a second, and not at all while it is known to be asleep. */
+  private async readFacts(): Promise<void> {
+    const i = this.selected;
+    const fleet = this.info?.fleet;
+    if (!fleet || i < 0) return;
+    const now = performance.now();
+    if (now - this.factsAt < 900) return;
+    if (this.facts?.i === i && this.facts.state === "z" && this.states[i] === ASLEEP) return;
+    this.factsAt = now;
+    try {
+      const response = await fetch(`${fleet.stateUrl}/${i}`, { cache: "no-store" });
+      if (!response.ok || this.selected !== i) return;
+      this.facts = await response.json();
+      for (const listener of this.changeListeners) listener();
+    } catch {}
+  }
 
   async start(): Promise<void> {
     if (this.started) return;
@@ -86,7 +151,7 @@ class FleetStore implements Feed {
     // The Worker may still be compiling in a local preview: ask until it answers.
     for (let attempt = 0; attempt < 120 && !this.info; attempt++) {
       try {
-        const response = await fetch("/api/info", { cache: "no-store" });
+        const response = await fetch("api/info", { cache: "no-store" });
         if (response.ok) this.info = await response.json();
         else if (response.status !== 503) break;
       } catch {}
@@ -154,6 +219,7 @@ class FleetStore implements Feed {
       this.states[i] = next;
       this.emit({ type: "changed", i, to: next });
     }
+    void this.readFacts();
     this.emit({ type: "sample" });
   }
 
@@ -188,8 +254,20 @@ class FleetStore implements Feed {
         this.emit({ type: "refused", i, code: this.lastRefused.code });
         return;
       }
-      const body: { cold: boolean } = await response.json();
+      const text = await response.text();
+      const body: { cold: boolean } = JSON.parse(text);
       const timing = /wake;dur=([\d.]+)/.exec(response.headers.get("server-timing") ?? "");
+      // Keep the answer as it arrived: the inspector prints it beside the curl line that would fetch it again.
+      const headers: Receipt["headers"] = [];
+      for (const name of RECEIPT_HEADERS) {
+        const value = response.headers.get(name);
+        if (value) headers.push([name, value]);
+      }
+      this.receipts.set(i, { i, at: Date.now(), status: response.status, ms, headers, body: text.slice(0, 240) });
+      const id = response.headers.get("x-sproutboat-request-id");
+      if (id) this.mine.add(id);
+      if (this.mine.size > 400) this.mine.clear();
+      this.factsAt = 0;
       this.states[i] = AWAKE;
       this.lastRequestAt[i] = performance.now();
       const answer = {

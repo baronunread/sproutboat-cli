@@ -18,9 +18,12 @@ function info(env: Env) {
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/healthz") return json({ ok: true });
-    if (url.pathname === "/api/info" && request.method === "GET") return json(info(env));
-    if (url.pathname.startsWith("/api/")) return json({ error: "not found" }, 404);
+    // The page is mounted under a path on the main site (sproutboat.com/demo), so its routes may arrive with
+    // that prefix. The page itself only ever asks for relative URLs.
+    const path = url.pathname.replace(/^\/demo(?=\/)/, "");
+    if (path === "/healthz") return json({ ok: true });
+    if (path === "/api/info" && request.method === "GET") return json(info(env));
+    if (path.startsWith("/api/")) return json({ error: "not found" }, 404);
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;
