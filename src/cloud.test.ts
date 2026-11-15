@@ -625,7 +625,7 @@ describe("the CLI end to end", () => {
     }
   });
 
-  test("domains list shows the app's routes; add, verify and delete say an operator does that", async () => {
+  test("domains list shows the app's routes (and the team's domains when it has some)", async () => {
     const cloud = startFakeCloud({ existingHosts: ["hello.acme.sproutboat.app", "risulta.dev", "risulta.dev/blog"] });
     try {
       const env = { SPROUTBOAT_API_URL: cloud.url, SPROUTBOAT_API_TOKEN: FAKE_KEY };
@@ -638,16 +638,101 @@ describe("the CLI end to end", () => {
         "custom    risulta.dev/blog",
       ]);
       expect((await run(["domains", project], env)).stdout).toBe(listed.stdout);
-      for (const verb of ["add", "verify", "delete"]) {
-        const refused = await run(["domains", verb, "risulta.dev", project], env);
-        expect(refused.code).toBe(1);
-        expect(refused.stderr).toContain("by a Sproutboat operator for now");
-        expect(refused.stderr).toContain("keeps every route it did not add itself");
-      }
       // Nothing but reads reached the Cloud: no write, and none of Community's /api/projects routes.
       expect(cloud.calls.filter((c) => c.method !== "GET" || c.path.startsWith("/api/"))).toEqual([]);
     } finally {
       cloud.stop();
+    }
+  });
+
+  test("domains add prints the TXT record to publish, verify says what is missing until it is there, then verifies", async () => {
+    const cloud = startFakeCloud({ existingHosts: ["hello.acme.sproutboat.app"], domains: { published: [] } });
+    try {
+      const env = { SPROUTBOAT_API_URL: cloud.url, SPROUTBOAT_API_TOKEN: FAKE_KEY };
+      const added = await run(["domains", "add", "app.example.com", project], env);
+      expect(added.stderr).toBe("");
+      expect(added.code).toBe(0);
+      expect(added.stdout).toContain("Added app.example.com (waiting for the TXT record)");
+      expect(added.stdout).toContain(
+        'TXT  _sproutboat-challenge.app.example.com  "sproutboat-verify=tok-app.example.com"',
+      );
+      expect(added.stdout).toContain("then run: sproutboat domains verify app.example.com");
+      expect((await run(["domains", "add", "app.example.com", project], env)).stdout).toContain(
+        "Already added: app.example.com",
+      );
+      const early = await run(["domains", "verify", "app.example.com", project], env);
+      expect(early.code).toBe(1);
+      expect(early.stderr).toContain("The TXT record is not there yet");
+      expect(early.stderr).toContain(
+        'Expected: TXT  _sproutboat-challenge.app.example.com  "sproutboat-verify=tok-app.example.com"',
+      );
+      const listed = await run(["domains", "list", project], env);
+      expect(listed.stdout).toContain("domains of this team:");
+      expect(listed.stdout).toContain("app.example.com  waiting for the TXT record");
+      const removed = await run(["domains", "delete", "app.example.com", project], env);
+      expect(removed.stdout).toContain("removed app.example.com");
+      expect((await run(["domains", "delete", "app.example.com", project], env)).stderr).toContain(
+        "is not one of this team's domains",
+      );
+    } finally {
+      cloud.stop();
+    }
+  });
+
+  test("domains verify passes once the record is published, and a verified domain still in use cannot be deleted", async () => {
+    const cloud = startFakeCloud({
+      existingHosts: ["hello.acme.sproutboat.app", "risulta.dev"],
+      domains: {
+        published: ["new.example.com"],
+        claims: [{ host: "risulta.dev", state: "verified", routes: ["risulta.dev"] }],
+      },
+    });
+    try {
+      const env = { SPROUTBOAT_API_URL: cloud.url, SPROUTBOAT_API_TOKEN: FAKE_KEY };
+      await run(["domains", "add", "new.example.com", project], env);
+      const done = await run(["domains", "verify", "new.example.com", project], env);
+      expect(done.code).toBe(0);
+      expect(done.stdout).toContain("new.example.com is verified for this team.");
+      const inUse = await run(["domains", "delete", "risulta.dev", project], env);
+      expect(inUse.code).toBe(1);
+      expect(inUse.stderr).toContain("still routes this name");
+      const listed = await run(["domains", "list", project], env);
+      expect(listed.stdout).toContain("risulta.dev      verified  used by routes: risulta.dev");
+    } finally {
+      cloud.stop();
+    }
+  });
+
+  test("domains: a name another team verified, a name that cannot be claimed, a missing permission, and --account without a project", async () => {
+    const cloud = startFakeCloud({
+      domains: { heldByOther: ["taken.example.com"] },
+      denyPermissions: ["domain:write"],
+    });
+    const writable = startFakeCloud({ domains: { heldByOther: ["taken.example.com"] } });
+    try {
+      const denied = await run(["domains", "add", "x.example.com", project], {
+        SPROUTBOAT_API_URL: cloud.url,
+        SPROUTBOAT_API_TOKEN: FAKE_KEY,
+      });
+      expect(denied.code).toBe(1);
+      expect(denied.stderr).toContain("domain:write");
+      const env = { SPROUTBOAT_API_URL: writable.url, SPROUTBOAT_API_TOKEN: FAKE_KEY };
+      await run(["domains", "add", "taken.example.com", project], env);
+      const held = await run(["domains", "verify", "taken.example.com", project], env);
+      expect(held.code).toBe(1);
+      expect(held.stderr).toContain("already verified for another team");
+      const bad = await run(["domains", "add", "hello.acme.sproutboat.app", project], env);
+      expect(bad.code).toBe(1);
+      expect(bad.stderr).toContain("valid hostname");
+      // A claim belongs to the team: with --account, no project directory is needed.
+      const nowhere = await run(["domains", "add", "free.example.com", "--account", "acme"], { ...env, HOME: project });
+      expect(nowhere.stderr).toBe("");
+      expect(nowhere.stdout).toContain("Added free.example.com");
+      // Community's /api/projects routes are never called.
+      expect(writable.calls.filter((c) => c.path.startsWith("/api/"))).toEqual([]);
+    } finally {
+      cloud.stop();
+      writable.stop();
     }
   });
 
