@@ -15,6 +15,25 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+      # Test against a sproutboat-packages branch (a change that spans both repos): set the SPROUTBOAT_PACKAGES_REF
+      # repository variable to the branch. Unset, the packages are the versions bun.lock pins. The checkout is a
+      # hidden directory so `bun test` does not collect the packages' tests.
+      - uses: actions/checkout@v7
+        if: vars.SPROUTBOAT_PACKAGES_REF != ''
+        with:
+          repository: baronunread/sproutboat-packages
+          ref: ${{ vars.SPROUTBOAT_PACKAGES_REF }}
+          path: .sproutboat-packages
+      - name: Link the packages from ${{ vars.SPROUTBOAT_PACKAGES_REF }}
+        if: vars.SPROUTBOAT_PACKAGES_REF != ''
+        shell: bash
+        run: |
+          (cd .sproutboat-packages && bun install --frozen-lockfile)
+          for name in runtime toolchain wire; do
+            rm -rf "node_modules/@sproutboat/$name"
+            ln -s "$PWD/.sproutboat-packages/packages/$name" "node_modules/@sproutboat/$name"
+            echo "@sproutboat/$name -> $(bun -e "console.log(Bun.resolveSync('@sproutboat/$name', process.cwd()))")"
+          done
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run examples:types
@@ -31,6 +50,25 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+      # Test against a sproutboat-packages branch (a change that spans both repos): set the SPROUTBOAT_PACKAGES_REF
+      # repository variable to the branch. Unset, the packages are the versions bun.lock pins. The checkout is a
+      # hidden directory so `bun test` does not collect the packages' tests.
+      - uses: actions/checkout@v7
+        if: vars.SPROUTBOAT_PACKAGES_REF != ''
+        with:
+          repository: baronunread/sproutboat-packages
+          ref: ${{ vars.SPROUTBOAT_PACKAGES_REF }}
+          path: .sproutboat-packages
+      - name: Link the packages from ${{ vars.SPROUTBOAT_PACKAGES_REF }}
+        if: vars.SPROUTBOAT_PACKAGES_REF != ''
+        shell: bash
+        run: |
+          (cd .sproutboat-packages && bun install --frozen-lockfile)
+          for name in runtime toolchain wire; do
+            rm -rf "node_modules/@sproutboat/$name"
+            ln -s "$PWD/.sproutboat-packages/packages/$name" "node_modules/@sproutboat/$name"
+            echo "@sproutboat/$name -> $(bun -e "console.log(Bun.resolveSync('@sproutboat/$name', process.cwd()))")"
+          done
       - run: bun run examples:workerd
 
   runtime-conformance:
@@ -78,13 +116,27 @@ jobs:
         shell: bash
         run: if [ -d ~/.cache/porffor/build ]; then find ~/.cache/porffor/build -name flags -exec touch {} +; fi
       - run: bun install --frozen-lockfile
+      # Test against a sproutboat-packages branch (a change that spans both repos): set the SPROUTBOAT_PACKAGES_REF
+      # repository variable to the branch. Unset, the packages are the versions bun.lock pins. The checkout is a
+      # hidden directory so `bun test` does not collect the packages' tests.
+      - uses: actions/checkout@v7
+        if: vars.SPROUTBOAT_PACKAGES_REF != ''
+        with:
+          repository: baronunread/sproutboat-packages
+          ref: ${{ vars.SPROUTBOAT_PACKAGES_REF }}
+          path: .sproutboat-packages
+      - name: Link the packages from ${{ vars.SPROUTBOAT_PACKAGES_REF }}
+        if: vars.SPROUTBOAT_PACKAGES_REF != ''
+        shell: bash
+        run: |
+          (cd .sproutboat-packages && bun install --frozen-lockfile)
+          for name in runtime toolchain wire; do
+            rm -rf "node_modules/@sproutboat/$name"
+            ln -s "$PWD/.sproutboat-packages/packages/$name" "node_modules/@sproutboat/$name"
+            echo "@sproutboat/$name -> $(bun -e "console.log(Bun.resolveSync('@sproutboat/$name', process.cwd()))")"
+          done
       - run: bun run kitchen-sink
       - run: bun run kitchen-sink:standalone
-      # Standalone builds default to Porffor alpha 22; the alpha 19 fallback pin stays tested for the
-      # one release it is kept.
-      - run: bun run kitchen-sink:standalone
-        env:
-          SPROUTBOAT_PORFFOR_CHANNEL: alpha-19
       - run: bun run examples
 
   packaged-cli:
@@ -116,6 +168,25 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+      # Test against a sproutboat-packages branch (a change that spans both repos): set the SPROUTBOAT_PACKAGES_REF
+      # repository variable to the branch. Unset, the packages are the versions bun.lock pins. The checkout is a
+      # hidden directory so `bun test` does not collect the packages' tests.
+      - uses: actions/checkout@v7
+        if: vars.SPROUTBOAT_PACKAGES_REF != ''
+        with:
+          repository: baronunread/sproutboat-packages
+          ref: ${{ vars.SPROUTBOAT_PACKAGES_REF }}
+          path: .sproutboat-packages
+      - name: Link the packages from ${{ vars.SPROUTBOAT_PACKAGES_REF }}
+        if: vars.SPROUTBOAT_PACKAGES_REF != ''
+        shell: bash
+        run: |
+          (cd .sproutboat-packages && bun install --frozen-lockfile)
+          for name in runtime toolchain wire; do
+            rm -rf "node_modules/@sproutboat/$name"
+            ln -s "$PWD/.sproutboat-packages/packages/$name" "node_modules/@sproutboat/$name"
+            echo "@sproutboat/$name -> $(bun -e "console.log(Bun.resolveSync('@sproutboat/$name', process.cwd()))")"
+          done
       - run: bun scripts/build-cli.ts --target ${{ matrix.dir }}
       - name: Check the cross-built executable's architecture
         if: matrix.cross

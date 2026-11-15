@@ -506,7 +506,6 @@ async function build(directory?: string, target: BuildTarget = "linux-x86_64") {
 async function buildStandaloneBinary(
   directory: string | undefined,
   target: BuildTarget,
-  withRestore = false,
   deployFiles = false,
   release = false,
 ) {
@@ -519,7 +518,6 @@ async function buildStandaloneBinary(
       sourcePath: project.sourcePath,
       source: project.bundle.code,
       target,
-      withRestore,
       release,
     });
     console.log(ok(`built ${result.outPath} (${(result.bytes / 1_000_000).toFixed(1)} MB)`));
@@ -2543,12 +2541,6 @@ switch (resolveCommand(command)) {
     await run(args);
     break;
   case "build": {
-    const withRestore = args.includes("--with-restore");
-    if (withRestore && (!args.includes("--standalone") || args.includes("--emit-only")))
-      usageError(
-        "--with-restore requires --standalone without --emit-only",
-        "build --standalone --with-restore [--target host] [project-dir]",
-      );
     const targetAt = args.indexOf("--target");
     const targetArg = targetAt >= 0 ? args[targetAt + 1] : undefined;
     const target = targetAt < 0 ? "linux-x86_64" : parseTarget(targetArg);
@@ -2571,7 +2563,7 @@ switch (resolveCommand(command)) {
       );
     if (args.includes("--emit-only")) await emitOnly(directory, target, args.includes("--standalone"));
     else if (args.includes("--standalone"))
-      await buildStandaloneBinary(directory, target, withRestore, deployFiles, isReleaseBuild(args));
+      await buildStandaloneBinary(directory, target, deployFiles, isReleaseBuild(args));
     else await build(directory, target);
     break;
   }

@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { NATIVE_RESTORE_IDENTITY } from "./native-restore";
-import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { readAssetRules, walkAssets, type AssetManifest } from "./assets";
 import { queueSettings, resourceRefs, type SproutboatConfig } from "./config";
@@ -19,8 +18,11 @@ import {
   type ArtifactManifest,
 } from "./manifest";
 import { ensureZig, esbuildVersion, hostCompilerIdentity, porfforVersion, toolchainStamp } from "./toolchain";
-import { PORFFOR_ARCHIVE_SHA256, PORFFOR_COMMIT_FULL } from "./porffor-toolchain";
-import { A21_STANDALONE_FINGERPRINT } from "@sproutboat/toolchain/a21";
+import {
+  A21_STANDALONE_FINGERPRINT,
+  PORFFOR_A24_ARCHIVE_SHA256,
+  PORFFOR_A24_COMMIT_FULL,
+} from "@sproutboat/toolchain/a21";
 import { version as toolchainPackageVersion } from "@sproutboat/toolchain/package.json" with { type: "json" };
 import { version as cliVersion } from "../package.json" with { type: "json" };
 import { reachesSubtle, wrapNativeFetchHandler } from "./wrap";
@@ -64,8 +66,6 @@ export type BuildInput = {
   outputDirectory?: string;
   /** Stable compiler input used only by the local dev loop. */
   generatedPath?: string;
-  /** Include trusted offline restore startup in a standalone executable. */
-  withRestore?: boolean;
 };
 
 export type BuildOutput = {
@@ -91,16 +91,11 @@ async function integrationIdentity(): Promise<string> {
     const executable = await stat(process.execPath);
     return `release:${cliVersion}:${executable.size}:${executable.mtimeMs}`;
   }
-  const files = ["build.ts", "compile.ts", "sqlite.ts", "bearssl.ts", "toolchain.ts", "native-restore.ts"].map((file) =>
+  // The patched compiler and the standalone sources are keyed separately (the patch series hash and
+  // A21_STANDALONE_FINGERPRINT in the compile key), so this covers the CLI's own integration code.
+  const files = ["build.ts", "compile.ts", "sqlite.ts", "bearssl.ts", "toolchain.ts"].map((file) =>
     resolve(import.meta.dir, file),
   );
-  // Hash the patch implementation and its local modules so a Unicode patch
-  // edit cannot reuse a binary compiled with earlier builtin semantics.
-  const patchDir = dirname(Bun.resolveSync("@sproutboat/toolchain/patch", import.meta.dir));
-  const toolchainFiles = (await readdir(patchDir))
-    .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
-    .sort();
-  files.push(...toolchainFiles.map((file) => resolve(patchDir, file)));
   return digest(Buffer.concat(await Promise.all(files.map((file) => readFile(file)))));
 }
 
@@ -130,10 +125,6 @@ async function acquireArtifactLock(artifactDir: string): Promise<string> {
  * exactly where `buildArtifact` would.
  */
 async function prepareBuild(input: BuildInput) {
-  if (input.withRestore && input.reuseSproutPath)
-    throw new Error("--with-restore cannot reuse a previously compiled sprout");
-  if (input.withRestore && input.transport !== "embedded")
-    throw new Error("--with-restore is available only with --standalone");
   const source = input.source ?? (await readFile(input.sourcePath));
   const sourceHash = digest(source);
   const target = input.target ?? "linux-x86_64";
@@ -273,7 +264,7 @@ function unitDirFor(input: BuildInput): string {
   return resolve(
     input.projectDir,
     ".sproutboat/porffor-units",
-    `${input.target ?? "linux-x86_64"}-${input.transport ?? "broker"}-${input.optimize ?? "release"}${input.withRestore ? "-restore" : ""}`,
+    `${input.target ?? "linux-x86_64"}-${input.transport ?? "broker"}-${input.optimize ?? "release"}`,
   );
 }
 
@@ -307,7 +298,6 @@ export async function emitGenerated(input: BuildInput): Promise<{ generatedPath:
       lto: input.lto,
       versionMetadata,
       emitOnly: true,
-      withRestore: input.withRestore,
     });
   } finally {
     if (unitLock) await rm(unitLock, { recursive: true, force: true });
@@ -342,23 +332,19 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       generatedSource,
       target,
       optimize: input.optimize ?? "release",
-      // a non-LTO link is a different binary from the release one; only the alpha 21 line's channels honour it
-      lto: porfforChannel(input.withRestore) !== "alpha-19" ? ltoEnabled({ ...input, target }) : true,
+      // a non-LTO link is a different binary from the release one
+      lto: ltoEnabled({ ...input, target }),
       toolchain: toolchainStamp(),
       toolchainPackageVersion,
-      porffor: [PORFFOR_COMMIT_FULL, PORFFOR_ARCHIVE_SHA256],
-      // the alpha 22 channel is a different compiler, server and prelude shape (compile.ts porfforChannel)
-      channel: porfforChannel(input.withRestore),
-      // the alpha 22 channel's own inputs: the patched tree, the shim, the bridge, the build recipe, LTO
-      channelInputs:
-        porfforChannel(input.withRestore) !== "alpha-19"
-          ? [A21_STANDALONE_FINGERPRINT, process.env.SPROUTBOAT_FLTO ?? ""]
-          : null,
+      porffor: [PORFFOR_A24_COMMIT_FULL, PORFFOR_A24_ARCHIVE_SHA256],
+      // the channel is the compiler, server and prelude shape (compile.ts porfforChannel)
+      channel: porfforChannel(),
+      // the channel's own inputs: the patched tree, the vendored server sources, the shim pass, the bridge, the build recipe, LTO
+      channelInputs: [A21_STANDALONE_FINGERPRINT, process.env.SPROUTBOAT_FLTO ?? ""],
       native: embedded ? [sqliteStamp(), bearsslStamp()] : subtle ? [bearsslStamp()] : [],
       integration: await integrationIdentity(),
       // a host binary comes from this machine's C compiler, so a different compiler is a different binary
       hostCompiler: host ? await hostCompilerIdentity() : null,
-      nativeRestore: input.withRestore ? NATIVE_RESTORE_IDENTITY : null,
     }),
   ).slice("sha256:".length);
   const artifactId = versionMetadata
@@ -402,7 +388,6 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
           optimize: input.optimize,
           lto: input.lto,
           versionMetadata,
-          withRestore: input.withRestore,
         });
       } finally {
         if (unitLock) await rm(unitLock, { recursive: true, force: true });
@@ -447,7 +432,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       target: host ? hostTarget() : target === "linux-arm64" ? target : DEPLOY_TARGET,
       runtime: RUNTIME,
       capabilityProfile: CAPABILITY_PROFILE,
-      porfforVersion: porfforVersion(porfforChannel(input.withRestore)),
+      porfforVersion: porfforVersion(porfforChannel()),
       esbuildVersion: esbuildVersion(),
       buildImage: toolchainStamp(),
       compatibilityDate: input.config.compatibility_date,

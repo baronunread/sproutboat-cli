@@ -17,10 +17,8 @@ import { walkAssets, type AssetManifest } from "../../../src/assets";
 import { buildStandalone } from "../../../src/standalone-build";
 import { bundleHandler } from "../../../src/bundle";
 import type { JsonValue } from "../../../src/json";
-import { ensurePorffor } from "../../../src/porffor-toolchain";
+import { compileStandaloneHostA21 } from "@sproutboat/toolchain/a21";
 import { ensureBearssl } from "../../../src/bearssl";
-
-const CLI = join(import.meta.dir, "../../..");
 
 export type CheckFn = (name: string, cond: boolean, detail?: JsonValue) => void;
 
@@ -138,7 +136,6 @@ function bindingsOf(config: SproutboatConfig): Bindings {
 export async function runBroker(fixture: Fixture): Promise<never> {
   const token = "harness-token";
   const { harness, cleanup, die, check, finish } = lifecycle(fixture, "broker", [fixture.adminToken, token]);
-  const porf = join(await ensurePorffor(), "runtime/index.js");
   const config = readConfig(fixture.dir);
 
   const upstream = startUpstream();
@@ -183,29 +180,19 @@ export async function runBroker(fixture: Fixture): Promise<never> {
   const tls = await harness.build("preparing BearSSL", () => ensureBearssl({ target: "host" })).catch(die);
 
   console.log("compiling sprout (host native)…");
-  // Compilation has its own deadline (SB_HARNESS_BUILD_TIMEOUT_MS), so a slow build cannot look like a hung
-  // handler. The compiler is killed on timeout.
-  harness.step("compiling the sprout (host native)");
-  const compile = Bun.spawn(["node", porf, "native", generated, "-o", binary], {
-    env: {
-      ...process.env,
-      PATH: `${join(CLI, "node_modules/.bin")}:${process.env.PATH}`,
-      SB_EXTRA_CFLAGS: `-I ${tls.includeDir}`,
-      SB_EXTRA_LINK: tls.objects.slice(0, -1).join(" "),
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: harness.buildTimeoutMs,
-    killSignal: "SIGKILL",
-  });
-  const [compileOut, compileErr, compileCode] = await Promise.all([
-    new Response(compile.stdout).text(),
-    new Response(compile.stderr).text(),
-    compile.exited,
-  ]);
-  if (compile.signalCode)
-    die(`porffor compile did not finish within ${harness.buildTimeoutMs} ms (SB_HARNESS_BUILD_TIMEOUT_MS)`);
-  if (compileCode !== 0) die("porffor compile failed:\n" + compileErr + compileOut);
+  // The toolchain's host build, which the CLI's own builds share the recipe of. Compilation has its own deadline
+  // (SB_HARNESS_BUILD_TIMEOUT_MS), so a slow build cannot look like a hung handler.
+  await harness
+    .build("compiling the sprout (host native)", () =>
+      compileStandaloneHostA21({
+        generatedPath: generated,
+        outPath: binary,
+        extraCflags: ["-I", tls.includeDir],
+        extraLink: tls.objects.slice(0, -1),
+        workDir: join(harness.workdir, "sprout-units"),
+      }),
+    )
+    .catch(die);
 
   const sproutPort = freePort();
   const broker = createBroker({

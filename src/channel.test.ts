@@ -8,28 +8,20 @@ afterEach(() => {
   else process.env.SPROUTBOAT_PORFFOR_CHANNEL = saved;
 });
 
-test("standalone builds default to alpha 23, with alpha 22 and alpha 19 selectable", () => {
+test("standalone builds use alpha 24, by default and when asked for by name", () => {
   delete process.env.SPROUTBOAT_PORFFOR_CHANNEL;
-  expect(porfforChannel()).toBe("alpha-23");
-  process.env.SPROUTBOAT_PORFFOR_CHANNEL = "alpha-22";
-  expect(porfforChannel()).toBe("alpha-22");
-  process.env.SPROUTBOAT_PORFFOR_CHANNEL = "alpha-19";
-  expect(porfforChannel()).toBe("alpha-19");
+  expect(porfforChannel()).toBe("alpha-24");
+  process.env.SPROUTBOAT_PORFFOR_CHANNEL = "alpha-24";
+  expect(porfforChannel()).toBe("alpha-24");
 });
 
-test("--with-restore stays on alpha 19 unless alpha 22 or 23 is asked for, which is an error", () => {
-  delete process.env.SPROUTBOAT_PORFFOR_CHANNEL;
-  expect(porfforChannel(true)).toBe("alpha-19");
-  process.env.SPROUTBOAT_PORFFOR_CHANNEL = "alpha-19";
-  expect(porfforChannel(true)).toBe("alpha-19");
-  for (const channel of ["alpha-22", "alpha-23"]) {
+test("alpha 19, 21, 22 and 23 are errors that say they are no longer supported", () => {
+  for (const channel of ["alpha-19", "alpha-21", "alpha-22", "alpha-23"]) {
     process.env.SPROUTBOAT_PORFFOR_CHANNEL = channel;
-    expect(() => porfforChannel(true)).toThrow(/--with-restore is not available on Porffor alpha 22 or 23/);
+    expect(() => porfforChannel()).toThrow(/no longer supported/);
   }
 });
 
 test("the recorded Porffor version names the channel's release", () => {
-  expect(porfforVersion("alpha-23")).toStartWith("alpha-23 (");
-  expect(porfforVersion("alpha-22")).toStartWith("alpha-22 (");
-  expect(porfforVersion("alpha-19")).toStartWith("alpha-19 (");
+  expect(porfforVersion("alpha-24")).toStartWith("alpha-24 (");
 });
