@@ -48,7 +48,7 @@ export const COMMAND_OPTIONS = {
   },
   toolchain: { flag: ["--json"] },
   deploy: {
-    value: ["--account", "--artifact", "--module", "--sproutd", "--generation", "--secrets-file"],
+    value: ["--account", "--artifact", "--module", "--sproutd", "--generation", "--secrets-file", "--prepare-out"],
     flag: ["--dry-run", "--no-wait", "--no-provision"],
   },
   versions: {},
