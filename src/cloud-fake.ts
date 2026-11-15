@@ -37,6 +37,15 @@ export type FakeOptions = {
   r2?: string[];
   /** How POST /v1/apps/<project>/builds behaves. */
   build?: FakeBuildOptions;
+  /**
+   * The team's custom-domain claims (/v1/domains, design 025): `published` are hosts whose TXT record the resolvers show (verify passes),
+   * `heldByOther` are hosts another team has verified (verify is 409), `claims` are claims that exist already.
+   */
+  domains?: {
+    published?: string[];
+    heldByOther?: string[];
+    claims?: { host: string; state: "pending" | "verified" | "lost"; routes?: string[] }[];
+  };
 };
 
 export type FakeBuildOptions = {
@@ -128,6 +137,9 @@ export function startFakeCloud(options: FakeOptions = {}) {
   const written: JsonObject[] = [];
   const patches: JsonObject[] = [];
   const denied = new Set(options.denyPermissions ?? []);
+  const claims = new Map<string, { host: string; state: "pending" | "verified" | "lost"; routes: string[] }>(
+    (options.domains?.claims ?? []).map((c) => [c.host, { host: c.host, state: c.state, routes: c.routes ?? [] }]),
+  );
   const dataFailureReply = (failure: NonNullable<FakeOptions["dataFailure"]>) =>
     Response.json(failure.body ?? {}, { status: failure.status, headers: failure.headers });
   const dataDenied = (need: string) =>
@@ -493,6 +505,68 @@ export function startFakeCloud(options: FakeOptions = {}) {
           );
         modules.add(m[1]!);
         return Response.json({ sha256: m[1] });
+      }
+      const domainRoute = /^\/v1\/domains(?:\/([^/]+)(?:\/(verify))?)?$/.exec(path);
+      if (domainRoute) {
+        const host = domainRoute[1] ? decodeURIComponent(domainRoute[1]) : undefined;
+        const view = (c: { host: string; state: string; routes: string[] }) => ({
+          host: c.host,
+          state: c.state,
+          method: "txt",
+          verified_at: null,
+          last_checked_at: null,
+          lost_at: null,
+          lost_reason: c.state === "lost" ? "the name moved to another team" : null,
+          created_at: new Date().toISOString(),
+          txt:
+            c.state === "verified"
+              ? null
+              : { type: "TXT", name: `_sproutboat-challenge.${c.host}`, value: `sproutboat-verify=tok-${c.host}` },
+          routes: c.routes.map((key) => ({ project: lastProject, key })),
+        });
+        const write = request.method !== "GET";
+        if (write && denied.has("domain:write")) return permissionDenied("domain:write");
+        if (!write && denied.has("domain:read")) return permissionDenied("domain:read");
+        if (!host && request.method === "GET") return Response.json({ domains: [...claims.values()].map(view) });
+        if (!host && request.method === "POST") {
+          const h = (parseBody(body) ?? {}).host;
+          if (!isString(h) || !/^[a-z0-9.-]+\.[a-z]+$/.test(h) || h.endsWith(".sproutboat.app"))
+            return Response.json({ error: "not a valid hostname", reason: "invalid-host" }, { status: 400 });
+          const had = claims.get(h);
+          if (!had) claims.set(h, { host: h, state: "pending", routes: [] });
+          return Response.json(view(claims.get(h)!), { status: had ? 200 : 201 });
+        }
+        const claim = host ? claims.get(host) : undefined;
+        if (!claim) return Response.json({ error: "no such domain claim", reason: "no-claim" }, { status: 404 });
+        if (domainRoute[2] === "verify" && request.method === "POST") {
+          if (claim.state !== "verified") {
+            if (options.domains?.heldByOther?.includes(claim.host))
+              return Response.json(
+                {
+                  error:
+                    "this name is already verified for another team. If that team removes its DNS record it can be claimed here; your claim stays pending",
+                  reason: "host-claimed",
+                },
+                { status: 409 },
+              );
+            if (!options.domains?.published?.includes(claim.host))
+              return Response.json(
+                { error: "the TXT record is not there yet", reason: "txt-missing", expected: view(claim).txt },
+                { status: 400 },
+              );
+            claim.state = "verified";
+          }
+          return Response.json(view(claim));
+        }
+        if (request.method === "DELETE") {
+          if (claim.state === "verified" && claim.routes.length)
+            return Response.json(
+              { error: "an app of this team still routes this name; remove its routes first", reason: "domain-in-use" },
+              { status: 409 },
+            );
+          claims.delete(claim.host);
+          return Response.json({ deleted: claim.host });
+        }
       }
       if (path === "/v1/apps" && request.method === "GET") {
         const apps = [...(options.otherApps ?? []), ...(appExists ? [lastProject] : [])];

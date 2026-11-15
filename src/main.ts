@@ -98,7 +98,15 @@ import {
   putCloudSecret,
   readSecretsFile,
 } from "./cloud-secrets";
-import { cloudDomainsUnsupported, describeCloudRoutes, listCloudRoutes } from "./cloud-domains";
+import {
+  addCloudDomain,
+  deleteCloudDomain,
+  describeClaims,
+  describeCloudRoutes,
+  listCloudClaims,
+  listCloudRoutes,
+  verifyCloudDomain,
+} from "./cloud-domains";
 import { parseBulkSecrets, type BulkPlan } from "./secrets-bulk";
 import {
   cloudTarget,
@@ -1633,7 +1641,19 @@ async function domains(args: string[]) {
   const { apiUrl: targetUrl } = await resolveApiUrl();
   if ((await deployKind(targetUrl, false)) === "cloud") {
     await guard(async () => {
-      if (host !== undefined) throw new CloudError(cloudDomainsUnsupported(sub, host));
+      // A claim belongs to the team, not to a project: --account is enough. Otherwise the project's own config names the team.
+      if (host !== undefined) {
+        const account = flags["--account"] ?? (await readProjectConfig(args[0])).account;
+        const credentials = await cloudCredentials(targetUrl, account);
+        const lines =
+          sub === "add"
+            ? await addCloudDomain(credentials, host)
+            : sub === "verify"
+              ? await verifyCloudDomain(credentials, host)
+              : await deleteCloudDomain(credentials, host);
+        for (const line of lines) console.log(line);
+        return;
+      }
       const project = await readProjectConfig(args[0]);
       const credentials = await cloudCredentials(targetUrl, flags["--account"] ?? project.account);
       for (const line of describeCloudRoutes(
@@ -1641,6 +1661,7 @@ async function domains(args: string[]) {
         await listCloudRoutes(credentials, project.config.name),
       ))
         console.log(line);
+      for (const line of describeClaims(await listCloudClaims(credentials))) console.log(line);
     });
     return;
   }
