@@ -10,6 +10,14 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+### Removed
+
+- **`sproutboat build --standalone --with-restore`, and with it Porffor alpha 19.** The flag (the `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command) is gone; using it fails with a message that says so. Offline LTX restore will come back as a plain CLI command, `sproutboat restore`, not as something every standalone binary carries (`docs/native-ltx-restore.md` says where it went). The flag was the only reason the CLI still built with alpha 19: its restore objects were compiled against alpha 19's native-fetch C API. The CLI no longer acquires, patches or compiles with an alpha 19 tree. Removed with it: `vendor/ltx-restore/` (the native restore codec and its notices), `src/native-restore*.ts`, the alpha 19 `native` compile path, `porfforArgs`, and `SPROUTBOAT_COMPILE_TIMEOUT_MS` (it only reached the alpha 19 compile; the default build never read it).
+
+### Changed
+
+- **Porffor alpha 24 is the only compiler.** `SPROUTBOAT_PORFFOR_CHANNEL` accepts `alpha-24`; `alpha-19`, `alpha-21`, `alpha-22` and `alpha-23` are errors that say they are no longer supported. `sproutboat toolchain doctor` and the artifact manifest name alpha 24 and the patched tree the toolchain ships. A standalone build's server (the uWebSockets shim, the web classes and the HTTP/1.0 edit) comes from sources vendored in `@sproutboat/toolchain`, byte for byte the ones the alpha 19 chain produced. Needs the `@sproutboat/toolchain` release that carries them.
+
 ## [0.55.0] - 2026-11-13
 
 ### Added

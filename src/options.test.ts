@@ -48,6 +48,12 @@ describe("checkOptions", () => {
     expect(bad("tail", ["-z"])).toContain("unknown option -z");
   });
 
+  test('a removed flag says it was removed and where the capability went, not "unknown option"', () => {
+    expect(bad("build", ["--standalone", "--with-restore"])).toContain("--with-restore was removed");
+    expect(bad("build", ["--with-restore"])).toContain("sproutboat restore");
+    expect(bad("deploy", ["--with-restore"])).toContain("unknown option --with-restore");
+  });
+
   test("a value may start with a dash, and is never read as a flag", () => {
     expect(ok("secrets", ["put", "TOKEN", "--value", "--not-a-flag"])).toEqual([
       "put",

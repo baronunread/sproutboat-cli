@@ -13,8 +13,6 @@
 import { chmod, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { ensurePorfforPatched } from "./patch-porffor";
-import { buildNativeRestore } from "./native-restore";
 import {
   ensureUWebSockets,
   ensureUWebSocketsHost,
@@ -23,8 +21,7 @@ import {
   uwsCommitFull,
   UwsUnavailableError,
 } from "./toolchain";
-import { isLinuxTarget, LINUX_TARGETS, linuxTriple, type BuildTarget } from "./targets";
-import { ensurePorffor } from "./porffor-toolchain";
+import { linuxTriple, type BuildTarget } from "./targets";
 import {
   buildStandaloneA21,
   composeStandaloneA21,
@@ -65,29 +62,16 @@ export {
   type Bindings,
 } from "./wrap";
 
-const COMPILE_TIMEOUT_MS = Number(process.env.SPROUTBOAT_COMPILE_TIMEOUT_MS || 600_000);
-
 /**
- * The Porffor channel a native compile uses: `alpha-23` by default (the alpha 21 line's compiler with
- * the toolchain's alpha 19 server shim over its bridge; sproutd-alpha22-standalone-port.md), `alpha-22`
- * (`SPROUTBOAT_PORFFOR_CHANNEL=alpha-22`: the same line one Porffor release back), or `alpha-19`
- * (`SPROUTBOAT_PORFFOR_CHANNEL=alpha-19`: Porffor's native-fetch server, the fallback pin kept for one release).
- * The toolchain's `standaloneChannel()` decides, so the CLI and the runtime's native tests agree on the default.
- *
- * `--with-restore` stays on alpha 19: its restore objects are built against alpha 19's native-fetch
- * C API, which the alpha 22 bridge does not provide, so they do not link there. Unless the channel is
- * set explicitly, such a build uses the alpha 19 compiler; `SPROUTBOAT_PORFFOR_CHANNEL=alpha-22` or
- * `alpha-23` with `--with-restore` is an error rather than a link failure.
+ * The Porffor channel a native compile uses: `alpha-24`, the toolchain's one alpha (the patched tree the
+ * toolchain ships, composed in sproutd's worker shape and served by the toolchain's vendored uWebSockets shim
+ * over its flat native-fetch bridge; sproutd-alpha22-standalone-port.md). The toolchain's `standaloneChannel()`
+ * decides, so the CLI and the runtime's native tests agree. `SPROUTBOAT_PORFFOR_CHANNEL` may name `alpha-24`;
+ * alpha 19, 21, 22 and 23 are errors that say they are no longer supported.
  */
 export type PorfforChannel = StandaloneChannel;
-export function porfforChannel(withRestore = false): PorfforChannel {
-  const channel = standaloneChannel();
-  if (!withRestore || channel === "alpha-19") return channel;
-  if (process.env.SPROUTBOAT_PORFFOR_CHANNEL)
-    throw new Error(
-      "--with-restore is not available on Porffor alpha 22 or 23 yet: unset SPROUTBOAT_PORFFOR_CHANNEL or set it to alpha-19",
-    );
-  return "alpha-19";
+export function porfforChannel(): PorfforChannel {
+  return standaloneChannel();
 }
 
 export type CompileInput = {
@@ -144,8 +128,6 @@ export type CompileInput = {
    * binary, such as a qualification run that only inspects the source.
    */
   emitOnly?: boolean;
-  /** Trusted offline restore startup, standalone builds only. Never a tenant compiler flag. */
-  withRestore?: boolean;
 };
 
 /**
@@ -220,60 +202,12 @@ export async function prunePorfforBuilds(
   return removed;
 }
 
-/** Child env for the Porffor run. `SB_EXTRA_LINK` is read by the patched link
- *  step (#15) and is absent entirely for a normal build. `cc`/`cxx` override
- *  Porffor's own `CC`/`CXX` read for a **host** build (musl builds hardcode
- *  `zig cc` themselves and ignore both). */
-function compileEnv(
-  path: string,
-  extraLink?: string[],
-  extraCflags?: string[],
-  compiler?: { cc: string[]; cxx: string[] },
-  linux?: { triple: string; uwsVariant: string },
-) {
-  const link = extraLink && extraLink.length > 0 ? extraLink.join(" ") : undefined;
-  const cflags = extraCflags && extraCflags.length > 0 ? extraCflags.join(" ") : undefined;
-  const env = {
-    ...process.env,
-    PATH: path,
-    SB_EXTRA_LINK: link,
-    SB_EXTRA_CFLAGS: cflags,
-    // The toolchain patch (patchMuslTarget) reads these; unset, Porffor builds x86_64 against its usual tree.
-    SB_MUSL_TARGET: linux?.triple,
-    SB_UWS_VARIANT: linux?.uwsVariant,
-  };
-  if (compiler) return { ...env, CC: compiler.cc.join(" "), CXX: compiler.cxx.join(" ") };
-  return env;
-}
-
 /**
- * The argument list handed to Porffor, minus the launcher.
- *
- * Exported for the test: the one thing worth pinning is that `-O0` reaches only
- * a build that cannot be deployed. `-s` strips at link, because the unstripped
- * static-musl binary is ~90% DWARF that nothing needs at runtime (12 MB down to
- * ~1.3 MB for the kitchen-sink). `--musl` is what makes it a cross-compile; a
- * host build omits it and Porffor targets the machine it runs on.
+ * The `-O` level of the C compile. `-O0` roughly triples build speed (8.4s -> 2.9s for examples/hello) and grows the
+ * binary by about half, so it is for a host `dev` build only: what a user could ship is never built with it.
  */
-export function porfforArgs(
-  generatedPath: string,
-  outPath: string,
-  target: CompileInput["target"],
-  optimize: CompileInput["optimize"],
-  usingZig = false,
-): string[] {
-  const args = ["native", generatedPath, "-o", outPath];
-  if (target !== "host") args.push("--musl");
-  args.push("-s");
-  // Porffor reads -O from its own argv and defaults to -O3. -O0 is roughly
-  // three times faster to compile, so dev takes it and everything else does
-  // not: a deployable artifact is never built with it.
-  if (optimize === "dev" && target === "host") args.push("-O0");
-  // Porffor defaults LTO on for a non-musl link. Zig's cc needs `-fuse-ld=lld`
-  // wired up for that, which nothing here does, so turn it off rather than
-  // fail every host build that falls back to Zig for its C toolchain.
-  if (usingZig) args.push("--no-flto");
-  return args;
+export function optimizeLevel(optimize: CompileInput["optimize"], target: CompileInput["target"]): 0 | 3 {
+  return optimize === "dev" && target === "host" ? 0 : 3;
 }
 
 /**
@@ -324,15 +258,10 @@ async function writeGenerated(input: CompileInput): Promise<string> {
  * the wrapper, never Porffor itself.
  */
 export async function compileSprout(input: CompileInput): Promise<void> {
-  if (input.withRestore && (input.transport !== "embedded" || input.emitOnly))
-    throw new Error("--with-restore requires a standalone native compile, without --emit-only");
   if (input.emitOnly) {
     await writeGenerated(input);
     return;
   }
-  const porffor = await ensurePorffor();
-  await ensurePorfforPatched(porffor);
-
   // Seed the Porffor uWebSockets cache from the prebuilt archive in `vendor/` so
   // the first build needs no `git` / `make`. The two targets keep separate
   // cache trees and separate uSockets.a, so seed whichever this build wants.
@@ -374,106 +303,44 @@ export async function compileSprout(input: CompileInput): Promise<void> {
   await rm(input.outPath, { force: true });
   const generatedPath = await writeGenerated(input);
 
-  const launcher = resolve(porffor, "runtime/index.js");
-  // A musl build shells `zig` bare (Porffor hardcodes the literal command), so
-  // it needs its dir on PATH; a host build passes its compiler via CC/CXX
-  // below instead and has no zigBin to contribute here.
+  // A musl build shells `zig` bare, so it needs its dir on PATH; a host build passes its compiler to the
+  // build recipe below and has no zigBin to contribute here.
   const zigDir = input.zigBin ? `${dirname(input.zigBin)}:` : "";
   const hostCompiler = input.target === "host" ? await resolveHostCompiler() : undefined;
   const path = `${zigDir}${process.env.PATH ?? ""}`;
-  const command = PACKAGED
-    ? [process.execPath, "__porffor", launcher]
-    : [process.execPath, resolve(import.meta.dir, "main.ts"), "__porffor", launcher];
-
-  const restoreObjects = input.withRestore
-    ? await buildNativeRestore({
-        directory: dirname(generatedPath),
-        prelude: await loadPrelude("embedded"),
-        porfforCommand: command,
-        cc: hostCompiler?.cc ?? [input.zigBin!, "cc", "-target", linuxTriple(input.target)],
-        cxx: hostCompiler?.cxx ?? [input.zigBin!, "c++", "-target", linuxTriple(input.target)],
-        cflags: input.extraCflags ?? [],
-        macho: input.target === "host" && process.platform === "darwin",
-      })
-    : [];
-
-  if (porfforChannel(input.withRestore) !== "alpha-19") {
-    await compileSproutA21(input, {
-      alpha19Root: porffor,
-      generatedPath,
-      launch: PACKAGED
-        ? [process.execPath, "__porffor"]
-        : [process.execPath, resolve(import.meta.dir, "main.ts"), "__porffor"],
-      path,
-      hostCompiler,
-      restoreObjects,
-      uwsVariant,
-    });
-    await chmod(input.outPath, 0o555);
-    return;
-  }
-
-  const child = Bun.spawn(
-    [...command, ...porfforArgs(generatedPath, input.outPath, input.target, input.optimize, hostCompiler?.usingZig)],
-    {
-      cwd: outDir,
-      stdout: "pipe",
-      stderr: "pipe",
-      env: compileEnv(
-        path,
-        [...(input.extraLink ?? []), ...restoreObjects],
-        [...(input.extraCflags ?? []), ...(input.withRestore ? ["-Dmain=sb_app_main"] : [])],
-        hostCompiler,
-        uwsVariant && input.target && isLinuxTarget(input.target)
-          ? { triple: LINUX_TARGETS[input.target].triple, uwsVariant }
-          : undefined,
-      ),
-    },
-  );
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill();
-  }, COMPILE_TIMEOUT_MS);
-  const [code, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  clearTimeout(timer);
-
-  if (timedOut) throw new Error(`compile timed out after ${COMPILE_TIMEOUT_MS}ms`);
-  if (code !== 0 || !(await Bun.file(input.outPath).exists())) {
-    throw new Error(`Porffor compile failed: ${(stderr || stdout).trim() || `exit ${code}`}`);
-  }
+  await compileSproutA21(input, {
+    generatedPath,
+    launch: PACKAGED
+      ? [process.execPath, "__porffor"]
+      : [process.execPath, resolve(import.meta.dir, "main.ts"), "__porffor"],
+    path,
+    hostCompiler,
+    uwsVariant,
+  });
   await chmod(input.outPath, 0o555);
 }
 
 /**
- * The alpha 21 line's native compile, alpha 23 or alpha 22 (sproutd-alpha22-standalone-port.md): the generated module is
- * compiled in sproutd's worker shape (the toolchain composes `shared-prelude.js` from it: alpha 19
- * helper names, the alpha 19 web classes, the dispatch shim), the line's compiler renders the split
- * C units, and the toolchain's build recipe compiles them with the native-fetch bridge and the alpha
- * 19 uWebSockets shim rewritten over flat data, then links with this build's native objects (SQLite,
- * BearSSL, the restore objects) and the uSockets this target already has. Same inputs, same outputs,
- * same environment variables as the alpha 19 path; the only switch is `SPROUTBOAT_PORFFOR_CHANNEL`.
+ * The native compile (sproutd-alpha22-standalone-port.md): the generated module is compiled in sproutd's worker
+ * shape (the toolchain composes `shared-prelude.js` from it: the helper names, the web classes, the dispatch
+ * shim), the toolchain's patched compiler renders the split C units, and the toolchain's build recipe compiles
+ * them with the native-fetch bridge and the vendored uWebSockets shim rewritten over flat data, then links with
+ * this build's native objects (SQLite, BearSSL) and the uSockets this target already has.
  */
 async function compileSproutA21(
   input: CompileInput,
   build: {
-    alpha19Root: string;
     generatedPath: string;
     launch: string[];
     path: string;
     hostCompiler?: { cc: string[]; cxx: string[]; usingZig: boolean };
-    restoreObjects: string[];
     uwsVariant?: string;
   },
 ): Promise<void> {
-  const a21Channel = standaloneA21Channel(porfforChannel(input.withRestore));
+  const a21Channel = standaloneA21Channel(porfforChannel());
   const a21 = await ensurePorfforA21(a21Channel);
   const dir = dirname(build.generatedPath);
-  const composed = composeStandaloneA21(await readFile(build.generatedPath, "utf8"), build.alpha19Root);
+  const composed = composeStandaloneA21(await readFile(build.generatedPath, "utf8"));
   // beside sprout.generated.js (which stays the wrapped module, for emit-only, dev and the cache key)
   await writeFile(resolve(dir, SHARED_PRELUDE_FILE), composed.sharedPrelude);
   const entry = resolve(dir, "sprout.a22.js");
@@ -512,14 +379,13 @@ async function compileSproutA21(
   );
   await buildStandaloneA21({
     unitsDir,
-    alpha19Root: build.alpha19Root,
     outPath: input.outPath,
     cc,
     cxx,
     uwsDir,
-    extraLink: [...(input.extraLink ?? []), ...build.restoreObjects],
-    extraCflags: [...(input.extraCflags ?? []), ...(input.withRestore ? ["-Dmain=sb_app_main"] : [])],
-    optimize: input.optimize === "dev" && host ? 0 : 3,
+    extraLink: input.extraLink,
+    extraCflags: input.extraCflags,
+    optimize: optimizeLevel(input.optimize, input.target),
     // LTO on for optimized builds, zig's musl cross builds included (romeo, M4: +11% req/s on hello,
     // +7% on stress, and 4% smaller), except a standalone build without --release (`lto: false`),
     // which skips it to link faster; SPROUTBOAT_FLTO=0 turns it off for measurements
@@ -527,5 +393,5 @@ async function compileSproutA21(
     musl: !host,
     strip: true,
   });
-  if (!(await Bun.file(input.outPath).exists())) throw new Error("alpha 21 line build produced no binary");
+  if (!(await Bun.file(input.outPath).exists())) throw new Error("native build produced no binary");
 }
