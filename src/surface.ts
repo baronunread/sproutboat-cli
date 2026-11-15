@@ -226,7 +226,7 @@ export const COMMANDS: readonly Command[] = [
     args: "<list | add <host> | verify <host> | delete <host>> [project-dir] [--api-url <url>] [--account <team>]",
     brief: "<list | add | verify | delete>",
     summary:
-      "List the project's domains, or attach one (TXT-verified). On the Cloud only list works: custom domains are added by an operator, and deploys keep them.",
+      "List the project's domains, or attach one (TXT-verified). On the Cloud a domain belongs to the team: `add <host>` claims a hostname and prints the TXT record to publish, `verify <host>` has the Cloud look it up through two public resolvers, `delete <host>` releases it (refused while an app routes it). Once verified, route the name from the project (it needs the domain:write permission, so an Owner or Admin) and its certificate is ordered at the first visit. `list` shows the app's routes and the team's domains. Deploys keep every route they did not add.",
   },
   {
     name: "secrets",
