@@ -20,8 +20,6 @@ import type { JsonValue } from "../../../src/json";
 import { compileStandaloneHostA21 } from "@sproutboat/toolchain/a21";
 import { ensureBearssl } from "../../../src/bearssl";
 
-const CLI = join(import.meta.dir, "../../..");
-
 export type CheckFn = (name: string, cond: boolean, detail?: JsonValue) => void;
 
 export type Fixture = {
