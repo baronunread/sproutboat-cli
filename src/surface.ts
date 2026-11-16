@@ -141,10 +141,10 @@ export const COMMANDS: readonly Command[] = [
     group: "Develop",
     emoji: "🔨",
     short: "Compile the app to a native binary",
-    args: "[project-dir] [--target host|linux-x64|linux-arm64] [--standalone] [--release] [--deploy-files] [--with-restore] [--emit-only]",
+    args: "[project-dir] [--target host|linux-x64|linux-arm64] [--standalone] [--release] [--deploy-files] [--emit-only]",
     brief: "[project-dir]",
     summary:
-      "Compile the app to a native binary (Porffor + Zig), cross-compiled for Linux x64 by default. `--target host` builds for this machine instead, to run locally, not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no separate storage process; add `--target linux-arm64` for an aarch64 box (the default is `linux-x64`) and `--deploy-files` to write a Dockerfile, a systemd socket and service, a fly.toml and a push script beside it. `--release` makes a standalone build the full `-flto -O3` one to publish; without it the link skips LTO (1.5 to 2x faster cold, ~90 MB link memory instead of 1.1 to 1.6 GB, fewer requests per second); `SPROUTBOAT_RELEASE=1` does the same, and a non-standalone build is always the release build. `--with-restore` adds an offline `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command to a standalone executable; it runs before app initialization. `--emit-only` stops after writing `.sproutboat/porffor-units/<shape>/sprout.generated.js`, the module Porffor would compile, and prints its path: every check still runs, nothing is compiled.",
+      "Compile the app to a native binary (Porffor + Zig), cross-compiled for Linux x64 by default. `--target host` builds for this machine instead, to run locally, not deployable. `--standalone` emits one executable carrying its own bindings, with SQLite compiled in (~2 MB) and no separate storage process; add `--target linux-arm64` for an aarch64 box (the default is `linux-x64`) and `--deploy-files` to write a Dockerfile, a systemd socket and service, a fly.toml and a push script beside it. `--release` makes a standalone build the full `-flto -O3` one to publish; without it the link skips LTO (1.5 to 2x faster cold, ~90 MB link memory instead of 1.1 to 1.6 GB, fewer requests per second); `SPROUTBOAT_RELEASE=1` does the same, and a non-standalone build is always the release build. `--emit-only` stops after writing `.sproutboat/porffor-units/<shape>/sprout.generated.js`, the module Porffor would compile, and prints its path: every check still runs, nothing is compiled.",
   },
   {
     name: "toolchain",
@@ -348,11 +348,10 @@ export const ENV_VARS: readonly EnvVar[] = [
     name: "AR",
     purpose: "Archiver used to assemble uSockets.a for a host build (default `ar` if present, else Zig's).",
   },
-  { name: "SPROUTBOAT_COMPILE_TIMEOUT_MS", purpose: "Porffor compile timeout in ms (default 600000)." },
   {
     name: "SPROUTBOAT_PORFFOR_CHANNEL",
     purpose:
-      "Porffor channel for standalone builds: `alpha-23` (default), `alpha-22` or `alpha-19` (the oldest compiler, kept as a fallback for one release).",
+      "Porffor channel for standalone builds: `alpha-24` (the default, and the only one). `alpha-19`, `alpha-21`, `alpha-22` and `alpha-23` are errors that say they are no longer supported.",
   },
   {
     name: "SPROUTBOAT_RELEASE",

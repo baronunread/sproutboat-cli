@@ -27,6 +27,17 @@ export type Options = {
   readonly own?: true;
 };
 
+/**
+ * Flags that existed and were removed: the command answers with where the capability went instead of "unknown option".
+ * Not listed in the grammar (surface.ts), so `surface.test.ts` still pins the grammar to the table below.
+ */
+const REMOVED_OPTIONS = new Map([
+  [
+    "build --with-restore",
+    "--with-restore was removed. Offline LTX restore will come back as a `sproutboat restore` command, not as a build flag (docs/native-ltx-restore.md)",
+  ],
+]);
+
 export const COMMAND_OPTIONS = {
   // As in create-cloudflare: --template picks a starter, --git and --install (and their --no-) decide the two steps
   // after scaffolding, -y takes every default. --list-templates prints the starters and exits.
@@ -44,7 +55,7 @@ export const COMMAND_OPTIONS = {
   run: { value: ["--binary", "--port", "--data-dir", "--require"], flag: ["--check"] },
   build: {
     value: ["--target"],
-    flag: ["--standalone", "--release", "--deploy-files", "--with-restore", "--emit-only"],
+    flag: ["--standalone", "--release", "--deploy-files", "--emit-only"],
   },
   toolchain: { flag: ["--json"] },
   deploy: {
@@ -231,6 +242,8 @@ export function checkOptions(command: string, args: readonly string[]): OptionsC
       out.push(name);
       continue;
     }
+    const removed = REMOVED_OPTIONS.get(`${command} ${name}`);
+    if (removed) return { error: removed };
     const near = suggest(name, flagsOf(spec));
     return {
       error: `unknown option ${name}${near ? ` (did you mean ${near}?)` : ""}${

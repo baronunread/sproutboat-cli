@@ -9,7 +9,7 @@
  * SPROUTBOAT_ZIG=/path/to/zig, or the download source with SPROUTBOAT_ZIG_URL.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -17,14 +17,14 @@ import { dirname, resolve } from "node:path";
 import embeddedUwsArchive from "../vendor/uwebsockets-360c276d-musl.tar.xz" with { type: "file" };
 import { BEARSSL_VERSION } from "./bearssl";
 import {
-  PORFFOR_A22_CHANNEL,
-  PORFFOR_A22_COMMIT,
-  PORFFOR_A23_CHANNEL,
-  PORFFOR_A23_COMMIT,
+  cachedPorfforA21Root,
+  CURRENT_ALPHA,
+  PORFFOR_A24_COMMIT,
+  porfforA21Version,
   standaloneChannel,
   type StandaloneChannel,
+  UWS_COMMIT as TOOLCHAIN_UWS_COMMIT,
 } from "@sproutboat/toolchain/a21";
-import { cachedPorfforRoot, PORFFOR_CHANNEL, PORFFOR_COMMIT } from "./porffor-toolchain";
 import { SQLITE_VERSION } from "./sqlite";
 import { LINUX_TARGETS, type LinuxTarget } from "./targets";
 
@@ -42,19 +42,19 @@ const ZIG_SHA256 = {
   "aarch64-macos": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
 } satisfies Record<ZigPlatform, string>;
 
-// Pinned Porffor identity comes from porffor-toolchain.ts. PORFFOR_VERSION overrides.
+// The Porffor identity is the toolchain package's pin (one alpha at a time). PORFFOR_VERSION overrides.
 // When bumping this pin (#55): run the monorepo's `bun run diff` against the
 // frozen reference handlers and update its COMPAT.md for any new mismatch before
 // releasing — the alpha compiler's output can shift between pins. Checked by
 // hand at bump time, not in CI.
-// uWebSockets commit Porffor alpha-10 fetches for the native-fetch server.
-const UWS_COMMIT = "360c276d";
-const UWS_COMMIT_FULL = "360c276d609d59af56ae6932adb95154ace9f15f";
+// The uWebSockets commit the standalone server is compiled against: the toolchain's vendored server sources pin it.
+const UWS_COMMIT_FULL = TOOLCHAIN_UWS_COMMIT;
+const UWS_COMMIT = UWS_COMMIT_FULL.slice(0, 8);
 
 // `vendor/uwebsockets-<UWS_COMMIT>-musl.tar.xz` ships in the package: the
 // checked-out, patched, `zig cc -target x86_64-linux-musl`-built uWebSockets
 // tree (headers + `uSockets/uSockets.a`). Regenerate + re-pin the sha whenever
-// the `porffor` pin (and thus UWS_COMMIT_FULL) changes — `bun tools/prebuild-uws.ts`
+// the toolchain's uWebSockets commit or patches change — `bun tools/prebuild-uws.ts`
 // or the `uws-prebuild` workflow.
 const UWS_TARBALL_SHA256 = "e83736f3f8cf9d56a1ebe6ea61625a7af12386763374d47c14cff472ada7484a";
 
@@ -427,7 +427,7 @@ export function inspectToolchain(): ToolchainDoctor {
     /* doctor reports an unsupported host instead of throwing before its diagnostics */
   }
   const zigPath = zigOverride ?? (platform ? resolve(cacheRoot, `zig-${ZIG_VERSION}-${platform}`, "zig") : null);
-  const porfforPath = porfforOverride ?? cachedPorfforRoot(cacheRoot);
+  const porfforPath = porfforOverride ?? cachedPorfforA21Root(CURRENT_ALPHA, cacheRoot);
   const sqlitePath = resolve(cacheRoot, `sqlite-${SQLITE_VERSION}`);
   const bearsslPath = resolve(cacheRoot, `bearssl-${BEARSSL_VERSION}`);
   const xcrun = process.platform === "darwin" ? Bun.which("xcrun") : null;
@@ -465,12 +465,7 @@ export function inspectToolchain(): ToolchainDoctor {
 }
 
 export function uwsCommitFull(): string {
-  try {
-    const src = readFileSync(resolve(porfforRoot(), "compiler/uwebsockets.js"), "utf8");
-    return /UWS_COMMIT\s*=\s*['"]([0-9a-f]{40})/.exec(src)?.[1] ?? UWS_COMMIT_FULL;
-  } catch {
-    return UWS_COMMIT_FULL;
-  }
+  return UWS_COMMIT_FULL;
 }
 
 /** Thrown when the prebuilt uWebSockets archive is missing or fails its checksum. */
@@ -679,26 +674,10 @@ export async function ensureUWebSocketsHost(): Promise<void> {
   });
 }
 
-/** Directory holding node_modules/porffor (walks up from this file). */
-export function porfforRoot(start = import.meta.dir): string {
-  const managed = cachedPorfforRoot();
-  if (existsSync(resolve(managed, "runtime/index.js"))) return managed;
-  let dir = start;
-  for (;;) {
-    const candidate = resolve(dir, "node_modules/porffor");
-    if (existsSync(resolve(candidate, "runtime/index.js"))) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) return managed;
-    dir = parent;
-  }
-}
-
 /** The Porffor release a build compiles with, on the standalone channel it uses (default: the environment's). */
 export function porfforVersion(channel: StandaloneChannel = standaloneChannel()): string {
   if (process.env.PORFFOR_VERSION) return process.env.PORFFOR_VERSION;
-  if (channel === "alpha-23") return `${PORFFOR_A23_CHANNEL} (${PORFFOR_A23_COMMIT})`;
-  if (channel === "alpha-22") return `${PORFFOR_A22_CHANNEL} (${PORFFOR_A22_COMMIT})`;
-  return `${PORFFOR_CHANNEL} (${PORFFOR_COMMIT})`;
+  return porfforA21Version(channel);
 }
 
 export function esbuildVersion(): string {
@@ -708,17 +687,12 @@ export function esbuildVersion(): string {
 }
 
 function uwsCommit(): string {
-  try {
-    const src = readFileSync(resolve(porfforRoot(), "compiler/uwebsockets.js"), "utf8");
-    return /UWS_COMMIT\s*=\s*['"]([0-9a-f]{7,40})/.exec(src)?.[1]?.slice(0, 8) || UWS_COMMIT;
-  } catch {
-    return UWS_COMMIT;
-  }
+  return UWS_COMMIT;
 }
 
 /** Compact provenance string for the artifact manifest. */
 export function toolchainStamp(): string {
-  return `zig-musl/${ZIG_VERSION}+porffor/${PORFFOR_COMMIT}+uws/${uwsCommit()}`;
+  return `zig-musl/${ZIG_VERSION}+porffor/${PORFFOR_A24_COMMIT}+uws/${uwsCommit()}`;
 }
 
 /**

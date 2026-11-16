@@ -29,8 +29,7 @@ import { bundleHandler } from "../src/bundle";
 import { parseConfig } from "../src/config";
 import { CHECKS, SECRETS, STANDALONE_SKIPS, type Check, type Context, type Ok } from "./checks";
 import { prunePorfforBuilds } from "../src/compile";
-import { ensurePorffor } from "../src/porffor-toolchain";
-import { ensurePorfforPatched } from "../src/patch-porffor";
+import { ensurePorfforA21, CURRENT_ALPHA } from "@sproutboat/toolchain/a21";
 import { ensureUWebSocketsHost, UwsUnavailableError } from "../src/toolchain";
 import { ensureSqliteObject } from "../src/sqlite";
 import { ensureBearssl } from "../src/bearssl";
@@ -165,7 +164,7 @@ for (const [signal, code] of [
  */
 async function warmSharedCaches(): Promise<void> {
   await prunePorfforBuilds();
-  await ensurePorfforPatched(await ensurePorffor());
+  await ensurePorfforA21(CURRENT_ALPHA);
   try {
     await ensureUWebSocketsHost();
   } catch (error) {

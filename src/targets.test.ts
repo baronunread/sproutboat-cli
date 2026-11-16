@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { isLinuxTarget, linuxTriple, parseTarget } from "./targets";
-import { porfforArgs } from "./compile";
+import { optimizeLevel } from "./compile";
 
 test("--target names resolve to a build target, aliases included", () => {
   expect(parseTarget("host")).toBe("host");
@@ -20,9 +20,7 @@ test("each Linux target compiles with its own static musl triple", () => {
 });
 
 test("an arm64 build is a cross-compile and never takes the dev-only -O0", () => {
-  const args = porfforArgs("/t/m.js", "/t/out", "linux-arm64", "dev");
-  expect(args).toContain("--musl");
-  expect(args).not.toContain("-O0");
+  expect(optimizeLevel("dev", "linux-arm64")).toBe(3);
 });
 
 test("the uSockets listen hook is added once, to the real bsd.c of the pinned uWebSockets", async () => {
