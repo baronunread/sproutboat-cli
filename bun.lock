@@ -8,9 +8,9 @@
         "@sproutboat/artifact": "^0.3.0",
         "@sproutboat/assets": "^0.3.1",
         "@sproutboat/config": "^0.6.0",
-        "@sproutboat/runtime": "^0.46.0",
+        "@sproutboat/runtime": "^0.47.0",
         "@sproutboat/toolchain": "^0.27.0",
-        "@sproutboat/wire": "^0.22.6",
+        "@sproutboat/wire": "^0.22.7",
       },
       "devDependencies": {
         "@oxlint/plugins": "1.85.0",
@@ -23,10 +23,10 @@
         "wrangler": "4.161.0",
       },
       "optionalDependencies": {
-        "@sproutboat/cli-darwin-arm64": "0.56.0",
-        "@sproutboat/cli-darwin-x64": "0.56.0",
-        "@sproutboat/cli-linux-arm64": "0.56.0",
-        "@sproutboat/cli-linux-x64": "0.56.0",
+        "@sproutboat/cli-darwin-arm64": "0.56.1",
+        "@sproutboat/cli-darwin-x64": "0.56.1",
+        "@sproutboat/cli-linux-arm64": "0.56.1",
+        "@sproutboat/cli-linux-x64": "0.56.1",
       },
     },
   },
@@ -255,11 +255,11 @@
 
     "@sproutboat/config": ["@sproutboat/config@0.6.0", "", {}, "sha512-fx7B412Sy4YEDXMSaUx07+GyAOQDOaGSW7kO4hmA1SZBUsRX3evx+zH7tyFv6b0PHxP+htkySl+8wZUdWc0vjA=="],
 
-    "@sproutboat/runtime": ["@sproutboat/runtime@0.46.0", "", {}, "sha512-iHcwU/kQS4vOP9cpnaFpnCyAvgVG7EulcRIAakXX7B7zWfZnnqCt9DrR921foeb9KEdAxtjPSxQ0LtrY7E0Yng=="],
+    "@sproutboat/runtime": ["@sproutboat/runtime@0.47.0", "", {}, "sha512-0UIrRL+iMqZbQxxUDGG+QEyZuRbXRWdI4FNDaRLkYCCqNOhmgAArrtWJp+7gtaaJz+gwuAPLfV95+BbEQRuqRg=="],
 
     "@sproutboat/toolchain": ["@sproutboat/toolchain@0.27.0", "", {}, "sha512-UJRGfNqhnMSJcksYsZHqU/2kVnDerPdSDmWnf5Bga9G98pz+oD1qnVKGld+gM4Ye8BWN4cl/3Dkl2o9oYSESLQ=="],
 
-    "@sproutboat/wire": ["@sproutboat/wire@0.22.6", "", { "dependencies": { "@sproutboat/assets": "^0.3.1", "@sproutboat/runtime": "^0.46.0" } }, "sha512-1bbdoBDpZbk62BgFMffAZMh1+hMXBWc7JtoKfZFiyLRC8r34YtgBjXUwAHNlfnh7T1hYHvCzgB7nyFGuLxy5YA=="],
+    "@sproutboat/wire": ["@sproutboat/wire@0.22.7", "", { "dependencies": { "@sproutboat/assets": "^0.3.1", "@sproutboat/runtime": "^0.47.0" } }, "sha512-lr50iMaultmWiwvM1wDEq+ZvbJfEIH4LHAH4KrO+zEfdLNQ5rBdUQxx3hXcxTdaEAcXEGn2Hs2b52uTBl2QAUA=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
