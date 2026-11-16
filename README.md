@@ -5,12 +5,12 @@
 
 https://sproutboat.com
 
-The CLI for [Sproutboat](https://github.com/baronunread/sproutboat). Compiles a
+The CLI for [Sproutboat](https://github.com/sproutboat/sproutboat). Compiles a
 `fetch` handler to a native binary and ships it to any Sproutboat control plane.
 
 ## Issues
 
-Tracked centrally in [baronunread/sproutboat](https://github.com/baronunread/sproutboat/issues)
+Tracked centrally in [sproutboat/sproutboat](https://github.com/sproutboat/sproutboat/issues)
 (label `area:cli`). Please file there.
 
 ## Overview
@@ -353,7 +353,7 @@ current sharp edges, are at [sproutboat.com/docs](https://sproutboat.com/docs).
 ## Bugs
 
 File issues at
-[baronunread/sproutboat/issues](https://github.com/baronunread/sproutboat/issues).
+[sproutboat/sproutboat/issues](https://github.com/sproutboat/sproutboat/issues).
 
 ## Contributing
 

@@ -10,7 +10,7 @@ const manifest: ArtifactManifest = {
   capabilityProfile: "http-sync-v0",
   porfforVersion: "alpha-10 (08ac7ee)",
   esbuildVersion: "0.28.2",
-  buildImage: "ghcr.io/baronunread/sproutboat/build@sha256:" + "a".repeat(64),
+  buildImage: "ghcr.io/sproutboat/sproutboat/build@sha256:" + "a".repeat(64),
   sourceHash: "sha256:a",
   binaryHash: "sha256:b",
   binarySize: 2048,

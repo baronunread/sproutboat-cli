@@ -2,7 +2,7 @@
 
 The CLI was extracted from `sproutboat/apps/cli` on 2026-08-29 and is the
 canonical source for the shared runtime surface. As of 2026-09-01 the monorepo
-**depends on this package** — `"sproutboat": "github:baronunread/sproutboat-cli#main"`,
+**depends on this package** — `"sproutboat": "github:sproutboat/cli#main"`,
 pinned to a resolved commit by its `bun.lock` — instead of hand-copying files.
 Nothing is vendored any more.
 

@@ -9,12 +9,12 @@ on:
 #
 # Auth is npm Trusted Publishing (OIDC) -- no token secret. One-time setup on
 # npmjs.com, per package: @sproutboat/cli-<os>-<arch> -> Settings -> Trusted
-# Publisher -> GitHub Actions, with user baronunread, repo sproutboat-cli,
+# Publisher -> GitHub Actions, with owner sproutboat, repo cli,
 # workflow release-platform-packages.yml. Provenance is generated
 # automatically; the repo must stay public.
 jobs:
   publish:
-    if: github.repository == 'baronunread/sproutboat-cli'
+    if: github.repository == 'sproutboat/cli'
     name: publish (${{ matrix.name }})
     strategy:
       fail-fast: false
