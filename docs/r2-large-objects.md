@@ -100,4 +100,4 @@ Native standalone sprouts do not yet serve the direct-transfer path. Use the
 multipart recipe above there. `env.FILES.get()` still reads an entire object
 into memory in every mode, so use download tickets for large broker-backed
 downloads. The native standalone streaming requirement is tracked in
-[sproutboat#56](https://github.com/baronunread/sproutboat/issues/56).
+[sproutboat#56](https://github.com/sproutboat/sproutboat/issues/56).

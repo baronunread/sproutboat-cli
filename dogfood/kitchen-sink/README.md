@@ -154,12 +154,12 @@ uploads 90 MB from one address, out of the 100 MB a day an address may upload: r
 ### Where the platform limits are
 
 What an upload or a download meets on Sproutboat Cloud (Caddy, then the Cloud edge, then sproutd), with the file and
-line where each value lives. The numbers are read from the sources (sproutboat-cloud, the edge-rs binary it runs,
+line where each value lives. The numbers are read from the sources (sproutboat/cloud, the edge-rs binary it runs,
 sproutd), not measured on Cloud:
 
 | Layer | Limit | Where |
 | --- | --- | --- |
-| Caddy, the account's app hostname | none (a plain `reverse_proxy`) | sproutboat-cloud `docs/app-hostnames.md` (the drop-in) |
+| Caddy, the account's app hostname | none (a plain `reverse_proxy`) | sproutboat/cloud `docs/app-hostnames.md` (the drop-in) |
 | Cloud edge (edge-rs, backend mode) | 5 GiB request body, 413 by Content-Length; 30 s per request; 512 MiB response | `services/edge-rs/src/config.rs` 110-146 and 143 (`SPROUTBOAT_EDGE_MAX_BODY_BYTES`, `SPROUTBOAT_REQUEST_TIMEOUT_MS`), `src/proxy.rs` 372 and 1076, in the platform repo at `4fcf276` |
 | sproutd request body | 100 MiB streamed, 413 above it by Content-Length, from compatibility date 2026-10-27; 1 MiB buffered before that | `src/native-host.cpp` 72 (`BODY_STREAM_MAX`), 2530 and 2551 |
 | sproutd, per app | 32 MiB of memory, 30 s per request, 2 s of CPU without an answer | sproutd `README.md` "Limits" |

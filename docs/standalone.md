@@ -281,7 +281,7 @@ Any `fetch` handler whose result resolves a promise with a plain object —
 returning a `Response` from an `async` function is the common shape, so this
 is not a rare pattern — can wedge the process at 100% CPU after a handful of
 requests, with no error and no log line (upstream Porffor, alpha-5; tracked
-as [#168](https://github.com/baronunread/sproutboat/issues/168)). Root cause:
+as [#168](https://github.com/sproutboat/sproutboat/issues/168)). Root cause:
 a duck-typing check for `.then` walks the resolved value's prototype chain
 and, under certain allocator conditions, never finds the terminator — an
 infinite spin, not a slow leak. Onset is allocator-dependent, so it does not
@@ -291,11 +291,11 @@ which only ever correlated with one specific repro, not the actual trigger.
 Sync-only handlers are unaffected, since nothing ever resolves a promise.
 
 Fixed by a local patch to Porffor's `.then` probe (see the
-[platform upstream note](https://github.com/baronunread/sproutboat/blob/main/patches/upstream/promise-resolution-livelock.md)).
+[platform upstream note](https://github.com/sproutboat/sproutboat/blob/main/patches/upstream/promise-resolution-livelock.md)).
 Current CLI releases include that toolchain patch. Builds using an older
 toolchain remain affected; the exact allocator trigger isn't something a safe
 subset of `async`/`await` usage can dodge. Track
-[#168](https://github.com/baronunread/sproutboat/issues/168) for the release
+[#168](https://github.com/sproutboat/sproutboat/issues/168) for the release
 that carries it.
 
 ## What differs from a deployed sprout
@@ -496,7 +496,7 @@ median of 80 ms; the slowest request in the run waited 101 ms. The old recipe
 (start the new copy on the same port, then `SIGTERM` the old) failed 134 of
 283,966 requests over 200 swaps and needed 597 retries.
 The harness is `packages/runtime/test/standalone-restart-stress.py` in the
-sproutboat-packages repository.
+sproutboat/packages repository.
 
 ### On a VPS: systemd
 

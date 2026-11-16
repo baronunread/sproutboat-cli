@@ -1,9 +1,9 @@
 ---
 name: release
-description: Cut a sproutboat-cli release — pick the next version from what actually changed since the last tag, update CHANGELOG.md, and tag it. Use when the user asks to release, cut a release, ship a version, tag a release, or asks what the next version number should be.
+description: Cut a sproutboat/cli release — pick the next version from what actually changed since the last tag, update CHANGELOG.md, and tag it. Use when the user asks to release, cut a release, ship a version, tag a release, or asks what the next version number should be.
 ---
 
-# Release sproutboat-cli
+# Release sproutboat/cli
 
 Tagging a `vX.Y.Z` here triggers an immediate, real `npm publish`
 (`.github/workflows/release.yml`, on push of a tag matching `v*`, gated only
@@ -158,8 +158,8 @@ the four `@sproutboat/cli-<os>-<arch>` binary packages, one per platform).
 Check both:
 
 ```bash
-gh run list --repo baronunread/sproutboat-cli --workflow=release.yml --limit 1
-gh run list --repo baronunread/sproutboat-cli --workflow=release-platform-packages.yml --limit 1
+gh run list --repo sproutboat/cli --workflow=release.yml --limit 1
+gh run list --repo sproutboat/cli --workflow=release-platform-packages.yml --limit 1
 ```
 
 Once both succeed (poll if needed — don't declare success before each
@@ -168,7 +168,7 @@ check all 4), create the GitHub Release so the tag has notes attached (today,
 none of the 14 existing tags do):
 
 ```bash
-gh release create vX.Y.Z --repo baronunread/sproutboat-cli \
+gh release create vX.Y.Z --repo sproutboat/cli \
   --title "vX.Y.Z" --notes-file <(sed -n '/^## \[X.Y.Z\]/,/^## \[/p' CHANGELOG.md | sed '$d')
 ```
 

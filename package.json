@@ -11,12 +11,12 @@
     "sproutboat",
     "wrangler"
   ],
-  "homepage": "https://github.com/baronunread/sproutboat-cli",
-  "bugs": "https://github.com/baronunread/sproutboat-cli/issues",
+  "homepage": "https://github.com/sproutboat/cli",
+  "bugs": "https://github.com/sproutboat/cli/issues",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/baronunread/sproutboat-cli.git"
+    "url": "git+https://github.com/sproutboat/cli.git"
   },
   "bin": {
     "sproutboat": "bin/sproutboat.cjs"

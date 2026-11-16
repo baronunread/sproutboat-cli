@@ -11,7 +11,7 @@ Both are deployed on Sproutboat Cloud, under the names in their `sproutboat.json
 
 Three other places use them:
 
-- `bun run kitchen-sink` and `bun run kitchen-sink:standalone` run the kitchen-sink checks on the broker and on a standalone binary. The downstream job of [sproutboat-packages](https://github.com/baronunread/sproutboat-packages) runs these two scripts against every packages PR, so their names are fixed.
+- `bun run kitchen-sink` and `bun run kitchen-sink:standalone` run the kitchen-sink checks on the broker and on a standalone binary. The downstream job of [sproutboat/packages](https://github.com/sproutboat/packages) runs these two scripts against every packages PR, so their names are fixed.
 - `bun run examples:workerd` runs both apps on workerd with the examples, which keeps them standard Cloudflare Workers.
 - `src/kitchen-sink-cloud.test.ts` keeps `kitchen-sink` buildable on a Cloud generation.
 

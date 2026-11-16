@@ -42,7 +42,7 @@ milliseconds with `SB_HARNESS_REQUEST_TIMEOUT_MS` (default 30000),
 To run the CLI against local `@sproutboat/runtime`, `toolchain` or `wire`
 changes, use `scripts/with-local-packages.ts` rather than moving
 `node_modules` entries by hand. It symlinks
-`<sproutboat-packages>/packages/<pkg>` over `node_modules/@sproutboat/<pkg>`,
+`<sproutboat/packages>/packages/<pkg>` over `node_modules/@sproutboat/<pkg>`,
 runs the command, and always puts the originals back, also when the command
 fails or is interrupted:
 
@@ -61,7 +61,7 @@ while it has uncommitted changes, so do this from a worktree
 ## Compiler gaps
 
 The canonical notes are in
-[`baronunread/sproutboat:patches/upstream/README.md`](https://github.com/baronunread/sproutboat/tree/main/patches/upstream).
+[`sproutboat/sproutboat:patches/upstream/README.md`](https://github.com/sproutboat/sproutboat/tree/main/patches/upstream).
 Read them before working around a Porffor gap: Proxy, Web Crypto, streams and
 the zod init crash are recorded there with issue numbers.
 
@@ -70,7 +70,7 @@ authorization to open it on the real `CanadaHonk/porffor` tracker. Filing
 there is outward-facing and effectively irreversible, so always stop and ask
 a human first, immediately before the `gh issue create` call, even if told
 earlier in the conversation to "file it." An agent skipped that check once
-(baronunread/sproutboat, 2026-09-13) and the issue had to be closed with an
+(sproutboat/sproutboat, 2026-09-13) and the issue had to be closed with an
 apology; don't repeat it.
 
 When reducing a compiler bug, delete the binary before every compile and bind
