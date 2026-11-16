@@ -10,13 +10,24 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.56.0] - 2026-11-16
+
+Built on `@sproutboat/runtime` 0.46.0, `@sproutboat/wire` 0.22.6, `@sproutboat/assets` 0.3.1 and `@sproutboat/toolchain` 0.27.0 (`config` 0.6.0 and `artifact` 0.3.0 unchanged). This is the runtime generation b147117c that Sproutboat Cloud runs. Every app is recompiled on its next build, since the runtime prelude changed. **Breaking for standalone builds: Porffor alpha 24 is the only compiler, and `--with-restore` is gone.**
+
+### Added
+
+- **`sproutboat domains add <host>`, `verify <host>` and `delete <host>` on a Cloud.** A custom domain belongs to the team. `add` claims the hostname and prints the TXT record to publish; `verify` has the Cloud look the record up through two public resolvers and says whether the claim is now verified; `delete` releases the claim (refused while an app still routes it). Once a domain is verified, route it from the project (`routes` in the config; it needs the `domain:write` permission, so an Owner or Admin) and its certificate is ordered at the first visit. `domains list` shows the app's routes and the team's claims, each with its state (`pending`, `verified` or `lost`). Before, these three verbs answered that an operator adds custom domains.
+- **`sproutboat deploy --prepare-out <dir>`.** Does everything a Cloud deploy does before its first network call and writes it to `<dir>` instead of uploading: `sprout.generated.js` (the bundled, wrapped source the Cloud compiles), `build.json`, `spec.json` (bindings, crons, queue consumers, and service bindings by name), `assets/manifest.json` and `assets/blobs/<sha256>`. No login, no network, no secrets. It is what the Cloud's builder runs in its sandbox for a Git deploy.
+
 ### Removed
 
-- **`sproutboat build --standalone --with-restore`, and with it Porffor alpha 19.** The flag (the `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command) is gone; using it fails with a message that says so. Offline LTX restore will come back as a plain CLI command, `sproutboat restore`, not as something every standalone binary carries (`docs/native-ltx-restore.md` says where it went). The flag was the only reason the CLI still built with alpha 19: its restore objects were compiled against alpha 19's native-fetch C API. The CLI no longer acquires, patches or compiles with an alpha 19 tree. Removed with it: `vendor/ltx-restore/` (the native restore codec and its notices), `src/native-restore*.ts`, the alpha 19 `native` compile path, `porfforArgs`, and `SPROUTBOAT_COMPILE_TIMEOUT_MS` (it only reached the alpha 19 compile; the default build never read it).
+- **`sproutboat build --standalone --with-restore`, and with it Porffor alpha 19.** The flag (the `APP ltx-restore --generation DIR --output NEW_DB [--txid N]` startup command) is gone; using it fails with a message that says so. Offline LTX restore will come back later as a plain CLI command, `sproutboat restore`, rather than as something every standalone binary carries (`docs/native-ltx-restore.md` says where it went). If you built with `--with-restore`, drop the flag; a binary built without it behaves as before. The flag was the only reason the CLI still built with alpha 19: its restore objects were compiled against alpha 19's native-fetch C API. The CLI no longer acquires, patches or compiles with an alpha 19 tree. Removed with it: `vendor/ltx-restore/` (the native restore codec and its notices), `src/native-restore*.ts`, the alpha 19 `native` compile path, `porfforArgs`, and `SPROUTBOAT_COMPILE_TIMEOUT_MS` (it only reached the alpha 19 compile; the default build never read it).
 
 ### Changed
 
-- **Porffor alpha 24 is the only compiler.** `SPROUTBOAT_PORFFOR_CHANNEL` accepts `alpha-24`; `alpha-19`, `alpha-21`, `alpha-22` and `alpha-23` are errors that say they are no longer supported. `sproutboat toolchain doctor` and the artifact manifest name alpha 24 and the patched tree the toolchain ships. A standalone build's server (the uWebSockets shim, the web classes and the HTTP/1.0 edit) comes from sources vendored in `@sproutboat/toolchain`, byte for byte the ones the alpha 19 chain produced. Needs the `@sproutboat/toolchain` release that carries them.
+- **Porffor alpha 24 is the only compiler.** `SPROUTBOAT_PORFFOR_CHANNEL` accepts `alpha-24`; `alpha-19`, `alpha-21`, `alpha-22` and `alpha-23` are errors that say they are no longer supported. Alpha 24 compiles TypeScript namespaces, enums and parameter properties, and decorators, which earlier channels rejected. `sproutboat toolchain doctor` and the artifact manifest name alpha 24 and the patched tree the toolchain ships. A standalone build's server (the uWebSockets shim, the web classes and the HTTP/1.0 edit) comes from sources vendored in `@sproutboat/toolchain` 0.27.0, byte for byte the ones the alpha 19 chain produced.
+- **`_redirects` follows Cloudflare's matching** (`@sproutboat/assets` 0.3.1, `@sproutboat/wire` 0.22.6). The whole request path must match, so a trailing slash is significant: `/compare /compare/ 308` redirects `/compare` once and `/compare/` is then served instead of redirecting to itself forever. `:name` matches up to the next `/` and may sit inside a segment, `*` matches anything including `/` and is `:splat` in the target, a static rule beats a dynamic one, and among rules of one kind the first in the file wins. Paths that differ only by a trailing slash match differently from before, with no compatibility date, because the edge serves assets before any app code runs.
+- **Durable Objects leave memory when idle** (`@sproutboat/runtime` 0.46.0), from compatibility date 2026-11-21; earlier dates are unchanged. An idle object is evicted and constructed again by its next event, with its storage, alarm and SQLite file kept. A pending timer, an unawaited `fetch`, an open WebSocket or `connect()` socket, or a streamed response keeps an object in memory. `SB_DO_IDLE_MS`, `SB_DO_MAX`, `SB_DO_WAIT_MS` and `SB_DO_QUEUE_MAX` tune it; a standalone binary keeps every object with an open socket in memory. Runtime 0.46.0 also makes SQLite page caches start at 256 KiB and grow on evidence (up to 2 MiB or the database's share of `SB_MEMORY_LIMIT`), which lowers the memory of an app with many databases.
 
 ## [0.55.0] - 2026-11-13
 
@@ -1852,7 +1863,9 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.54.0...HEAD
+[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.56.0...HEAD
+[0.56.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.55.0...v0.56.0
+[0.55.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.53.1...v0.54.0
 [0.32.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.30.0...v0.31.0
