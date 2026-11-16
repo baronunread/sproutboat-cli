@@ -10,6 +10,17 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.56.1] - 2026-11-16
+
+Built on `@sproutboat/runtime` 0.47.0 and `@sproutboat/wire` 0.22.7 (the rest unchanged from 0.56.0). No generation change: apps that build today build to the same bytes.
+
+### Fixed
+
+- **Bundles that merely mention `node:async_hooks` (or another `node:` module) in a string are no longer refused.** The check now looks only at real imports and `require` calls, so libraries such as Effect build; a genuine unsupported import is still refused.
+- **Dynamic `import("cloudflare:workers")` works** like the static import (it resolves to `env`, `WorkerEntrypoint`, `DurableObject` and `RpcTarget`).
+- **`import.meta` compiles in every form,** with workerd's values: `url` is `file:///bundle/index.js`, `main` is `true`, `resolve()` works, `env`, `dirname` and `filename` are `undefined`. Before, forms other than `url`, `filename`, `dirname` and `main` failed the native build, and those four carried the build machine's path.
+- The repository moved to [sproutboat/cli](https://github.com/sproutboat/cli).
+
 ## [0.56.0] - 2026-11-16
 
 Built on `@sproutboat/runtime` 0.46.0, `@sproutboat/wire` 0.22.6, `@sproutboat/assets` 0.3.1 and `@sproutboat/toolchain` 0.27.0 (`config` 0.6.0 and `artifact` 0.3.0 unchanged). This is the runtime generation b147117c that Sproutboat Cloud runs. Every app is recompiled on its next build, since the runtime prelude changed. **Breaking for standalone builds: Porffor alpha 24 is the only compiler, and `--with-restore` is gone.**
