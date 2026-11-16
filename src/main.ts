@@ -66,6 +66,7 @@ import {
   tailBuild,
   waitForApply,
 } from "./cloud-deploy";
+import { writePrepareOut } from "./prepare-out";
 import {
   checkDurableObjectExports,
   describeCloudBindings,
@@ -835,6 +836,7 @@ async function whoami(args: string[]) {
 
 async function deploy(args: string[]) {
   const flags = takeFlags(args, DEPLOY_FLAGS);
+  if (flags["--prepare-out"] !== undefined) return prepareOut(args, resolve(flags["--prepare-out"]));
   const dryRun = args.includes("--dry-run");
   const { apiUrl: targetUrl, target } = await resolveApiUrl(flags["--api-url"]);
   await printTarget(target);
@@ -1063,7 +1065,15 @@ async function login(args: string[]) {
   fail("login expired before approval");
 }
 
-const DEPLOY_FLAGS = ["--api-url", "--account", "--module", "--sproutd", "--generation", "--secrets-file"] as const;
+const DEPLOY_FLAGS = [
+  "--api-url",
+  "--account",
+  "--module",
+  "--sproutd",
+  "--generation",
+  "--secrets-file",
+  "--prepare-out",
+] as const;
 type DeployFlag = (typeof DEPLOY_FLAGS)[number];
 
 function guardSync(step: () => void): void {
@@ -1194,6 +1204,43 @@ async function cloudLogin(apiUrl: string, directToken: string | undefined, accou
   );
   console.log(dim("  revoke it any time under Settings, API keys, or with `sproutboat logout`"));
   reportSaved(done);
+}
+
+/**
+ * `deploy --prepare-out <dir>`: the Cloud deploy up to its first network call, written to <dir> (src/prepare-out.ts). No login, no network.
+ * The Cloud's builder runs this for a Git deploy; nothing here needs a team or a key.
+ */
+async function prepareOut(args: string[], outDir: string) {
+  const directory = args.find((arg) => !arg.startsWith("--"));
+  const project = await readProjectConfig(directory);
+  const cfg = project.config;
+  const name = cfg.name;
+  if (!CLOUD_PROJECT_RE.test(name))
+    fail(`"${name}" is not a valid Cloud app name (3 to 32 characters: lowercase letters, digits, dashes)`);
+  const services = cfg.services ?? [];
+  guardSync(() => checkServiceBindings(name, services, cfg.compatibility_date));
+  let cloudBindings!: CloudBindings;
+  guardSync(() => {
+    cloudBindings = mapCloudBindings(cfg, services.length);
+    checkDurableObjectExports(cfg, project.directory);
+  });
+  for (const warning of cloudBindings.warnings) console.warn(amber(`! ${warning}`));
+  const assets = cfg.assets ? await guard(async () => buildAssetBundle(project.directory, cfg.assets!)) : undefined;
+  const generatedPath = await emitStandaloneUnit(directory);
+  writePrepareOut({
+    outDir,
+    project: name,
+    generatedPath,
+    cli: { version: CLI_VERSION },
+    compatibilityDate: cfg.compatibility_date,
+    cloudBindings,
+    services,
+    assets,
+  });
+  console.log(`app       ${bold(name)}`);
+  console.log(
+    `prepared  ${outDir} (${formatKiB(Bun.file(generatedPath).size)} of source${assets ? `, ${assets.files} asset files` : ""})`,
+  );
 }
 
 async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typeof takeFlags<DeployFlag>>) {
