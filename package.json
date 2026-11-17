@@ -71,9 +71,9 @@
     "@sproutboat/artifact": "^0.3.0",
     "@sproutboat/assets": "^0.3.1",
     "@sproutboat/config": "^0.6.0",
-    "@sproutboat/runtime": "^0.47.0",
-    "@sproutboat/toolchain": "^0.27.0",
-    "@sproutboat/wire": "^0.22.7"
+    "@sproutboat/runtime": "^0.48.0",
+    "@sproutboat/toolchain": "^0.28.0",
+    "@sproutboat/wire": "^0.22.8"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.85.0",
