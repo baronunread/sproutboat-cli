@@ -20,8 +20,8 @@ import {
 import { ensureZig, esbuildVersion, hostCompilerIdentity, porfforVersion, toolchainStamp } from "./toolchain";
 import {
   A21_STANDALONE_FINGERPRINT,
-  PORFFOR_A24_ARCHIVE_SHA256,
-  PORFFOR_A24_COMMIT_FULL,
+  PORFFOR_A25_ARCHIVE_SHA256,
+  PORFFOR_A25_COMMIT_FULL,
 } from "@sproutboat/toolchain/a21";
 import { version as toolchainPackageVersion } from "@sproutboat/toolchain/package.json" with { type: "json" };
 import { version as cliVersion } from "../package.json" with { type: "json" };
@@ -336,7 +336,7 @@ export async function buildArtifact(input: BuildInput): Promise<BuildOutput> {
       lto: ltoEnabled({ ...input, target }),
       toolchain: toolchainStamp(),
       toolchainPackageVersion,
-      porffor: [PORFFOR_A24_COMMIT_FULL, PORFFOR_A24_ARCHIVE_SHA256],
+      porffor: [PORFFOR_A25_COMMIT_FULL, PORFFOR_A25_ARCHIVE_SHA256],
       // the channel is the compiler, server and prelude shape (compile.ts porfforChannel)
       channel: porfforChannel(),
       // the channel's own inputs: the patched tree, the vendored server sources, the shim pass, the bridge, the build recipe, LTO

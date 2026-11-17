@@ -67,7 +67,7 @@ usage: sproutboat <init [name] [--template <name>] [--list-templates] [--git | -
 | `CC` | C compiler for a host build (default `cc` if present, else the vendored Zig cross-compiler targeting this host). |
 | `CXX` | C++ compiler for a host build's native-fetch link step (default `c++` if present, else the vendored Zig cross-compiler targeting this host). |
 | `AR` | Archiver used to assemble uSockets.a for a host build (default `ar` if present, else Zig's). |
-| `SPROUTBOAT_PORFFOR_CHANNEL` | Porffor channel for standalone builds: `alpha-24` (the default, and the only one). `alpha-19`, `alpha-21`, `alpha-22` and `alpha-23` are errors that say they are no longer supported. |
+| `SPROUTBOAT_PORFFOR_CHANNEL` | Porffor channel for standalone builds: `alpha-25` (the default, and the only one). `alpha-19`, `alpha-21`, `alpha-22`, `alpha-23` and `alpha-24` are errors that say they are no longer supported. |
 | `SPROUTBOAT_RELEASE` | Same as `build --standalone --release`: link with LTO. Any value but empty, `0` or `false` turns it on. |
 | `SPROUTBOAT_FLTO` | Overrides link-time optimization on alpha 22 builds: `1` turns it on, `0` turns it off. |
 | `SPROUTBOAT_TOOLCHAIN_CACHE` | Managed Porffor and compiler cache root (default ~/.cache/sproutboat). |
@@ -98,7 +98,7 @@ usage: sproutboat <init [name] [--template <name>] [--list-templates] [--git | -
 | | |
 | --- | --- |
 | Zig | `0.16.0` (`zig cc -target x86_64-linux-musl`, static) |
-| Provenance stamp | `zig-musl/0.16.0+porffor/1b8225e+uws/360c276d` |
+| Provenance stamp | `zig-musl/0.16.0+porffor/c9af40c+uws/360c276d` |
 | Artifact schema | `2` |
 | Runtime | `native-fetch` |
 | Capability profile | `http-sync-v0` |

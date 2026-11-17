@@ -19,7 +19,7 @@ import { BEARSSL_VERSION } from "./bearssl";
 import {
   cachedPorfforA21Root,
   CURRENT_ALPHA,
-  PORFFOR_A24_COMMIT,
+  PORFFOR_A25_COMMIT,
   porfforA21Version,
   standaloneChannel,
   type StandaloneChannel,
@@ -692,7 +692,7 @@ function uwsCommit(): string {
 
 /** Compact provenance string for the artifact manifest. */
 export function toolchainStamp(): string {
-  return `zig-musl/${ZIG_VERSION}+porffor/${PORFFOR_A24_COMMIT}+uws/${uwsCommit()}`;
+  return `zig-musl/${ZIG_VERSION}+porffor/${PORFFOR_A25_COMMIT}+uws/${uwsCommit()}`;
 }
 
 /**

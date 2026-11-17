@@ -351,7 +351,7 @@ export const ENV_VARS: readonly EnvVar[] = [
   {
     name: "SPROUTBOAT_PORFFOR_CHANNEL",
     purpose:
-      "Porffor channel for standalone builds: `alpha-24` (the default, and the only one). `alpha-19`, `alpha-21`, `alpha-22` and `alpha-23` are errors that say they are no longer supported.",
+      "Porffor channel for standalone builds: `alpha-25` (the default, and the only one). `alpha-19`, `alpha-21`, `alpha-22`, `alpha-23` and `alpha-24` are errors that say they are no longer supported.",
   },
   {
     name: "SPROUTBOAT_RELEASE",
