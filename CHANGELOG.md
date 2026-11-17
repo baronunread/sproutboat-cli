@@ -10,6 +10,16 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.57.0] - 2026-11-17
+
+Built on `@sproutboat/toolchain` 0.28.0 (Porffor alpha 25), with `@sproutboat/runtime` 0.47.0 and `@sproutboat/wire` 0.22.7 kept as in 0.56.1. This is the runtime generation bb0aefe9 that Sproutboat Cloud runs. Every app is recompiled on its next build. **Breaking for standalone builds: Porffor alpha 25 is now the only compiler; alpha 24 is no longer supported.**
+
+### Changed
+
+- **Porffor alpha 25 replaces alpha 24.** Alpha 25 brings faster string and `Buffer` handling, `crypto.subtle` AES-GCM, `stream/consumers` and two compiler fixes. `SPROUTBOAT_PORFFOR_CHANNEL` accepts `alpha-25`; `alpha-24` is refused like the older channels.
+- `@sproutboat/runtime` stays on 0.47.0 and `@sproutboat/wire` on exactly 0.22.7. Runtime 0.48.0 carries the storage capture code (switched off), which changes the code every app with bindings compiles, so it ships with its own runtime generation later.
+- CI runs Bun 1.4.4, the version Sproutboat Cloud runs.
+
 ## [0.56.1] - 2026-11-16
 
 Built on `@sproutboat/runtime` 0.47.0 and `@sproutboat/wire` 0.22.7 (the rest unchanged from 0.56.0). No generation change: apps that build today build to the same bytes.
@@ -1874,7 +1884,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/baronunread/sproutboat-cli/compare/v0.56.0...HEAD
+[Unreleased]: https://github.com/sproutboat/cli/compare/v0.57.0...HEAD
+[0.57.0]: https://github.com/sproutboat/cli/compare/v0.56.1...v0.57.0
 [0.56.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.55.0...v0.56.0
 [0.55.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.53.1...v0.54.0
