@@ -151,10 +151,15 @@ export function startFakeCloud(options: FakeOptions = {}) {
     if (sent.hosts_patch === undefined) return null;
     if (options.legacyHosts) return refuse("unknown key hosts_patch", "hosts_patch");
     if (sent.hosts !== undefined) return refuse("hosts and hosts_patch are mutually exclusive", "hosts_patch");
-    const add = jsonObject(sent.hosts_patch)?.add;
-    for (const [i, host] of (Array.isArray(add) ? add : []).entries())
-      if (!isString(host) || !/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(\/.*)?$/.test(host))
-        return refuse(`hosts_patch.add[${i}]: ${JSON.stringify(host)} is not a valid route`, `hosts_patch.add[${i}]`);
+    for (const part of ["add", "remove"] as const) {
+      const list = jsonObject(sent.hosts_patch)?.[part];
+      for (const [i, host] of (Array.isArray(list) ? list : []).entries())
+        if (!isString(host) || !/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(\/.*)?$/.test(host))
+          return refuse(
+            `hosts_patch.${part}[${i}]: ${JSON.stringify(host)} is not a valid route`,
+            `hosts_patch.${part}[${i}]`,
+          );
+    }
     return null;
   };
   /** The Cloud's spec rules for service bindings and secrets, then the merge. Returns an error reply or null. */

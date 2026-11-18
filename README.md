@@ -122,6 +122,19 @@ preselects the team on the approval page.
   prompt. Precedence is `--account`, the config field, then the environment
   variable. A key from the environment belongs to one team, so a different
   `account` is an error.
+- **Which addresses.** A deploy puts `<app>.<team>.sproutboat.app` among the
+  app's routes, the way a Worker gets its `workers.dev` address. `workers_dev`
+  in `sproutboat.jsonc` (or the file named with `--config`) is Wrangler's
+  switch for it: `"workers_dev": false` makes a deploy take that name out and
+  leave every other route as it is, and without the key the name is on (Wrangler
+  defaults it to true when the config declares no `route` or `routes`, and this
+  config has none). Every deploy, `--dry-run` and `--prepare-out` included,
+  prints a `route` line saying whether the name is on or off and why. An app
+  may have no route at all, as a Worker may (a cron-only app, or one reached
+  only by a service binding); the deploy says it has no public address. Turning
+  the name off in the dashboard does not stick: the next deploy puts it back
+  unless the config says `workers_dev: false`. Wrangler's `preview_urls` has
+  no counterpart, since a Cloud app has no version or preview URLs.
 - **Build.** The Cloud builds your app. `deploy` bundles the project here, uploads
   that one file by its sha256 (it skips the upload when the Cloud already has
   it), asks the Cloud to build it and streams the build log:
