@@ -36,6 +36,9 @@ import {
   assetsOnlySource,
   configAccount,
   configMigrationsDir,
+  configWorkersDev,
+  describePlatformName,
+  resolveWorkersDev,
   parseProjectConfig,
 } from "./account-field";
 import { DATA_ERROR_STATUSES } from "./data-errors";
@@ -382,6 +385,8 @@ async function readProjectConfig(directory?: string) {
     config: parsed.value,
     account: configAccount(configSource),
     migrationsDir: configMigrationsDir(configSource),
+    workersDev: resolveWorkersDev(configWorkersDev(configSource)),
+    configFile: basename(configPath),
   };
 }
 
@@ -1243,8 +1248,10 @@ async function prepareOut(args: string[], outDir: string) {
     cloudBindings,
     services,
     assets,
+    workersDev: project.workersDev.enabled,
   });
   console.log(`app       ${bold(name)}`);
+  console.log(`route     ${describePlatformName(project.workersDev, project.configFile, undefined)}`);
   console.log(
     `prepared  ${outDir} (${formatKiB(Bun.file(generatedPath).size)} of source${assets ? `, ${assets.files} asset files, ${assetsPath(cfg.assets)}` : ""})`,
   );
@@ -1277,7 +1284,11 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     io.warn(`! ${error.message}; the plan below uses a placeholder team`);
   }
   const team = session?.slug ?? account ?? "<team>";
-  const hosts = [hostFor(name, team)];
+  const platformName = hostFor(name, team);
+  const workersDev = project.workersDev;
+  // `hosts` is what this deploy adds to the app's routes, `unroute` what it takes out: only the platform name, and never another route.
+  const hosts = workersDev.enabled ? [platformName] : [];
+  const unroute = workersDev.enabled ? [] : [platformName];
 
   const cfg = project.config;
   const services = cfg.services ?? [];
@@ -1319,7 +1330,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
   console.log(`app       ${bold(name)}`);
   console.log(`team      ${team}${session ? "" : dim("  (not resolved)")}`);
   console.log(`endpoint  ${apiUrl}`);
-  console.log(`route     https://${hosts[0]}`);
+  console.log(`route     ${describePlatformName(workersDev, project.configFile, platformName)}`);
   if (assets) console.log(`assets    ${assets.files} files, ${assetsPath(cfg.assets)}`);
   for (const line of describeCloudBindings(cloudBindings)) console.log(`binding   ${line}`);
   if (services.length > 0)
@@ -1338,6 +1349,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     created: boolean;
     generation: number | undefined;
     url: string | undefined;
+    routes: string[];
     applied: boolean | "skipped";
     buildId?: string;
   }) => {
@@ -1349,6 +1361,14 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     console.log(`\n${leaf("🌱")} ${bold(leaf(`${result.created ? "Created" : "Updated"} ${name}`))}`);
     if (result.url) {
       console.log(`  ${bold(result.url)}`);
+    } else if (result.routes.length === 0) {
+      console.log(
+        dim(
+          `  no public address: workers_dev is false and the app has no other route (set it to true, or add a route in the dashboard)`,
+        ),
+      );
+    } else {
+      console.log(dim(`  not on ${platformName}; routed on ${result.routes.join(", ")}`));
     }
     console.log(dim(`  generation ${result.generation}  ·  team ${team}`));
     if (result.applied === false) {
@@ -1375,6 +1395,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
           compatibilityDate: cfg.compatibility_date,
           secrets: secretValues,
           hosts,
+          unroute,
           sourcePath,
           cli: { version: CLI_VERSION },
           assets,
@@ -1403,6 +1424,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
         tokenFromEnv,
         project: name,
         hosts,
+        unroute,
         modulePath: modulePath!,
         assets,
         noWait,

@@ -440,7 +440,13 @@ describe("cloud deploy", () => {
     const cloud = startFakeCloud({ applyStates: ["pending", "applied"] });
     try {
       const result = await deployToCloud(plan(cloud.url), fakeIo().io);
-      expect(result).toEqual({ created: true, generation: 1, url: "https://hello.acme.sproutboat.app", applied: true });
+      expect(result).toEqual({
+        created: true,
+        generation: 1,
+        url: "https://hello.acme.sproutboat.app",
+        routes: ["hello.acme.sproutboat.app"],
+        applied: true,
+      });
       expect(cloud.spec).toMatchObject({ hosts: ["hello.acme.sproutboat.app"] });
       expect(cloud.modules.size).toBe(1);
       const paths = cloud.calls.map((c) => `${c.method} ${c.path.replace(/[0-9a-f]{64}/, "<sha>")}`);
@@ -883,6 +889,46 @@ describe("custom domains survive a deploy", () => {
       expect(trimmed.spec.hosts).toEqual(["risulta.dev", "hello.acme.sproutboat.app"]);
     } finally {
       trimmed.stop();
+    }
+  });
+
+  test("workers_dev false takes the platform name out and keeps every other route", async () => {
+    const cloud = startFakeCloud({ existingHosts: OPERATOR_ADDED });
+    try {
+      const result = await deployToCloud(
+        { ...plan(cloud.url), hosts: [], unroute: ["hello.acme.sproutboat.app"] },
+        fakeIo().io,
+      );
+      expect(cloud.written.at(-1)).toMatchObject({ hosts_patch: { remove: ["hello.acme.sproutboat.app"] } });
+      expect(cloud.written.at(-1)).not.toHaveProperty("hosts");
+      expect(cloud.spec.hosts).toEqual(["risulta.dev", "risulta.dev/blog"]);
+      expect(result).toMatchObject({ url: undefined, routes: ["risulta.dev", "risulta.dev/blog"] });
+    } finally {
+      cloud.stop();
+    }
+  });
+
+  test("workers_dev false on a first deploy leaves the app with no route at all, and the Cloud takes it", async () => {
+    const cloud = startFakeCloud();
+    try {
+      const result = await deployToCloud(
+        { ...plan(cloud.url), hosts: [], unroute: ["hello.acme.sproutboat.app"] },
+        fakeIo().io,
+      );
+      expect(cloud.spec.hosts).toEqual([]);
+      expect(result).toMatchObject({ created: true, url: undefined, routes: [] });
+    } finally {
+      cloud.stop();
+    }
+  });
+
+  test("a Cloud without hosts_patch still loses the platform name: the live routes are sent back without it", async () => {
+    const cloud = startFakeCloud({ existingHosts: OPERATOR_ADDED, legacyHosts: true });
+    try {
+      await deployToCloud({ ...plan(cloud.url), hosts: [], unroute: ["hello.acme.sproutboat.app"] }, fakeIo().io);
+      expect(cloud.spec.hosts).toEqual(["risulta.dev", "risulta.dev/blog"]);
+    } finally {
+      cloud.stop();
     }
   });
 

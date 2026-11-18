@@ -177,6 +177,31 @@ describe("buildAndDeploy", () => {
     });
   });
 
+  test("workers_dev false: the build carries a hosts_patch that removes the platform name and nothing else", async () => {
+    const live = ["hello.acme.sproutboat.app", "risulta.dev"];
+    await withCloud({ existingHosts: live }, async (cloud) => {
+      const result = await buildAndDeploy(
+        plan(cloud.url, { hosts: [], unroute: ["hello.acme.sproutboat.app"] }),
+        fakeIo().io,
+      );
+      expect(cloud.buildRequests[0]).toMatchObject({
+        spec: { hosts_patch: { remove: ["hello.acme.sproutboat.app"] } },
+      });
+      expect(cloud.buildRequests[0]!.spec).not.toHaveProperty("hosts_patch.add");
+      expect(cloud.spec.hosts).toEqual(["risulta.dev"]);
+      expect(result).toMatchObject({ url: undefined, routes: ["risulta.dev"] });
+    });
+  });
+
+  test("workers_dev false against a Cloud without hosts_patch sends the live routes back without the platform name", async () => {
+    const live = ["hello.acme.sproutboat.app", "risulta.dev"];
+    await withCloud({ existingHosts: live, legacyHosts: true }, async (cloud) => {
+      await buildAndDeploy(plan(cloud.url, { hosts: [], unroute: ["hello.acme.sproutboat.app"] }), fakeIo().io);
+      expect(cloud.buildRequests[0]).toMatchObject({ spec: { hosts: ["risulta.dev"] } });
+      expect(cloud.spec.hosts).toEqual(["risulta.dev"]);
+    });
+  });
+
   test("a Cloud without hosts_patch gets the live routes sent back with the build", async () => {
     await withCloud({ existingHosts: ["risulta.dev"], legacyHosts: true }, async (cloud) => {
       const { io, lines } = fakeIo();

@@ -199,7 +199,10 @@ export type CloudDeployPlan = SpecExtras & {
   token: string;
   tokenFromEnv: boolean;
   project: string;
+  /** Routes the deploy adds (the platform name, unless `workers_dev` is false). */
   hosts: string[];
+  /** Routes the deploy takes out (the platform name when `workers_dev` is false); every other route stays. */
+  unroute?: string[];
   modulePath: string;
   assets?: AssetBundle;
   noWait: boolean;
@@ -212,6 +215,8 @@ export type CloudDeployResult = {
   created: boolean;
   generation: number;
   url: string | undefined;
+  /** The routes the app holds after this deploy, as far as this deploy knows (those it read, plus its own change). */
+  routes: string[];
   applied: boolean | "skipped";
 };
 
@@ -222,7 +227,8 @@ type SpecAdditions = {
   queue_consumers?: RecordQueueConsumer[];
   secrets_patch?: { set: Record<string, string> };
 };
-type HostsField = { hosts_patch: { add: string[] } } | { hosts: string[] };
+type HostsPatch = { add?: string[]; remove?: string[] };
+type HostsField = { hosts_patch: HostsPatch } | { hosts: string[] };
 type AppSpec = { module: { sha256: string }; assets_manifest_ref?: string } & HostsField & SpecAdditions;
 type Call = { method: string; path: string; body?: BodyInit; json?: object; ok?: number[] };
 type CallResult = { status: number; text: string; body?: JsonObject; headers: Headers };
@@ -251,29 +257,40 @@ export function makeCall(plan: CloudCredentials): CallFn {
   };
 }
 
+/** The routes after a change: removals first, then additions appended, what stays keeps its place (the Cloud's own rule). */
+export const routesAfter = (live: string[], add: string[], remove: string[]): string[] => {
+  const kept = live.filter((host) => !remove.includes(host));
+  return [...kept, ...add.filter((host) => !kept.includes(host))];
+};
+
 /**
- * Send an app spec that adds the deploy's own hosts (the `<project>.<team>.sproutboat.app` name) to the app's routes and
- * removes none. `hosts` on the Cloud is the whole list, so sending only the default host would unroute every custom domain an
- * operator added; `hosts_patch` leaves the others alone, as `wrangler deploy` leaves dashboard routes when the config declares
- * none. A Cloud that predates `hosts_patch` refuses the key by name; then the live routes (read at the start of this deploy)
- * are merged here and sent as `hosts`.
+ * Send an app spec that adds the deploy's own hosts (the `<project>.<team>.sproutboat.app` name) to the app's routes, or takes
+ * it out (`unroute`, when `workers_dev` is false), and touches no other. `hosts` on the Cloud is the whole list, so sending only
+ * the default host would unroute every custom domain an operator added; `hosts_patch` leaves the others alone, as
+ * `wrangler deploy` leaves dashboard routes when the config declares none. A Cloud that predates `hosts_patch` refuses the key by
+ * name; then the live routes (read at the start of this deploy) are merged here and sent as `hosts`.
  */
 async function sendWithHosts(
   plan: CloudCredentials,
   call: CallFn,
   wanted: string[],
+  unroute: string[],
   live: string[],
   io: CloudIo,
   request: (hosts: HostsField) => Call,
 ): Promise<CallResult> {
-  const first = request({ hosts_patch: { add: wanted } });
+  // `add` stays in the body when it is the only part (as every older CLI sent it); `remove` rides along only when there is one.
+  const patch: HostsPatch = {};
+  if (wanted.length > 0 || unroute.length === 0) patch.add = wanted;
+  if (unroute.length > 0) patch.remove = unroute;
+  const first = request({ hosts_patch: patch });
   const answer = await call({ ...first, ok: [...(first.ok ?? []), 400] });
   if (answer.status !== 400) return answer;
   const body = answer.body;
   if (body?.path !== "hosts_patch" || !String(body.error).startsWith("unknown key"))
     throw new CloudError(explainApiFailure(400, answer.text, plan.tokenFromEnv));
   io.log(dim("  hosts   this Cloud has no hosts_patch yet; sending its current routes back with this deploy's"));
-  return call(request({ hosts: [...live, ...wanted.filter((host) => !live.includes(host))] }));
+  return call(request({ hosts: routesAfter(live, wanted, unroute) }));
 }
 
 /** What the app holds now: tells a first deploy from an update, keeps its assets when this deploy has none, and lists its routes. */
@@ -339,7 +356,7 @@ export async function deployToCloud(plan: CloudDeployPlan, io: CloudIo): Promise
   io.log(`  module  ${sha.slice(0, 12)} (${(bytes.byteLength / 1024).toFixed(0)} KiB)`);
   await call({ method: "PUT", path: `/v1/modules/${sha}`, body: bytes });
 
-  const put = await sendWithHosts(plan, call, plan.hosts, liveHosts, io, (hosts) => {
+  const put = await sendWithHosts(plan, call, plan.hosts, plan.unroute ?? [], liveHosts, io, (hosts) => {
     const spec: AppSpec = { module: { sha256: sha }, ...hosts };
     if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
     applyExtras(spec, wiring, plan.secrets, plan.cloudBindings);
@@ -348,10 +365,11 @@ export async function deployToCloud(plan: CloudDeployPlan, io: CloudIo): Promise
   const generation = put.body?.record_generation;
   if (!isSafeInteger(generation)) throw new CloudError("the Cloud's reply carried no record generation");
   const url = plan.hosts[0] === undefined ? undefined : `https://${plan.hosts[0]}`;
-  if (plan.noWait) return { created, generation, url, applied: "skipped" };
+  const routes = routesAfter(liveHosts, plan.hosts, plan.unroute ?? []);
+  if (plan.noWait) return { created, generation, url, routes, applied: "skipped" };
 
   const applied = await waitForApply(call, plan, generation, io);
-  return { created, generation, url, applied };
+  return { created, generation, url, routes, applied };
 }
 
 async function pushAssets(call: CallFn, bundle: AssetBundle, io: CloudIo): Promise<void> {
@@ -441,7 +459,10 @@ type BuildCli = { version: string; runtime?: string; toolchain?: string };
 export type BuildPlan = CloudCredentials &
   SpecExtras & {
     project: string;
+    /** Routes the deploy adds (the platform name, unless `workers_dev` is false). */
     hosts: string[];
+    /** Routes the deploy takes out (the platform name when `workers_dev` is false); every other route stays. */
+    unroute?: string[];
     /** The bundled source (sprout.generated.js, the "generated" input kind). */
     sourcePath: string;
     cli: BuildCli;
@@ -472,6 +493,8 @@ export type BuildDeployResult = {
   /** Undefined when --no-wait returned before the build finished. */
   generation: number | undefined;
   url: string | undefined;
+  /** The routes the app holds after this deploy, as far as this deploy knows (those it read, plus its own change). */
+  routes: string[];
   applied: boolean | "skipped";
   buildId: string;
   build: BuildView;
@@ -773,7 +796,7 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
   if (plan.cli.toolchain) cli.toolchain = plan.cli.toolchain;
   const build = { v: 1, name: plan.project, cli };
   // The routes are merged when the build is applied, minutes from now, so one added meanwhile is kept too.
-  const accepted = await sendWithHosts(plan, call, plan.hosts, liveHosts, io, (hosts) => {
+  const accepted = await sendWithHosts(plan, call, plan.hosts, plan.unroute ?? [], liveHosts, io, (hosts) => {
     const spec: BuildSpec = { ...hosts };
     if (assetsRef !== undefined) spec.assets_manifest_ref = assetsRef;
     // The build spec is stored in plaintext by the Cloud: secrets never go in it (they follow the build, below).
@@ -788,6 +811,7 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
   if (accepted.status === 429 || accepted.status === 503) throw new CloudError(explainBuildRefusal(accepted));
   let view = parseBuildView(accepted.body);
   const url = plan.hosts[0] === undefined ? undefined : `https://${plan.hosts[0]}`;
+  const routes = routesAfter(liveHosts, plan.hosts, plan.unroute ?? []);
 
   let shown = "";
   const onState = (state: string, position: number | null, waiting: string | null) => {
@@ -802,7 +826,7 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
     onState(view.state, view.position, view.waiting);
     if (plan.noWait) {
       io.log(`  Build      ${view.id} accepted; status at /v1/builds/${view.id}`);
-      return { created, generation: undefined, url, applied: "skipped", buildId: view.id, build: view };
+      return { created, generation: undefined, url, routes, applied: "skipped", buildId: view.id, build: view };
     }
     try {
       view = await followBuild(plan, call, view, io, onState, signal);
@@ -832,7 +856,7 @@ export async function buildAndDeploy(plan: BuildPlan, io: CloudIo, signal?: Abor
   if (secretNames.length > 0) {
     generation = await patchSecretsAfterBuild(call, plan.project, plan.secrets!, generation, io);
   }
-  if (plan.noWait) return { created, generation, url, applied: "skipped", buildId: view.id, build: view };
+  if (plan.noWait) return { created, generation, url, routes, applied: "skipped", buildId: view.id, build: view };
   const applied = await waitForApply(call, plan, generation, io, signal);
-  return { created, generation, url, applied, buildId: view.id, build: view };
+  return { created, generation, url, routes, applied, buildId: view.id, build: view };
 }

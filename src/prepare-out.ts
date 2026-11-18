@@ -6,7 +6,9 @@
  *   sprout.generated.js         the bundled, wrapped source the Cloud compiles (the same file `build --standalone --emit-only` writes)
  *   build.json                  {v:1, name, cli:{version}}
  *   spec.json                   what the app spec carries beyond hosts, assets and the module: bindings, crons, queue consumers, and the
- *                               service bindings BY NAME (the API resolves them against the team's apps; this process cannot)
+ *                               service bindings BY NAME (the API resolves them against the team's apps; this process cannot), and
+ *                               `workers_dev: false` when the config turns the platform name off (absent means on, so a Cloud that
+ *                               predates the key still gets a spec it accepts)
  *   assets/manifest.json        the manifest exactly as it is uploaded; the API hashes it
  *   assets/blobs/<sha256>       each distinct asset file once
  */
@@ -22,6 +24,7 @@ type PreparedSpec = {
   crons?: string[];
   queue_consumers?: RecordQueueConsumer[];
   services?: ServiceRef[];
+  workers_dev?: false;
 };
 
 export type PrepareOutInput = {
@@ -33,6 +36,8 @@ export type PrepareOutInput = {
   cloudBindings: CloudBindings;
   services: ServiceRef[];
   assets: AssetBundle | undefined;
+  /** Whether the app is served on its platform name (the effective `workers_dev`). Only false is written. */
+  workersDev: boolean;
 };
 
 export function writePrepareOut(i: PrepareOutInput) {
@@ -44,6 +49,7 @@ export function writePrepareOut(i: PrepareOutInput) {
   if (i.cloudBindings.bindings.length > 0) spec.bindings = i.cloudBindings.bindings;
   if (i.cloudBindings.crons.length > 0) spec.crons = i.cloudBindings.crons;
   if (i.cloudBindings.queue_consumers.length > 0) spec.queue_consumers = i.cloudBindings.queue_consumers;
+  if (!i.workersDev) spec.workers_dev = false;
   if (i.services.length > 0) spec.services = i.services.map(({ binding, service }) => ({ binding, service }));
   writeFileSync(join(i.outDir, "spec.json"), `${JSON.stringify(spec)}\n`);
   let assetFiles = 0;
