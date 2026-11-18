@@ -10,6 +10,10 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.59.0] - 2026-11-18
+
+Same toolchain, runtime and wire as 0.58.1 (`@sproutboat/toolchain` 0.28.0, `@sproutboat/runtime` 0.47.0, `@sproutboat/wire` 0.22.7), so there is no generation change.
+
 ### Added
 
 - **`workers_dev` in `sproutboat.jsonc` (and a config named with `--config`, such as `wrangler.jsonc`) turns the platform name off, as in Wrangler.** Every Cloud deploy added `<app>.<team>.sproutboat.app` to the app's routes and nothing could stop it, so a site on its own domain was served on a second address. With `"workers_dev": false` the deploy removes that one name (`hosts_patch.remove`) and leaves every other route as it is; true, or no key, adds it as before (Wrangler defaults it to true when the config has no `route` or `routes`; this config has neither, so the default is always true). A Cloud that predates `hosts_patch` gets the live routes back without the name. An app with no route at all is allowed, as in Wrangler, and the deploy says it has no public address. `deploy` prints one `route` line saying whether the name is on or off and why (the config or the default), in `--dry-run` and `--prepare-out` too; `--prepare-out` writes `workers_dev: false` into `spec.json` only when the config says so. A value that is not true or false is an error. Turning the name off in the dashboard lasts only until the next deploy, as in Cloudflare, unless the config says `workers_dev: false`. Wrangler's `preview_urls` has no counterpart here.
@@ -1906,7 +1910,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/sproutboat/cli/compare/v0.58.1...HEAD
+[Unreleased]: https://github.com/sproutboat/cli/compare/v0.59.0...HEAD
+[0.59.0]: https://github.com/sproutboat/cli/compare/v0.58.1...v0.59.0
 [0.58.1]: https://github.com/sproutboat/cli/compare/v0.58.0...v0.58.1
 [0.58.0]: https://github.com/sproutboat/cli/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/sproutboat/cli/compare/v0.56.1...v0.57.0
