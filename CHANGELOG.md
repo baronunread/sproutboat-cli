@@ -10,6 +10,16 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.58.0] - 2026-11-18
+
+Same toolchain, runtime and wire as 0.57.0 (`@sproutboat/toolchain` 0.28.0, `@sproutboat/runtime` 0.47.0, `@sproutboat/wire` 0.22.7), so there's no generation change. Cloud deploys of sites with static assets now work as they do with the operator tool.
+
+### Fixed
+
+- **A Cloud deploy no longer bakes the static assets into the module.** They go only to the Cloud's asset store, where the edge serves them. A site with about 1 MiB of assets used to fail to compile (`static data exceeds module ABI region`).
+- **Cloud deploys upload brotli and gzip copies of compressible assets**, so the edge serves them compressed. The rule is the same as the operator tool's: text, JSON, XML, SVG and WASM files of at least 1 KiB, kept when at least 10% smaller. For example, sproutboat.com's `/` is 9,873 bytes instead of 42,456.
+- **`.md` and `.mdx` assets are served as `text/markdown; charset=utf-8`.** They used to have no content type, so browsers downloaded them.
+
 ## [0.57.0] - 2026-11-17
 
 Built on `@sproutboat/toolchain` 0.28.0 (Porffor alpha 25), with `@sproutboat/runtime` 0.47.0 and `@sproutboat/wire` 0.22.7 kept as in 0.56.1. This is the runtime generation bb0aefe9 that Sproutboat Cloud runs. Every app is recompiled on its next build. **Breaking for standalone builds: Porffor alpha 25 is now the only compiler; alpha 24 is no longer supported.**
@@ -1884,7 +1894,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/sproutboat/cli/compare/v0.57.0...HEAD
+[Unreleased]: https://github.com/sproutboat/cli/compare/v0.58.0...HEAD
+[0.58.0]: https://github.com/sproutboat/cli/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/sproutboat/cli/compare/v0.56.1...v0.57.0
 [0.56.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.55.0...v0.56.0
 [0.55.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.54.0...v0.55.0
