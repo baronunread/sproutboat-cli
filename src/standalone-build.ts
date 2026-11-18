@@ -58,6 +58,19 @@ function assertStandaloneSupported(input: BuildInput): void {
 }
 
 /**
+ * Whether the worker of a Cloud deploy can read its own assets, so the module has to carry them. Cloudflare gives the worker
+ * `env.<BINDING>` only when `assets.binding` is set, and runs it before the files only for `run_worker_first` (here
+ * `run_sprout_first`): `true` or a non-empty route list. A worker with either calls `env.ASSETS.fetch(request)`, which reads the
+ * module's embedded files; the Cloud's edge serves a request the worker never sees. An app with neither has its files served
+ * by the edge alone, and the module carries none (a module's static data is limited to about 1 MiB).
+ */
+export function workerReadsAssets(assets: BuildInput["config"]["assets"]): boolean {
+  if (!assets) return false;
+  const first = assets.run_sprout_first;
+  return Boolean(assets.binding) || first === true || (Array.isArray(first) && first.length > 0);
+}
+
+/**
  * `sproutboat build --standalone --emit-only`: the standalone build up to and
  * including `sprout.generated.js`, byte for byte what a full standalone build
  * compiles, at the same path. Every check that fails a standalone build fails
@@ -70,8 +83,9 @@ export async function emitStandalone(
 ): Promise<{ generatedPath: string }> {
   if (!options.forCloud) assertStandaloneSupported(input);
   // A Cloud deploy sends the assets as a manifest the Cloud's edge serves; baking them into the module breaks its compile past about 1 MiB
-  // ("static data exceeds module ABI region").
-  const bakeAssets = options.forCloud !== true;
+  // ("static data exceeds module ABI region"). A worker that reads its assets (a binding, or run_sprout_first) keeps them in the module
+  // as well, as in 0.57.0: its `env.ASSETS.fetch` has no other source.
+  const bakeAssets = options.forCloud !== true || workerReadsAssets(input.config.assets);
   return emitGenerated({ ...input, transport: "embedded", bakeAssets });
 }
 

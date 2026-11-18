@@ -4,8 +4,11 @@
   "type": "module",
   "scripts": {
     "build": "bun build-web.ts",
-    "deploy": "bun run build && bunx sproutboat deploy",
+    "deploy": "bun run build && sproutboat deploy",
     "dev": "bun serve.ts",
     "test": "bun harness.ts"
+  },
+  "devDependencies": {
+    "sproutboat": "0.58.1"
   }
 }
