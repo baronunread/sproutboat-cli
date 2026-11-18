@@ -3,7 +3,7 @@
  * Like harness.ts but it stays up: compile the sprout for the host, start the
  * broker + a stub upstream, boot the sprout, print the URLs, and wait.
  *
- *   bun examples/kitchen-sink/serve.ts
+ *   bun dogfood/kitchen-sink/serve.ts
  *
  * Ctrl-C to stop. This is a dev convenience, not the platform path.
  */

@@ -4,7 +4,7 @@
  * in-process broker (KV / D1 / R2 / queue / DO / analytics / cron) plus a stub upstream, then drives the dashboard's
  * API, its limits and its chat room over HTTP.
  *
- *   bun examples/kitchen-sink/harness.ts
+ *   bun dogfood/kitchen-sink/harness.ts
  *
  * This is the local stand-in for the platform: the real supervisor spawns the same broker per deployment and passes
  * SB_BROKER_PORT / SB_BROKER_TOKEN / SB_SPROUT_URL to the sprout, as test/fixtures/lib/backends.ts does. The binding

@@ -4,7 +4,7 @@
  * The harness (harness.ts) runs the compiled sprout against the real broker; this runs in a second and
  * can make an hour or a day pass.
  *
- *   bun test examples/kitchen-sink/worker.test.ts
+ *   bun test dogfood/kitchen-sink/worker.test.ts
  */
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
