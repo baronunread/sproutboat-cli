@@ -1345,7 +1345,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
   }
   const tokenFromEnv = session!.source !== "stored login";
   const noWait = args.includes("--no-wait");
-  const printResult = (result: {
+  const printResult = async (result: {
     created: boolean;
     generation: number | undefined;
     url: string | undefined;
@@ -1361,14 +1361,19 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     console.log(`\n${leaf("🌱")} ${bold(leaf(`${result.created ? "Created" : "Updated"} ${name}`))}`);
     if (result.url) {
       console.log(`  ${bold(result.url)}`);
-    } else if (result.routes.length === 0) {
-      console.log(
-        dim(
-          `  no public address: workers_dev is false and the app has no other route (set it to true, or add a route in the dashboard)`,
-        ),
-      );
     } else {
-      console.log(dim(`  not on ${platformName}; routed on ${result.routes.join(", ")}`));
+      // The routes the deploy read before it started can be stale by now (a build takes minutes), so ask the Cloud again.
+      const routes = await listCloudRoutes({ apiUrl, token: session!.token, tokenFromEnv }, name).then(
+        (live) => live.routes.map((entry) => entry.route),
+        () => result.routes,
+      );
+      if (routes.length === 0)
+        console.log(
+          dim(
+            `  no public address: workers_dev is false and the app has no other route (set it to true, or add a route in the dashboard)`,
+          ),
+        );
+      else console.log(dim(`  not on ${platformName}; routed on ${routes.join(", ")}`));
     }
     console.log(dim(`  generation ${result.generation}  ·  team ${team}`));
     if (result.applied === false) {
@@ -1404,7 +1409,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
         io,
         controller.signal,
       );
-      printResult(result);
+      await printResult(result);
     } catch (error) {
       if (error instanceof Interrupted) {
         console.error(error.message);
@@ -1435,7 +1440,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
       },
       io,
     );
-    printResult(result);
+    await printResult(result);
   } finally {
     if (compiled) rmSync(modulePath!, { force: true });
   }
