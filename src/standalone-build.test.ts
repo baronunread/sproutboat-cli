@@ -136,3 +136,36 @@ test("--release and SPROUTBOAT_RELEASE choose the release build; the default is 
   expect(isReleaseBuild([], { SPROUTBOAT_RELEASE: "true" })).toBe(true);
   for (const off of ["", "0", "false", "FALSE"]) expect(isReleaseBuild([], { SPROUTBOAT_RELEASE: off })).toBe(false);
 });
+
+test("a Cloud emit keeps the assets settings but bakes no file into the module; a standalone emit still bakes them", async () => {
+  const projectDir = await mkdtemp(join(tmpdir(), "sb-emit-assets-"));
+  try {
+    const marker = "UNIQUE-ASSET-BYTES-0123456789";
+    await Bun.write(join(projectDir, "site/index.html"), `<h1>${marker}</h1>${"x".repeat(2000)}`);
+    const config = {
+      name: "assets-app",
+      main: "src/index.js",
+      compatibility_date: "2026-10-01",
+      assets: {
+        directory: "site",
+        binding: "ASSETS",
+        not_found_handling: "404-page" as const,
+        run_sprout_first: ["/api/*"],
+      },
+    };
+    const input = {
+      projectDir,
+      sourcePath: join(projectDir, "src/index.js"),
+      source: `export default { fetch(r, env) { return env.ASSETS.fetch(r); } };`,
+      config,
+    };
+    const baked = await readFile((await emitStandalone(input)).generatedPath, "utf8");
+    expect(baked).toContain(marker);
+    const cloud = await readFile((await emitStandalone(input, { forCloud: true })).generatedPath, "utf8");
+    expect(cloud).not.toContain(marker);
+    expect(cloud).toContain("404-page");
+    expect(cloud).toContain("/api/*");
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+});

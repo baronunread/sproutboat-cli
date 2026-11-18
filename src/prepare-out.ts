@@ -12,7 +12,7 @@
  */
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AssetBundle, ServiceRef } from "./cloud-deploy";
+import { readAssetBlob, type AssetBundle, type ServiceRef } from "./cloud-deploy";
 import type { CloudBindings, RecordBinding, RecordQueueConsumer } from "./cloud-bindings";
 
 /** What spec.json carries: the keys the Cloud's builder accepts from a repository build, and no others. */
@@ -49,8 +49,8 @@ export function writePrepareOut(i: PrepareOutInput) {
   let assetFiles = 0;
   if (i.assets) {
     writeFileSync(join(i.outDir, "assets", "manifest.json"), i.assets.manifestText);
-    for (const [hash, file] of i.assets.blobs) {
-      copyFileSync(file, join(i.outDir, "assets", "blobs", hash));
+    for (const [hash, blob] of i.assets.blobs) {
+      writeFileSync(join(i.outDir, "assets", "blobs", hash), readAssetBlob(blob));
       assetFiles++;
     }
   }

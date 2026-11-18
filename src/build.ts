@@ -60,6 +60,12 @@ export type BuildInput = {
    * input to the compile cache key, so the two kinds of binary never share an entry.
    */
   lto?: boolean;
+  /**
+   * `false` keeps the assets settings (not_found_handling, run_sprout_first, the binding) but bakes none of the files into the module. The
+   * Cloud deploy sets it: its files travel as an asset manifest to the Cloud's asset store and its edge serves them, so the module carries
+   * none and its static data stays far under the ABI region (1 MiB). Defaults to `true`: a standalone binary has no files beside it.
+   */
+  bakeAssets?: boolean;
   /** Reuse a previously compiled native sprout when only sidecar assets changed. */
   reuseSproutPath?: string;
   /** An isolated artifact directory, used by dev candidates to avoid mixing snapshots. */
@@ -195,7 +201,13 @@ async function prepareBuild(input: BuildInput) {
   // after the compile, and the compile is what needs them. Bytes travel as a
   // latin1 string, one char per byte, which is what the asset shim hands back.
   let bakedAssets: { manifest: AssetManifest; files: Record<string, string> } | undefined;
-  if (embedded && assetDir && assetManifest) {
+  if (embedded && assetDir && assetManifest && input.bakeAssets === false) {
+    // The settings only, as a Cloud deploy of an empty assets directory always had: the files are in the Cloud's asset store.
+    bakedAssets = {
+      manifest: { notFound: assetManifest.notFound, runSproutFirst: assetManifest.runSproutFirst, files: {} },
+      files: {},
+    };
+  } else if (embedded && assetDir && assetManifest) {
     const files: Record<string, string> = {};
     let total = 0;
     for (const key of Object.keys(assetManifest.files)) {

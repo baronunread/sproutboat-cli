@@ -69,7 +69,10 @@ export async function emitStandalone(
   options: { forCloud?: boolean } = {},
 ): Promise<{ generatedPath: string }> {
   if (!options.forCloud) assertStandaloneSupported(input);
-  return emitGenerated({ ...input, transport: "embedded" });
+  // A Cloud deploy sends the assets as a manifest the Cloud's edge serves; baking them into the module breaks its compile past about 1 MiB
+  // ("static data exceeds module ABI region").
+  const bakeAssets = options.forCloud !== true;
+  return emitGenerated({ ...input, transport: "embedded", bakeAssets });
 }
 
 export async function buildStandalone(input: StandaloneBuildInput): Promise<StandaloneBuildResult> {

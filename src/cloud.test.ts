@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir, platform } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import {
 } from "./cloud";
 import {
   buildAssetBundle,
+  readAssetBlob,
   type CloudDeployPlan,
   compileModule,
   deployToCloud,
@@ -483,6 +485,40 @@ describe("cloud deploy", () => {
       cloud.stop();
     }
     expect(() => buildAssetBundle(work, { directory: "missing" })).toThrow("not found");
+  });
+
+  test("the asset manifest carries br and gz copies of compressible files, and a type for markdown", async () => {
+    const site = join(work, "variants");
+    await mkdir(site);
+    const html = `<!doctype html><title>x</title>${"<p>hello hello hello</p>".repeat(200)}`;
+    await writeFile(join(site, "index.html"), html);
+    await writeFile(join(site, "small.css"), "body{}");
+    await writeFile(join(site, "page.md"), "# a page\n".repeat(300));
+    await writeFile(join(site, "logo.png"), Buffer.alloc(4000, 7));
+    const bundle = buildAssetBundle(work, { directory: "variants" });
+    // SAFETY: the text is the manifest buildAssetBundle just produced; these assertions read exactly the fields below.
+    const manifest = JSON.parse(bundle.manifestText) as {
+      files: Record<
+        string,
+        { type: string; hash: string; br?: { hash: string; size: number }; gz?: { hash: string; size: number } }
+      >;
+    };
+    const index = manifest.files["/index.html"]!;
+    expect(index.br && index.gz).toBeTruthy();
+    expect(index.br!.size).toBeLessThan(html.length * 0.9);
+    expect(gunzipSync(readAssetBlob(bundle.blobs.get(index.gz!.hash)!)).toString()).toBe(html);
+    expect(brotliDecompressSync(readAssetBlob(bundle.blobs.get(index.br!.hash)!)).toString()).toBe(html);
+    expect(manifest.files["/small.css"]!.br).toBeUndefined(); // under 1 KiB
+    expect(manifest.files["/logo.png"]!.br).toBeUndefined(); // not compressible
+    expect(manifest.files["/page.md"]!.type).toBe("text/markdown; charset=utf-8");
+    expect(manifest.files["/page.md"]!.br).toBeTruthy();
+    const cloud = startFakeCloud();
+    try {
+      await deployToCloud(plan(cloud.url, { assets: bundle, noWait: true }), fakeIo().io);
+      expect(cloud.blobs.has(index.br!.hash) && cloud.blobs.has(index.gz!.hash)).toBe(true);
+    } finally {
+      cloud.stop();
+    }
   });
 
   test("a failed apply is an error carrying the host's reason", async () => {
