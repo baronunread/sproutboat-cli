@@ -3,6 +3,6 @@
   "name": "quote-service",
   "main": "src/index.ts",
   // Service bindings between Cloud apps need 2026-11-18 or later; the callee is
-  // set the same way so the pair deploys together (see examples/kitchen-sink).
+  // set the same way so the pair deploys together (see dogfood/kitchen-sink).
   "compatibility_date": "2026-11-18",
 }

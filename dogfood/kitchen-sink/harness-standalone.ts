@@ -2,7 +2,7 @@
 /**
  * The same kitchen-sink checks as harness.ts, against a standalone binary.
  *
- *   bun examples/kitchen-sink/harness-standalone.ts
+ *   bun dogfood/kitchen-sink/harness-standalone.ts
  *
  * harness.ts drives a host sprout with an in-process broker, the shape the supervisor runs in production. This
  * drives one executable that carries the sprout, the assets and the bindings inside it. Both run `runConformance`

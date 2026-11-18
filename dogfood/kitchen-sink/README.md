@@ -218,7 +218,7 @@ GET  /api/chat                        WebSocket upgrade to the ChatRoom object
 ## Run it
 
 ```sh
-cd examples/kitchen-sink
+cd dogfood/kitchen-sink
 bun run build                         # public/ -> site/ (the harnesses and serve.ts do this too)
 bun run test                          # harness.ts, the broker backend
 bun run dev                           # serve.ts: stays up on http://127.0.0.1:8787, stub quote service included
@@ -227,7 +227,7 @@ bun run dev                           # serve.ts: stays up on http://127.0.0.1:8
 With the CLI from this repository:
 
 ```sh
-bun ../../src/main.ts dev --port 8787     # run from examples/kitchen-sink; the quote tile shows its error state
+bun ../../src/main.ts dev --port 8787     # run from dogfood/kitchen-sink; the quote tile shows its error state
 bun ../../src/main.ts build --standalone -c sproutboat.standalone.jsonc --target host
 ```
 

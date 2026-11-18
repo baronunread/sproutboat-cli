@@ -1,4 +1,4 @@
-// The peer of examples/kitchen-sink: its `PEER` service binding calls this app. Deploy this one first.
+// The peer of dogfood/kitchen-sink: its `PEER` service binding calls this app. Deploy this one first.
 //
 // A Worker as a class: fetch() answers HTTP, and every other public method is callable from a service binding
 // over RPC, as `await env.PEER.random()`.

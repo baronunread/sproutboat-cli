@@ -383,7 +383,7 @@
     pre.tabIndex = 0;
     var text = snippets[key];
     if (text) pre.appendChild(highlight(text));
-    else pre.textContent = "The excerpt is written by build-web.ts. Run `bun run build` in examples/kitchen-sink.";
+    else pre.textContent = "The excerpt is written by build-web.ts. Run `bun run build` in dogfood/kitchen-sink.";
     pop.appendChild(head);
     pop.appendChild(pre);
     pop.dataset.filled = "1";
@@ -435,8 +435,8 @@
       $("#compat").textContent = "unknown";
       $("#built").textContent = "no build info";
       $("#size-note").textContent =
-        "build-info.json is missing. Run bun run build in examples/kitchen-sink to measure sizes.";
-      $("#snippet-code").textContent = "build-info.json is missing. Run bun run build in examples/kitchen-sink.";
+        "build-info.json is missing. Run bun run build in dogfood/kitchen-sink to measure sizes.";
+      $("#snippet-code").textContent = "build-info.json is missing. Run bun run build in dogfood/kitchen-sink.";
       return;
     }
     snippets = build.snippets || {};
