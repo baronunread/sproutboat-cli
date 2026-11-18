@@ -123,7 +123,7 @@ type Bindings = Vars &
   Limiters & {
     DB: ReturnType<typeof fakeD1>;
     UPLOADS: ReturnType<typeof fakeBucket>;
-    METRICS: { writeDataPoint(): void };
+    METRICS: { writeDataPoint(): void; query?(): Promise<{ count: number }> };
   };
 type Worker = {
   fetch(request: Request, env: Bindings): Promise<Response>;
@@ -234,6 +234,36 @@ const names = async () => items((await readObject(await call("/api/r2"))).object
 const advance = (ms: number) => {
   clock += ms;
 };
+
+describe("/api/info request count", () => {
+  test("is a counter in D1: seeded once from METRICS, then plus one per request, and METRICS is not scanned again", async () => {
+    let queries = 0;
+    let points = 0;
+    env.METRICS = {
+      writeDataPoint() {
+        points++;
+      },
+      query: async () => {
+        queries++;
+        return { count: 1000 };
+      },
+    };
+    const first = await readObject(await call("/api/info"));
+    // the seed (1000, from the one METRICS.query) and this request itself
+    expect(first.requests).toBe(1001);
+    const second = await readObject(await call("/api/info"));
+    expect(second.requests).toBe(1002);
+    await call("/api/guestbook");
+    expect((await readObject(await call("/api/info"))).requests).toBe(1004);
+    expect(queries).toBe(1);
+    expect(points).toBe(4); // the analytics point is still written for every request
+  });
+
+  test("starts at 0 when METRICS cannot answer, and /healthz is not counted", async () => {
+    await call("/healthz");
+    expect((await readObject(await call("/api/info"))).requests).toBe(1);
+  });
+});
 
 describe("/healthz", () => {
   test("answers 200 JSON, uncached, without touching D1, KV or R2", async () => {

@@ -96,6 +96,14 @@ export async function runConformance(context: RunContext, options: ConformanceOp
       bindings.service === !options.skipServices,
     info.bindings ?? null,
   );
+  const infoAgain = obj((await jget("/api/info")).body);
+  check(
+    "info: the request count is a number that goes up with each request",
+    Number.isInteger(info.requests) &&
+      Number.isInteger(infoAgain.requests) &&
+      Number(infoAgain.requests) > Number(info.requests),
+    { first: info.requests ?? null, second: infoAgain.requests ?? null },
+  );
   const counter1 = obj((await jget("/api/kv/incr", { method: "POST" })).body);
   const counter2 = obj((await jget("/api/kv/incr", { method: "POST" })).body);
   check("KV: the counter tile increments across requests", Number(counter2.n) === Number(counter1.n) + 1, {
