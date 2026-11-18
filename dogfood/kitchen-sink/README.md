@@ -251,6 +251,10 @@ sproutboat secrets put ADMIN_TOKEN                  # optional: the Secrets tile
 bun run deploy                                      # bun run build && sproutboat deploy
 ```
 
+`bun run deploy` runs the CLI this folder pins (`devDependencies.sproutboat`, an exact version), after `bun install`.
+It used to run `bunx sproutboat`, which can pick a stale cached CLI (it picked 0.54.0 once). Bump the pin with each
+CLI release, or deploy a build from this checkout with `bun ../../src/main.ts deploy`.
+
 `sproutboat.jsonc` binds `PEER` to the service named `quote-service`, and both
 configs use compatibility date 2026-11-18, which service bindings between Cloud
 apps need. A service binding must point at a different deployment: one sprout

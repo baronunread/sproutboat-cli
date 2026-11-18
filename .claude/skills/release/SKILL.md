@@ -202,3 +202,7 @@ A toolchain/runtime-driven release here almost never stands alone:
   silently keeps running an old CLI after this release ships. Bump it,
   `bun install`, `bun run build` to confirm it still compiles, then
   `bun run deploy` (it builds and deploys in one step — no separate tag).
+- **Check `dogfood/kitchen-sink/package.json`** (this repo). Its `sproutboat`
+  devDependency is an exact pin, so `bun run deploy` there never picks a stale
+  cached CLI. Bump it in the release PR; it can only be installed once the
+  version is published.

@@ -3,7 +3,15 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPrelude, wrapNativeFetchHandler } from "./compile";
-import { buildStandalone, emitStandalone, isReleaseBuild, unsupportedBindings } from "./standalone-build";
+import type { BuildInput } from "./build";
+import { parseConfig } from "./config";
+import {
+  buildStandalone,
+  emitStandalone,
+  isReleaseBuild,
+  unsupportedBindings,
+  workerReadsAssets,
+} from "./standalone-build";
 test("service bindings cannot work in a standalone binary", () => {
   // They call another deployment through an edge, and a standalone binary has
   // none — so this is a build error rather than a runtime surprise.
@@ -137,34 +145,87 @@ test("--release and SPROUTBOAT_RELEASE choose the release build; the default is 
   for (const off of ["", "0", "false", "FALSE"]) expect(isReleaseBuild([], { SPROUTBOAT_RELEASE: off })).toBe(false);
 });
 
-test("a Cloud emit keeps the assets settings but bakes no file into the module; a standalone emit still bakes them", async () => {
+test("workerReadsAssets: a binding, run_sprout_first true or a non-empty route list; nothing else", () => {
+  const dir = { directory: "site" };
+  expect(workerReadsAssets(undefined)).toBe(false);
+  expect(workerReadsAssets(dir)).toBe(false);
+  expect(workerReadsAssets({ ...dir, not_found_handling: "404-page" })).toBe(false);
+  expect(workerReadsAssets({ ...dir, run_sprout_first: false })).toBe(false);
+  expect(workerReadsAssets({ ...dir, run_sprout_first: [] })).toBe(false);
+  expect(workerReadsAssets({ ...dir, binding: "ASSETS" })).toBe(true);
+  expect(workerReadsAssets({ ...dir, run_sprout_first: true })).toBe(true);
+  expect(workerReadsAssets({ ...dir, run_sprout_first: ["/api/*"] })).toBe(true);
+  expect(workerReadsAssets({ ...dir, binding: "ASSETS", run_sprout_first: false })).toBe(true);
+});
+
+/** Emit a one-file assets project and return the module source of a standalone emit and of a Cloud emit. */
+async function emitBoth(assets: Partial<NonNullable<BuildInput["config"]["assets"]>>) {
   const projectDir = await mkdtemp(join(tmpdir(), "sb-emit-assets-"));
   try {
     const marker = "UNIQUE-ASSET-BYTES-0123456789";
     await Bun.write(join(projectDir, "site/index.html"), `<h1>${marker}</h1>${"x".repeat(2000)}`);
-    const config = {
-      name: "assets-app",
-      main: "src/index.js",
-      compatibility_date: "2026-10-01",
-      assets: {
-        directory: "site",
-        binding: "ASSETS",
-        not_found_handling: "404-page" as const,
-        run_sprout_first: ["/api/*"],
-      },
-    };
     const input = {
       projectDir,
       sourcePath: join(projectDir, "src/index.js"),
       source: `export default { fetch(r, env) { return env.ASSETS.fetch(r); } };`,
-      config,
+      config: {
+        name: "assets-app",
+        main: "src/index.js",
+        compatibility_date: "2026-10-01",
+        assets: { directory: "site", ...assets },
+      },
     };
-    const baked = await readFile((await emitStandalone(input)).generatedPath, "utf8");
-    expect(baked).toContain(marker);
+    const standalone = await readFile((await emitStandalone(input)).generatedPath, "utf8");
     const cloud = await readFile((await emitStandalone(input, { forCloud: true })).generatedPath, "utf8");
-    expect(cloud).not.toContain(marker);
-    expect(cloud).toContain("404-page");
-    expect(cloud).toContain("/api/*");
+    return { marker, standalone, cloud };
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+}
+
+test("a Cloud emit of an app with no binding and no worker-first route keeps the settings and bakes no file", async () => {
+  const { marker, standalone, cloud } = await emitBoth({ not_found_handling: "404-page" });
+  expect(standalone).toContain(marker);
+  expect(cloud).not.toContain(marker);
+  expect(cloud).toContain("404-page");
+});
+
+test("a Cloud emit bakes the files in when the worker can read them: a binding, or run_sprout_first (boolean or routes)", async () => {
+  const workerFirstConfigs: Parameters<typeof emitBoth>[0][] = [
+    { binding: "ASSETS" },
+    { run_sprout_first: true },
+    { run_sprout_first: ["/api/*"] },
+    // the kitchen-sink shape (dogfood/kitchen-sink/sproutboat.jsonc)
+    { binding: "ASSETS", not_found_handling: "single-page-application", run_sprout_first: true },
+  ];
+  for (const assets of workerFirstConfigs) {
+    const { marker, cloud } = await emitBoth(assets);
+    expect(cloud, JSON.stringify(assets)).toContain(marker);
+  }
+});
+
+test("the real kitchen-sink config (worker-first, with a binding) gets its assets embedded in a Cloud emit", async () => {
+  const dir = join(import.meta.dir, "../dogfood/kitchen-sink");
+  const parsed = parseConfig(await readFile(join(dir, "sproutboat.jsonc"), "utf8"));
+  if (!parsed.ok) throw new Error(parsed.errors.join("; "));
+  const { assets } = parsed.value;
+  expect(assets).toMatchObject({ binding: "ASSETS", run_sprout_first: true });
+  expect(workerReadsAssets(assets)).toBe(true);
+  // the Cloud emit of this very config, over a stand-in site directory
+  const projectDir = await mkdtemp(join(tmpdir(), "sb-ks-assets-"));
+  try {
+    const marker = "KITCHEN-SINK-PAGE-BYTES-0123456789";
+    await Bun.write(join(projectDir, "site/index.html"), `<h1>${marker}</h1>`);
+    const { generatedPath } = await emitStandalone(
+      {
+        projectDir,
+        sourcePath: join(projectDir, "src/index.js"),
+        source: `export default { fetch(r, env) { return env.ASSETS.fetch(r); } };`,
+        config: { ...parsed.value, services: [] },
+      },
+      { forCloud: true },
+    );
+    expect(await readFile(generatedPath, "utf8")).toContain(marker);
   } finally {
     await rm(projectDir, { recursive: true, force: true });
   }

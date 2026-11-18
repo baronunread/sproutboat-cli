@@ -10,6 +10,14 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.58.1] - 2026-11-18
+
+Same toolchain, runtime and wire as 0.58.0 (`@sproutboat/toolchain` 0.28.0, `@sproutboat/runtime` 0.47.0, `@sproutboat/wire` 0.22.7), so there's no generation change.
+
+### Fixed
+
+- **A Cloud deploy keeps the static assets in the module when the worker reads them.** 0.58.0 left every asset out of the module, so `env.ASSETS.fetch(request)` in a worker answered 404 for every file. The files stay in the module, as before 0.58.0, when `assets.binding` is set (Cloudflare gives the worker `env.ASSETS` only then) or `assets.run_sprout_first` is `true` or a non-empty list of routes. They are still uploaded to the asset store and served by the edge. An app with neither keeps the 0.58.0 behaviour (no files in the module, so a site of about 1 MiB or more still compiles). The deploy prints which of the two it did.
+
 ## [0.58.0] - 2026-11-18
 
 Same toolchain, runtime and wire as 0.57.0 (`@sproutboat/toolchain` 0.28.0, `@sproutboat/runtime` 0.47.0, `@sproutboat/wire` 0.22.7), so there's no generation change. Cloud deploys of sites with static assets now work as they do with the operator tool.
@@ -1894,7 +1902,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/sproutboat/cli/compare/v0.58.0...HEAD
+[Unreleased]: https://github.com/sproutboat/cli/compare/v0.58.1...HEAD
+[0.58.1]: https://github.com/sproutboat/cli/compare/v0.58.0...v0.58.1
 [0.58.0]: https://github.com/sproutboat/cli/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/sproutboat/cli/compare/v0.56.1...v0.57.0
 [0.56.0]: https://github.com/baronunread/sproutboat-cli/compare/v0.55.0...v0.56.0

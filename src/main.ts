@@ -13,7 +13,7 @@ import { LEGACY_TYPES_FILE, TYPES_FILE } from "./types-gen";
 import { checkTypes, parseTypesArgs, planTypes, refreshTypes, removeLegacyTypes, TYPES_USAGE } from "./types-cmd";
 import { bundleHandler, BundleError, type BundleResult } from "./bundle";
 import { runDev } from "./dev";
-import { buildStandalone, emitStandalone, isReleaseBuild } from "./standalone-build";
+import { buildStandalone, emitStandalone, isReleaseBuild, workerReadsAssets } from "./standalone-build";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import {
@@ -563,6 +563,13 @@ async function emitOnly(directory: string | undefined, target: BuildTarget, stan
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
+}
+
+/** One short line for the deploy output: where the worker's `env.ASSETS` reads from (see workerReadsAssets). */
+function assetsPath(assets: Parameters<typeof workerReadsAssets>[0]): string {
+  return workerReadsAssets(assets)
+    ? "kept in the module as well (the worker reads env.ASSETS), and served by the edge"
+    : "served by the edge, none in the module";
 }
 
 /** The standalone source unit the Cloud compile starts from (what `build --standalone --emit-only` prints). */
@@ -1239,7 +1246,7 @@ async function prepareOut(args: string[], outDir: string) {
   });
   console.log(`app       ${bold(name)}`);
   console.log(
-    `prepared  ${outDir} (${formatKiB(Bun.file(generatedPath).size)} of source${assets ? `, ${assets.files} asset files` : ""})`,
+    `prepared  ${outDir} (${formatKiB(Bun.file(generatedPath).size)} of source${assets ? `, ${assets.files} asset files, ${assetsPath(cfg.assets)}` : ""})`,
   );
 }
 
@@ -1313,7 +1320,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
   console.log(`team      ${team}${session ? "" : dim("  (not resolved)")}`);
   console.log(`endpoint  ${apiUrl}`);
   console.log(`route     https://${hosts[0]}`);
-  if (assets) console.log(`assets    ${assets.files} files`);
+  if (assets) console.log(`assets    ${assets.files} files, ${assetsPath(cfg.assets)}`);
   for (const line of describeCloudBindings(cloudBindings)) console.log(`binding   ${line}`);
   if (services.length > 0)
     console.log(`services  ${services.map((entry) => `${entry.binding} -> ${entry.service}`).join(", ")}`);
