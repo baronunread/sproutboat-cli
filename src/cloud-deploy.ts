@@ -5,7 +5,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { readAssetRules, walkAssets, type AssetManifest } from "./assets";
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
+import { readAssetRules, walkAssets, type AssetEntry, type AssetManifest } from "./assets";
 import type { SproutboatConfig } from "./config";
 import { MAX_BINDINGS, type CloudBindings, type RecordBinding, type RecordQueueConsumer } from "./cloud-bindings";
 import { authHeaders, CloudError, explainApiFailure, parseBody, type CloudIo } from "./cloud";
@@ -37,12 +38,26 @@ export function buildFailureHeadline(message: string | undefined): string {
 
 export const hostFor = (project: string, team: string): string => `${project}.${team}.sproutboat.app`;
 
+/** A precompressed copy of a file the Cloud's edge serves to a client that accepts it (manifest `br` and `gz`). */
+type AssetVariant = { hash: string; size: number };
+type CloudAssetEntry = AssetEntry & { br?: AssetVariant; gz?: AssetVariant };
+
+/** Files worth a brotli (q11) and a gzip (9) copy: text, JSON, XML, SVG, WASM. Same rule as tools/sbcloud-assets.ts in the Cloud repo. */
+const COMPRESSIBLE = /^(?:text\/|application\/(?:json|javascript|xml|wasm|manifest\+json)\b|image\/svg\+xml\b)/;
+const MIN_VARIANT_SOURCE = 1024;
+const MARKDOWN_TYPE = "text/markdown; charset=utf-8";
+
+/** What holds a blob's bytes: a file of the project, or the bytes of a precompressed variant made here. */
+export type AssetBlob = { file: string } | { bytes: Uint8Array };
+export const readAssetBlob = (blob: AssetBlob): Uint8Array<ArrayBuffer> =>
+  new Uint8Array("bytes" in blob ? blob.bytes : readFileSync(blob.file));
+
 export type AssetBundle = {
   /** The manifest JSON as it is uploaded; its sha256 names it. */
   manifestText: string;
   manifestSha: string;
-  /** Blob digest to the file that holds it. */
-  blobs: Map<string, string>;
+  /** Blob digest to what holds it. */
+  blobs: Map<string, AssetBlob>;
   files: number;
   bytes: number;
 };
@@ -52,26 +67,51 @@ export function buildAssetBundle(projectDir: string, assets: NonNullable<Sproutb
   const dir = resolve(projectDir, assets.directory);
   if (!existsSync(dir))
     throw new CloudError(`assets.directory "${assets.directory}" not found; run your site build first`);
-  const manifest: AssetManifest = {
+  const files: Record<string, CloudAssetEntry> = walkAssets(dir);
+  const manifest: Omit<AssetManifest, "files"> & { files: Record<string, CloudAssetEntry> } = {
     notFound: assets.not_found_handling ?? "none",
     runSproutFirst: assets.run_sprout_first ?? false,
-    files: walkAssets(dir),
+    files,
   };
   const rules = readAssetRules(dir);
   if (rules.headers.length) manifest.headers = rules.headers;
   if (rules.redirects.length) manifest.redirects = rules.redirects;
-  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
-  const blobs = new Map<string, string>();
+  const blobs = new Map<string, AssetBlob>();
   let bytes = 0;
-  for (const [key, entry] of Object.entries(manifest.files)) {
-    blobs.set(entry.hash, resolve(dir, `.${key}`));
+  for (const [key, entry] of Object.entries(files)) {
+    const file = resolve(dir, `.${key}`);
+    // The shared content-type table has no markdown; without a type the edge serves a .md twin as a download.
+    if (/\.mdx?$/i.test(key)) entry.type = MARKDOWN_TYPE;
+    blobs.set(entry.hash, { file });
     bytes += entry.size;
+    if (COMPRESSIBLE.test(entry.type) && entry.size >= MIN_VARIANT_SOURCE) {
+      const body = readFileSync(file);
+      const candidates: ["br" | "gz", Uint8Array][] = [
+        [
+          "br",
+          brotliCompressSync(body, {
+            params: {
+              [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+              [zlibConstants.BROTLI_PARAM_SIZE_HINT]: body.byteLength,
+            },
+          }),
+        ],
+        ["gz", gzipSync(body, { level: 9 })],
+      ];
+      for (const [encoding, compressed] of candidates) {
+        if (compressed.byteLength > body.byteLength * 0.9) continue;
+        const hash = createHash("sha256").update(compressed).digest("hex");
+        entry[encoding] = { hash, size: compressed.byteLength };
+        blobs.set(hash, { bytes: compressed });
+      }
+    }
   }
+  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
   return {
     manifestText,
     manifestSha: createHash("sha256").update(manifestText).digest("hex"),
     blobs,
-    files: Object.keys(manifest.files).length,
+    files: Object.keys(files).length,
     bytes,
   };
 }
@@ -324,9 +364,13 @@ async function pushAssets(call: CallFn, bundle: AssetBundle, io: CloudIo): Promi
   await Promise.all(
     Array.from({ length: Math.min(4, queue.length) }, async () => {
       for (let hash = queue.shift(); hash !== undefined; hash = queue.shift()) {
-        const file = bundle.blobs.get(hash);
-        if (file === undefined) throw new CloudError("the Cloud asked for a blob the manifest does not list");
-        await call({ method: "PUT", path: `/v1/assets/blobs/${hash}`, body: new Uint8Array(readFileSync(file)) });
+        const blob = bundle.blobs.get(hash);
+        if (blob === undefined) throw new CloudError("the Cloud asked for a blob the manifest does not list");
+        await call({
+          method: "PUT",
+          path: `/v1/assets/blobs/${hash}`,
+          body: readAssetBlob(blob),
+        });
         uploaded++;
       }
     }),
