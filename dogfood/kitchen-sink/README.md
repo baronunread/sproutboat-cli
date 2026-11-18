@@ -48,7 +48,7 @@ Nothing on the page is estimated.
   `Server-Timing: app;dur=...` header and as `ms` in the JSON. The tile latencies, the p50 and
   p99 cards and the chart are built from those values for the requests this tab has made. The
   chat tile shows the room's own handling time, and the client times the round trip itself.
-- **Requests served** is the Analytics Engine data point count (`env.METRICS.query`), one per request, for all visitors.
+- **Requests served** is one counter row in D1 (`stats`), raised by every request with an atomic `UPDATE`, for all visitors; `/healthz` is not counted. It used to be the Analytics Engine data point count (`env.METRICS.query`), which scans every point and so got slower with each visit. The counter was seeded once from that count, and every request still writes its `METRICS` point.
 - **Worker module and Static assets** are file sizes measured by `build-web.ts`
   and written to `site/build-info.json`. The binary's size is not shown live: it depends on the
   target and on `--release`, and `sproutboat build --standalone` prints it. The page links the

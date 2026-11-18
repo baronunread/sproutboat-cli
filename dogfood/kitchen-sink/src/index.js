@@ -637,16 +637,48 @@ function fmtKb(n) {
 // The tables are created once per process, by the first request or trigger that needs them, not on every request.
 let schema;
 async function ensureSchema(env) {
-  schema ??= env.DB.exec(
-    "CREATE TABLE IF NOT EXISTS guestbook (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, msg TEXT, at TEXT);" +
-      "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, label TEXT, ms REAL, at TEXT);" +
-      "CREATE TABLE IF NOT EXISTS quota (key TEXT PRIMARY KEY, bytes INTEGER, expires INTEGER)",
-  );
+  schema ??= (async () => {
+    await env.DB.exec(
+      "CREATE TABLE IF NOT EXISTS guestbook (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, msg TEXT, at TEXT);" +
+        "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, label TEXT, ms REAL, at TEXT);" +
+        "CREATE TABLE IF NOT EXISTS quota (key TEXT PRIMARY KEY, bytes INTEGER, expires INTEGER);" +
+        "CREATE TABLE IF NOT EXISTS stats (name TEXT PRIMARY KEY, n INTEGER NOT NULL)",
+    );
+    await seedRequestCount(env);
+  })();
   try {
     await schema;
   } catch (error) {
     schema = undefined; // a failed attempt is not cached
     throw error;
+  }
+}
+
+// The request count in /api/info. env.METRICS.query() answers a count by scanning every data point, and the
+// app writes one per request, so it gets slower with every visit. This is one row in D1 instead: `UPDATE ... n = n + 1`
+// is atomic, the row never grows, and reading it is a primary-key lookup. The METRICS point is still written
+// for every request (that binding is the one being exercised); it is just not read on the hot path.
+async function seedRequestCount(env) {
+  const have = await env.DB.prepare("SELECT n FROM stats WHERE name = 'requests'").first("n");
+  if (have !== null && have !== undefined) return;
+  // The counter's first run only: start from what METRICS has already counted (once, so the scan is paid once).
+  let n = 0;
+  try {
+    n = Number((await env.METRICS.query({ limit: 1 })).count) || 0;
+  } catch {}
+  await env.DB.prepare("INSERT OR IGNORE INTO stats (name, n) VALUES ('requests', ?)").bind(n).run();
+}
+async function countRequest(env) {
+  try {
+    await env.DB.prepare("UPDATE stats SET n = n + 1 WHERE name = 'requests'").run();
+  } catch {} // the count is a display figure: it never fails a request
+}
+async function requestCount(env) {
+  try {
+    const n = await env.DB.prepare("SELECT n FROM stats WHERE name = 'requests'").first("n");
+    return n === null || n === undefined ? null : Number(n);
+  } catch {
+    return null;
   }
 }
 
@@ -1179,10 +1211,7 @@ async function api(request, env, url, path, t0) {
   if (slow) return slow;
 
   if (path === "/api/info" && method === "GET") {
-    let requests = null;
-    try {
-      requests = (await env.METRICS.query({ limit: 1 })).count;
-    } catch {}
+    const requests = await requestCount(env);
     return timed(
       {
         site: env.SITE_NAME,
@@ -1406,6 +1435,7 @@ export default {
 
       // analytics: one point per request
       env.METRICS.writeDataPoint({ blobs: [request.method, path], indexes: [path], doubles: [1] });
+      await countRequest(env);
 
       // The dashboard's JSON API, handled in api() above.
       if (path.indexOf("/api/") === 0) return await api(request, env, url, path, t0);
