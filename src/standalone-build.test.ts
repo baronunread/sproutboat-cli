@@ -331,3 +331,29 @@ test("a worker that does not read its assets plans no bake and no warning, howev
   expect(describeAssetBake(emitted.assetBake!)).toContain("does not read env.ASSETS");
   expect(module).not.toContain("A".repeat(1000));
 });
+
+test("planAssetBake counts the worker file when no source string is passed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-bake-src-"));
+  try {
+    mkdirSync(join(dir, "site"));
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "site/a.txt"), "x");
+    writeFileSync(join(dir, "src/index.js"), "s".repeat(50_000));
+    const config = {
+      name: "a",
+      main: "src/index.js",
+      compatibility_date: "2026-10-01",
+      assets: { directory: "site", binding: "ASSETS" },
+    };
+    const fromFile = planAssetBake({ projectDir: dir, sourcePath: join(dir, "src/index.js"), config });
+    const given = planAssetBake({
+      projectDir: dir,
+      sourcePath: join(dir, "src/index.js"),
+      source: "s".repeat(50_000),
+      config,
+    });
+    expect(fromFile.budget).toBe(given.budget);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

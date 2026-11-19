@@ -7,7 +7,7 @@
  * embedded transport already produces exactly the binary we want, so this
  * copies it out and enforces the one thing a standalone binary cannot do.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, cp, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { readAssetRules, walkAssets } from "./assets";
@@ -134,7 +134,9 @@ export function planAssetBake(input: BuildInput): AssetBakePlan {
   }
   const rules = readAssetRules(dir);
   bakedBytes += JSON.stringify([rules.headers, rules.redirects]).length;
-  const own = (input.source ?? "").length + JSON.stringify(input.config.vars ?? {}).length;
+  // the build reads the worker from sourcePath when no source is given (build.ts), so count that file
+  const own =
+    (input.source ?? readFileSync(input.sourcePath, "utf8")).length + JSON.stringify(input.config.vars ?? {}).length;
   const budget = Math.max(0, MODULE_STATIC_LIMIT - MODULE_STATIC_MARGIN - MODULE_STATIC_BASE - own);
   const overBy = Math.max(0, bakedBytes - budget);
   return { reads, bake: overBy === 0, files: Object.keys(files).length, fileBytes, bakedBytes, budget, overBy };
