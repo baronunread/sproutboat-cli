@@ -130,13 +130,15 @@ export function planAssetBake(input: BuildInput): AssetBakePlan {
   let bakedBytes = 0;
   for (const [key, entry] of Object.entries(files)) {
     fileBytes += entry.size;
-    bakedBytes += entry.size + key.length + STATIC_PER_FILE;
+    bakedBytes += entry.size + Buffer.byteLength(key, "utf8") + STATIC_PER_FILE;
   }
   const rules = readAssetRules(dir);
   bakedBytes += JSON.stringify([rules.headers, rules.redirects]).length;
   // the build reads the worker from sourcePath when no source is given (build.ts), so count that file
+  // bytes, not UTF-16 units: a non-ASCII string takes at least as many bytes in static data as it has characters, and UTF-8 is the upper bound
   const own =
-    (input.source ?? readFileSync(input.sourcePath, "utf8")).length + JSON.stringify(input.config.vars ?? {}).length;
+    Buffer.byteLength(input.source ?? readFileSync(input.sourcePath, "utf8"), "utf8") +
+    Buffer.byteLength(JSON.stringify(input.config.vars ?? {}), "utf8");
   const budget = Math.max(0, MODULE_STATIC_LIMIT - MODULE_STATIC_MARGIN - MODULE_STATIC_BASE - own);
   const overBy = Math.max(0, bakedBytes - budget);
   return { reads, bake: overBy === 0, files: Object.keys(files).length, fileBytes, bakedBytes, budget, overBy };

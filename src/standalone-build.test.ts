@@ -357,3 +357,22 @@ test("planAssetBake counts the worker file when no source string is passed", () 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("planAssetBake counts the worker's source in UTF-8 bytes, so a CJK literal takes its full size", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-bake-utf8-"));
+  try {
+    mkdirSync(join(dir, "site"));
+    writeFileSync(join(dir, "site/a.txt"), "x");
+    const config = {
+      name: "a",
+      main: "src/index.js",
+      compatibility_date: "2026-10-01",
+      assets: { directory: "site", binding: "ASSETS" },
+    };
+    const ascii = planAssetBake({ projectDir: dir, sourcePath: "x", source: "s".repeat(1000), config });
+    const cjk = planAssetBake({ projectDir: dir, sourcePath: "x", source: "文".repeat(1000), config });
+    expect(ascii.budget - cjk.budget).toBe(2000);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
