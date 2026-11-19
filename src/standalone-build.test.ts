@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,9 +7,15 @@ import { loadPrelude, wrapNativeFetchHandler } from "./compile";
 import type { BuildInput } from "./build";
 import { parseConfig } from "./config";
 import {
+  assetBakeWarning,
   buildStandalone,
+  describeAssetBake,
   emitStandalone,
   isReleaseBuild,
+  MODULE_STATIC_BASE,
+  MODULE_STATIC_LIMIT,
+  MODULE_STATIC_MARGIN,
+  planAssetBake,
   unsupportedBindings,
   workerReadsAssets,
 } from "./standalone-build";
@@ -228,5 +235,144 @@ test("the real kitchen-sink config (worker-first, with a binding) gets its asset
     expect(await readFile(generatedPath, "utf8")).toContain(marker);
   } finally {
     await rm(projectDir, { recursive: true, force: true });
+  }
+});
+
+// Size of a Cloud emit's module, the worker's own source and what the bake decision measured, for a one-file site of `bytes` bytes.
+async function bakeCase(
+  bytes: number,
+  assets: Partial<NonNullable<BuildInput["config"]["assets"]>> = { binding: "ASSETS" },
+) {
+  const projectDir = await mkdtemp(join(tmpdir(), "sb-bake-fit-"));
+  try {
+    await Bun.write(join(projectDir, "site/big.bin"), new Uint8Array(bytes).fill(0x41));
+    const input = {
+      projectDir,
+      sourcePath: join(projectDir, "src/index.js"),
+      source: `export default { fetch(r, env) { return env.ASSETS.fetch(r); } };`,
+      config: {
+        name: "big-site",
+        main: "src/index.js",
+        compatibility_date: "2026-10-01",
+        assets: { directory: "site", ...assets },
+      },
+    };
+    const emitted = await emitStandalone(input, { forCloud: true });
+    return { input, emitted, module: await readFile(emitted.generatedPath, "utf8") };
+  } finally {
+    await rm(projectDir, { recursive: true, force: true });
+  }
+}
+
+const OWN_SOURCE = `export default { fetch(r, env) { return env.ASSETS.fetch(r); } };`.length + "{}".length;
+const BUDGET = MODULE_STATIC_LIMIT - MODULE_STATIC_MARGIN - MODULE_STATIC_BASE - OWN_SOURCE;
+// one file "/big.bin": its bytes, its key, the per-file cost and the empty _headers/_redirects lists
+const ONE_FILE_COST = "/big.bin".length + 88 + JSON.stringify([[], []]).length;
+
+test("assets over the module's static data limit are left out of a Cloud emit, with a warning that says so", async () => {
+  // the sproutboat.com shape: 1.1 MB of files, a binding
+  const { emitted, module } = await bakeCase(1_100_000);
+  expect(emitted.assetBake).toMatchObject({ reads: true, bake: false, files: 1 });
+  expect(emitted.assetBake!.overBy).toBe(1_100_000 + ONE_FILE_COST - BUDGET);
+  expect(module).not.toContain("A".repeat(1000));
+  // the settings stay, as in 0.58.0
+  expect(module).toContain("__sbAssets");
+  const warning = assetBakeWarning(emitted.assetBake!)!;
+  expect(warning).toContain("env.ASSETS.fetch inside the worker will not find these files");
+  expect(warning).toContain(`${emitted.assetBake!.overBy.toLocaleString("en-US")} bytes over the limit`);
+  expect(describeAssetBake(emitted.assetBake!)).toContain(
+    `${emitted.assetBake!.overBy.toLocaleString("en-US")} bytes over`,
+  );
+});
+
+test("small assets of a worker that reads them are still baked into a Cloud emit, and the line says it fits", async () => {
+  const { emitted, module } = await bakeCase(2000);
+  expect(emitted.assetBake).toMatchObject({ reads: true, bake: true, overBy: 0 });
+  expect(module).toContain("A".repeat(2000));
+  expect(assetBakeWarning(emitted.assetBake!)).toBeUndefined();
+  expect(describeAssetBake(emitted.assetBake!)).toContain("kept in the module");
+  expect(describeAssetBake(emitted.assetBake!)).toContain("fits");
+});
+
+test("the bake boundary: the last byte that fits is baked, one more is not", async () => {
+  const fit = await bakeCase(BUDGET - ONE_FILE_COST);
+  expect(fit.emitted.assetBake).toMatchObject({ bake: true, overBy: 0, bakedBytes: BUDGET });
+  expect(fit.module).toContain("A".repeat(10_000));
+  const over = await bakeCase(BUDGET - ONE_FILE_COST + 1);
+  expect(over.emitted.assetBake).toMatchObject({ bake: false, overBy: 1 });
+  expect(over.module).not.toContain("A".repeat(10_000));
+});
+
+test("the limit keeps a margin below the linker's 1 MiB, and the worker's own source counts against it", () => {
+  expect(MODULE_STATIC_LIMIT).toBe(1_048_576);
+  expect(MODULE_STATIC_LIMIT - MODULE_STATIC_MARGIN - MODULE_STATIC_BASE).toBeLessThan(MODULE_STATIC_LIMIT - 126_080);
+  const base = {
+    name: "a",
+    main: "src/index.js",
+    compatibility_date: "2026-10-01",
+    assets: { directory: "site", binding: "ASSETS" },
+  };
+  const dir = mkdtempSync(join(tmpdir(), "sb-bake-own-"));
+  try {
+    mkdirSync(join(dir, "site"));
+    writeFileSync(join(dir, "site/a.txt"), "x");
+    const plain = planAssetBake({ projectDir: dir, sourcePath: "x", source: "", config: base });
+    const big = planAssetBake({ projectDir: dir, sourcePath: "x", source: "s".repeat(200_000), config: base });
+    expect(plain.budget - big.budget).toBe(200_000);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a worker that does not read its assets plans no bake and no warning, however big the files", async () => {
+  const { emitted, module } = await bakeCase(1_100_000, { not_found_handling: "404-page" });
+  expect(emitted.assetBake).toMatchObject({ reads: false, bake: false });
+  expect(assetBakeWarning(emitted.assetBake!)).toBeUndefined();
+  expect(describeAssetBake(emitted.assetBake!)).toContain("does not read env.ASSETS");
+  expect(module).not.toContain("A".repeat(1000));
+});
+
+test("planAssetBake counts the worker file when no source string is passed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-bake-src-"));
+  try {
+    mkdirSync(join(dir, "site"));
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "site/a.txt"), "x");
+    writeFileSync(join(dir, "src/index.js"), "s".repeat(50_000));
+    const config = {
+      name: "a",
+      main: "src/index.js",
+      compatibility_date: "2026-10-01",
+      assets: { directory: "site", binding: "ASSETS" },
+    };
+    const fromFile = planAssetBake({ projectDir: dir, sourcePath: join(dir, "src/index.js"), config });
+    const given = planAssetBake({
+      projectDir: dir,
+      sourcePath: join(dir, "src/index.js"),
+      source: "s".repeat(50_000),
+      config,
+    });
+    expect(fromFile.budget).toBe(given.budget);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("planAssetBake counts the worker's source in UTF-8 bytes, so a CJK literal takes its full size", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-bake-utf8-"));
+  try {
+    mkdirSync(join(dir, "site"));
+    writeFileSync(join(dir, "site/a.txt"), "x");
+    const config = {
+      name: "a",
+      main: "src/index.js",
+      compatibility_date: "2026-10-01",
+      assets: { directory: "site", binding: "ASSETS" },
+    };
+    const ascii = planAssetBake({ projectDir: dir, sourcePath: "x", source: "s".repeat(1000), config });
+    const cjk = planAssetBake({ projectDir: dir, sourcePath: "x", source: "文".repeat(1000), config });
+    expect(ascii.budget - cjk.budget).toBe(2000);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -13,7 +13,14 @@ import { LEGACY_TYPES_FILE, TYPES_FILE } from "./types-gen";
 import { checkTypes, parseTypesArgs, planTypes, refreshTypes, removeLegacyTypes, TYPES_USAGE } from "./types-cmd";
 import { bundleHandler, BundleError, type BundleResult } from "./bundle";
 import { runDev } from "./dev";
-import { buildStandalone, emitStandalone, isReleaseBuild, workerReadsAssets } from "./standalone-build";
+import {
+  assetBakeWarning,
+  buildStandalone,
+  describeAssetBake,
+  emitStandalone,
+  isReleaseBuild,
+  type AssetBakePlan,
+} from "./standalone-build";
 import { hostTarget, validateManifest, type ArtifactManifest } from "./manifest";
 import { CLI_VERSION, printDeployReport } from "./report";
 import {
@@ -570,18 +577,16 @@ async function emitOnly(directory: string | undefined, target: BuildTarget, stan
   }
 }
 
-/** One short line for the deploy output: where the worker's `env.ASSETS` reads from (see workerReadsAssets). */
-function assetsPath(assets: Parameters<typeof workerReadsAssets>[0]): string {
-  return workerReadsAssets(assets)
-    ? "kept in the module as well (the worker reads env.ASSETS), and served by the edge"
-    : "served by the edge, none in the module";
-}
-
-/** The standalone source unit the Cloud compile starts from (what `build --standalone --emit-only` prints). */
-async function emitStandaloneUnit(directory: string | undefined): Promise<string> {
+/**
+ * The standalone source unit the Cloud compile starts from (what `build --standalone --emit-only` prints), and, when the project
+ * has assets, whether they went into the module and why (printed as a warning when the worker reads them and they do not fit).
+ */
+async function emitStandaloneUnit(
+  directory: string | undefined,
+): Promise<{ generatedPath: string; assetBake?: AssetBakePlan }> {
   const project = await readProject(directory);
   try {
-    const { generatedPath } = await emitStandalone(
+    const unit = await emitStandalone(
       {
         projectDir: project.directory,
         config: project.config,
@@ -591,7 +596,9 @@ async function emitStandaloneUnit(directory: string | undefined): Promise<string
       },
       { forCloud: true },
     );
-    return generatedPath;
+    const warning = unit.assetBake && assetBakeWarning(unit.assetBake);
+    if (warning) console.warn(amber(`! ${warning}`));
+    return unit;
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
   }
@@ -1238,7 +1245,7 @@ async function prepareOut(args: string[], outDir: string) {
   });
   for (const warning of cloudBindings.warnings) console.warn(amber(`! ${warning}`));
   const assets = cfg.assets ? await guard(async () => buildAssetBundle(project.directory, cfg.assets!)) : undefined;
-  const generatedPath = await emitStandaloneUnit(directory);
+  const { generatedPath, assetBake } = await emitStandaloneUnit(directory);
   writePrepareOut({
     outDir,
     project: name,
@@ -1253,7 +1260,7 @@ async function prepareOut(args: string[], outDir: string) {
   console.log(`app       ${bold(name)}`);
   console.log(`route     ${describePlatformName(project.workersDev, project.configFile, undefined)}`);
   console.log(
-    `prepared  ${outDir} (${formatKiB(Bun.file(generatedPath).size)} of source${assets ? `, ${assets.files} asset files, ${assetsPath(cfg.assets)}` : ""})`,
+    `prepared  ${outDir} (${formatKiB(Bun.file(generatedPath).size)} of source${assets ? `, ${assets.files} asset files, ${assetBake ? describeAssetBake(assetBake) : "served by the edge"}` : ""})`,
   );
 }
 
@@ -1311,6 +1318,9 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
   // Regular deploys build in the Cloud from the bundled source. --module (a prebuilt module) and --sproutd with
   // --generation (compile here) are the operator paths; the Cloud refuses a module from a team key.
   let modulePath = flags["--module"];
+  let assetBake: AssetBakePlan | undefined;
+  // The unit is emitted before the summary below, so the "assets" line can say whether the files went into it. A dry run builds it too.
+  let sourceUnit: string | undefined;
   const compiled =
     modulePath === undefined && Boolean(flags["--sproutd"] ?? flags["--generation"] ?? process.env.SPROUTBOAT_SPROUTD);
   const fromSource = modulePath === undefined && !compiled;
@@ -1319,19 +1329,31 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     console.log(dim("Compiling the module (sproutd)…"));
     await compileModule({
       project: name,
-      emit: () => emitStandaloneUnit(directory),
+      emit: async () => {
+        const unit = await emitStandaloneUnit(directory);
+        assetBake = unit.assetBake;
+        return unit.generatedPath;
+      },
       sproutd: flags["--sproutd"] ?? process.env.SPROUTBOAT_SPROUTD,
       generation: flags["--generation"] ?? process.env.SPROUTBOAT_GENERATION,
       out: modulePath,
       bun: process.versions.bun ? process.execPath : (Bun.which("bun") ?? "bun"),
     });
   } else if (modulePath !== undefined && !existsSync(modulePath)) fail(`no such module: ${modulePath}`);
+  if (fromSource) {
+    const unit = await emitStandaloneUnit(directory);
+    sourceUnit = unit.generatedPath;
+    assetBake = unit.assetBake;
+  }
 
   console.log(`app       ${bold(name)}`);
   console.log(`team      ${team}${session ? "" : dim("  (not resolved)")}`);
   console.log(`endpoint  ${apiUrl}`);
   console.log(`route     ${describePlatformName(workersDev, project.configFile, platformName)}`);
-  if (assets) console.log(`assets    ${assets.files} files, ${assetsPath(cfg.assets)}`);
+  if (assets)
+    console.log(
+      `assets    ${assets.files} files, ${assetBake ? describeAssetBake(assetBake) : "served by the edge (a prebuilt module carries its own)"}`,
+    );
   for (const line of describeCloudBindings(cloudBindings)) console.log(`binding   ${line}`);
   if (services.length > 0)
     console.log(`services  ${services.map((entry) => `${entry.binding} -> ${entry.service}`).join(", ")}`);
@@ -1383,7 +1405,7 @@ async function deployCloud(args: string[], apiUrl: string, flags: ReturnType<typ
     }
   };
   if (fromSource) {
-    const sourcePath = await emitStandaloneUnit(directory);
+    const sourcePath = sourceUnit!;
     console.log(`  Bundling   ${entryLabel(cfg)} (${formatKiB(Bun.file(sourcePath).size)})`);
     const controller = new AbortController();
     const interrupt = () => controller.abort();

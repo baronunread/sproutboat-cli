@@ -10,6 +10,14 @@ maintained going forward by the `release` skill.
 
 ## Unreleased
 
+## [0.59.1] - 2026-11-19
+
+Same toolchain, runtime and wire as 0.59.0 (`@sproutboat/toolchain` 0.28.0, `@sproutboat/runtime` 0.47.0, `@sproutboat/wire` 0.22.7), so there is no generation change.
+
+### Fixed
+
+- **A Cloud deploy bakes the assets into the module only when they fit.** 0.58.1 baked the files into the module whenever the worker reads them (`assets.binding`, or `run_sprout_first` true or a non-empty list), but a module's static data is limited to 1 MiB (1,048,576 bytes, the linker's `static data exceeds module ABI region`), so a site of that size, such as sproutboat.com (1.1 MB, a binding) and the docs site, failed to build in the Cloud. The CLI now measures what the files would add to the module's static data (each file's bytes, its key and manifest entry, the worker's own source and vars, and the runtime's fixed base, with 64 KiB kept free) and bakes them only when the total is under the limit. When they do not fit they stay out, as in 0.58.0, and the deploy warns that `env.ASSETS.fetch` inside the worker will not find those files on the Cloud until the runtime reads the asset store; the edge still serves them. The `assets` line of `deploy`, `--dry-run` and `--prepare-out` says which way the files went and why (it fits, or too big by N bytes).
+
 ## [0.59.0] - 2026-11-18
 
 Same toolchain, runtime and wire as 0.58.1 (`@sproutboat/toolchain` 0.28.0, `@sproutboat/runtime` 0.47.0, `@sproutboat/wire` 0.22.7), so there is no generation change.
@@ -1910,7 +1918,8 @@ its own package.
 - Renamed the package to `sproutboat` (was `@sproutboat/cli`); dropped the
   `sprout` bin alias in favour of a user-defined shell alias.
 
-[Unreleased]: https://github.com/sproutboat/cli/compare/v0.59.0...HEAD
+[Unreleased]: https://github.com/sproutboat/cli/compare/v0.59.1...HEAD
+[0.59.1]: https://github.com/sproutboat/cli/compare/v0.59.0...v0.59.1
 [0.59.0]: https://github.com/sproutboat/cli/compare/v0.58.1...v0.59.0
 [0.58.1]: https://github.com/sproutboat/cli/compare/v0.58.0...v0.58.1
 [0.58.0]: https://github.com/sproutboat/cli/compare/v0.57.0...v0.58.0

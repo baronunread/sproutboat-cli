@@ -7,8 +7,10 @@
  * embedded transport already produces exactly the binary we want, so this
  * copies it out and enforces the one thing a standalone binary cannot do.
  */
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, cp, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { readAssetRules, walkAssets } from "./assets";
 import { buildArtifact, emitGenerated, type BuildInput } from "./build";
 import type { Bindings } from "./wrap";
 
@@ -58,16 +60,107 @@ function assertStandaloneSupported(input: BuildInput): void {
 }
 
 /**
- * Whether the worker of a Cloud deploy can read its own assets, so the module has to carry them. Cloudflare gives the worker
+ * Whether the worker of a Cloud deploy can read its own assets, so the module would have to carry them. Cloudflare gives the worker
  * `env.<BINDING>` only when `assets.binding` is set, and runs it before the files only for `run_worker_first` (here
  * `run_sprout_first`): `true` or a non-empty route list. A worker with either calls `env.ASSETS.fetch(request)`, which reads the
  * module's embedded files; the Cloud's edge serves a request the worker never sees. An app with neither has its files served
- * by the edge alone, and the module carries none (a module's static data is limited to about 1 MiB).
+ * by the edge alone, and the module carries none. Whether the files FIT is `planAssetBake`'s question.
  */
 export function workerReadsAssets(assets: BuildInput["config"]["assets"]): boolean {
   if (!assets) return false;
   const first = assets.run_sprout_first;
   return Boolean(assets.binding) || first === true || (Array.isArray(first) && first.length > 0);
+}
+
+/**
+ * The module ABI region for static data: the patched Porffor linker throws `static data exceeds module ABI region` when the data
+ * of ONE module reaches this many bytes (toolchain a21 patch, `off >= 1048576`). It counts every string literal of the module
+ * (runtime prelude, the worker's own strings, the baked files and their manifest), not code.
+ */
+export const MODULE_STATIC_LIMIT = 1_048_576;
+/** Kept free below the limit so a prelude that grows, or an estimate that is a little low, never turns into a failed deploy. */
+export const MODULE_STATIC_MARGIN = 65_536;
+/**
+ * Static data of a module with no assets and no strings of its own: measured at 126,080 bytes with runtime 0.47 (a render of the
+ * kitchen-sink shape, bisecting the file size until the linker threw), rounded up.
+ */
+export const MODULE_STATIC_BASE = 131_072;
+/**
+ * Static data one baked file costs besides its bytes. Measured at 102 to 125 bytes per file (1,000 and 3,000 files, keys of about
+ * 40 characters): the key (kept once, the manifest and the file map share it), the 64-character hash and the entry's other
+ * strings. Used as key length + this, which stays above the measured cost.
+ */
+const STATIC_PER_FILE = 88;
+
+export type AssetBakePlan = {
+  /** The worker would read its assets (see workerReadsAssets). */
+  reads: boolean;
+  /** The files go into the module: the worker reads them and they fit. */
+  bake: boolean;
+  files: number;
+  /** Raw size of the files. */
+  fileBytes: number;
+  /** Static data the baked files and their manifest would take. */
+  bakedBytes: number;
+  /** What the module can spend on them: the limit minus the margin, the base and the worker's own strings. */
+  budget: number;
+  /** `bakedBytes` past `budget`; 0 when it fits. */
+  overBy: number;
+};
+
+/**
+ * Decide whether a Cloud emit bakes the assets into the module: only when the worker reads them AND they fit. Bytes are measured
+ * on what the build puts into static data, not the directory size: a baked file is a latin1 string (one byte per byte, binary or
+ * text alike, confirmed against the linker), plus per file its key and manifest entry, plus the worker's own strings. The worker's
+ * source counts in full (its code takes no static data, so this is an upper bound: a margin, not a measurement).
+ *
+ * The files that do not fit stay out, as in 0.58.0: the edge still serves them from the Cloud asset store, but `env.ASSETS.fetch`
+ * in the worker finds none until the runtime reads that store.
+ */
+export function planAssetBake(input: BuildInput): AssetBakePlan {
+  const assets = input.config.assets;
+  const reads = workerReadsAssets(assets);
+  const empty = { reads, bake: reads, files: 0, fileBytes: 0, bakedBytes: 0, budget: 0, overBy: 0 };
+  if (!assets || !reads) return { ...empty, bake: false };
+  const dir = resolve(input.projectDir, assets.directory);
+  // A missing directory is the build's own error, raised with its message right after.
+  if (!existsSync(dir)) return empty;
+  const files = walkAssets(dir);
+  let fileBytes = 0;
+  let bakedBytes = 0;
+  for (const [key, entry] of Object.entries(files)) {
+    fileBytes += entry.size;
+    bakedBytes += entry.size + Buffer.byteLength(key, "utf8") + STATIC_PER_FILE;
+  }
+  const rules = readAssetRules(dir);
+  bakedBytes += JSON.stringify([rules.headers, rules.redirects]).length;
+  // the build reads the worker from sourcePath when no source is given (build.ts), so count that file
+  // bytes, not UTF-16 units: a non-ASCII string takes at least as many bytes in static data as it has characters, and UTF-8 is the upper bound
+  const own =
+    Buffer.byteLength(input.source ?? readFileSync(input.sourcePath, "utf8"), "utf8") +
+    Buffer.byteLength(JSON.stringify(input.config.vars ?? {}), "utf8");
+  const budget = Math.max(0, MODULE_STATIC_LIMIT - MODULE_STATIC_MARGIN - MODULE_STATIC_BASE - own);
+  const overBy = Math.max(0, bakedBytes - budget);
+  return { reads, bake: overBy === 0, files: Object.keys(files).length, fileBytes, bakedBytes, budget, overBy };
+}
+
+/** The deploy's "assets" detail: which way the files go and why. */
+export function describeAssetBake(plan: AssetBakePlan): string {
+  const bytes = (n: number) => n.toLocaleString("en-US");
+  if (!plan.reads) return "served by the edge, none in the module (the worker does not read env.ASSETS)";
+  if (plan.bake)
+    return `served by the edge, and kept in the module (the worker reads env.ASSETS; fits: ${bytes(plan.bakedBytes)} of ${bytes(plan.budget)} bytes)`;
+  return `served by the edge, none in the module (the worker reads env.ASSETS but the files are too big to bake: ${bytes(plan.overBy)} bytes over the limit of ${bytes(plan.budget)})`;
+}
+
+/** The warning for a worker that reads its assets whose files do not fit, or undefined. */
+export function assetBakeWarning(plan: AssetBakePlan): string | undefined {
+  if (!plan.reads || plan.bake) return undefined;
+  return (
+    `the assets (${plan.files} files, ${plan.fileBytes.toLocaleString("en-US")} bytes) do not fit in the module: ` +
+    `${plan.overBy.toLocaleString("en-US")} bytes over the limit. env.ASSETS.fetch inside the worker will not find these files on the Cloud ` +
+    `until the runtime reads the asset store; requests the edge serves from it still work`
+  );
 }
 
 /**
@@ -80,13 +173,15 @@ export async function emitStandalone(
   input: BuildInput,
   /** The Cloud compiles this unit and its hosts supply service bindings, so a deploy to the Cloud keeps them. */
   options: { forCloud?: boolean } = {},
-): Promise<{ generatedPath: string }> {
+): Promise<{ generatedPath: string; assetBake?: AssetBakePlan }> {
   if (!options.forCloud) assertStandaloneSupported(input);
   // A Cloud deploy sends the assets as a manifest the Cloud's edge serves; baking them into the module breaks its compile past about 1 MiB
   // ("static data exceeds module ABI region"). A worker that reads its assets (a binding, or run_sprout_first) keeps them in the module
-  // as well, as in 0.57.0: its `env.ASSETS.fetch` has no other source.
-  const bakeAssets = options.forCloud !== true || workerReadsAssets(input.config.assets);
-  return emitGenerated({ ...input, transport: "embedded", bakeAssets });
+  // as well, as in 0.57.0, but only when they fit: past the limit they stay out (0.58.0), and the plan says so.
+  const assetBake = options.forCloud === true ? planAssetBake(input) : undefined;
+  const bakeAssets = assetBake === undefined || assetBake.bake;
+  const { generatedPath } = await emitGenerated({ ...input, transport: "embedded", bakeAssets });
+  return { generatedPath, assetBake };
 }
 
 export async function buildStandalone(input: StandaloneBuildInput): Promise<StandaloneBuildResult> {
